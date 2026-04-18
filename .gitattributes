@@ -1,0 +1,10 @@
+# Force LF for text files to avoid ^M in Emacs
+*.el text eol=lf
+*.org text eol=lf
+*.md text eol=lf
+*.sh text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.txt text eol=lf
