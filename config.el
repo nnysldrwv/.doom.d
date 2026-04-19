@@ -594,18 +594,21 @@
 ;; Pixel-aligned agenda tags (fix CJK misalignment)
 (defun my/org-agenda-align-tags-pixel ()
   "Right-align agenda tags using pixel-based display alignment."
-  (let ((inhibit-read-only t)
-        (target-pixel (- (window-text-width nil t)
-                         (* 2 (string-pixel-width " ")))))
-    (save-excursion
-      (goto-char (point-min))
-      (while (re-search-forward "\\([ \t]+\\)\\(:[[:alnum:]_@#%:]+:\\)[ \t]*$" nil t)
-        (let* ((tags-str (match-string 2))
-               (tags-pixel (string-pixel-width tags-str))
-               (align-to (- target-pixel tags-pixel)))
-          (when (> align-to 0)
-            (put-text-property (match-beginning 1) (match-end 1)
-                               'display `(space :align-to (,align-to)))))))))
+  ;; Windows Emacs 30.2 is currently crashing in agenda display paths on this
+  ;; machine, so keep the safer default spacing there.
+  (unless (eq system-type 'windows-nt)
+    (let ((inhibit-read-only t)
+          (target-pixel (- (window-text-width nil t)
+                           (* 2 (string-pixel-width " ")))))
+      (save-excursion
+        (goto-char (point-min))
+        (while (re-search-forward "\\([ \t]+\\)\\(:[[:alnum:]_@#%:]+:\\)[ \t]*$" nil t)
+          (let* ((tags-str (match-string 2))
+                 (tags-pixel (string-pixel-width tags-str))
+                 (align-to (- target-pixel tags-pixel)))
+            (when (> align-to 0)
+              (put-text-property (match-beginning 1) (match-end 1)
+                                 'display `(space :align-to (,align-to))))))))))
 
 (add-hook 'org-agenda-finalize-hook #'my/org-agenda-align-tags-pixel)
 
@@ -1148,69 +1151,7 @@ EXT can hold the file extension, in case LINK doesn't provide it.
       :desc "Archive done tasks" "A" #'my/org-archive-done-tasks)
 
 ;; ============================================================
-;;  18. Smart input source (sis) + Weasel/Rime
-;; ============================================================
-
-(use-package sis
-  :demand t
-  :config
-  ;; Windows 下把 SIS 状态和系统 IME 真实状态对齐。
-  (defun my/sis-refresh-from-system-ime ()
-    "Refresh SIS state from the current system IME."
-    (when (and (eq system-type 'windows-nt)
-               (fboundp 'w32-get-ime-open-status))
-      (setq sis--for-buffer-locked nil)
-      (if (w32-get-ime-open-status)
-          (sis--set-other)
-        (sis--set-english))))
-
-  (defun my/sis-switch ()
-    "Toggle between English and the other input source."
-    (interactive)
-    (setq sis--for-buffer-locked nil)
-    (if (if (and (eq system-type 'windows-nt)
-                 (fboundp 'w32-get-ime-open-status))
-            (not (w32-get-ime-open-status))
-          (eq sis--current 'english))
-        (sis--set-other)
-      (sis--set-english)))
-
-  ;; 设置 Windows / macOS 输入法后端
-  (cond ((eq system-type 'windows-nt)
-         (setq sis-english-source nil))
-        ;; 设置Emacs-plus with input patch
-        ((eq system-type 'darwin)
-         (sis-ism-lazyman-config "com.apple.keylayout.UnicodeHexInput"
-                                 "im.rime.inputmethod.Squirrel.Hans"
-                                 'emp)))
-  ;; 启用全局光标颜色
-  (sis-global-cursor-color-mode t)
-  ;;设置sis的状态光标颜色
-  (setq sis-other-cursor-color (modus-themes-get-color-value 'fg-alt))
-  (setq sis-default-cursor-color (modus-themes-get-color-value 'border))
-  (set-cursor-color "#ffffff")
-  ;; enable the /respect/ mode
-  ;; 启用全局respect模式
-  (sis-global-respect-mode t)
-  ;; enable the /context/ mode for all buffers
-  (sis-global-context-mode t)
-  ;; enable the /inline english/ mode for all buffers
-  (sis-global-inline-mode t)
-  ;;自动设置为英文的函数
-  (setq sis-respect-go-english-triggers
-        (list #'org-agenda))
-  ;; 在切换窗口后获取并更新一次输入法状态
-  (add-function :after after-focus-change-function #'my/sis-refresh-from-system-ime)
-
-  ;; 这些场景通常需要直接进入中文输入。
-  (add-hook 'org-capture-mode-hook #'sis-set-other)
-  (add-hook 'atomic-chrome-edit-mode-hook #'sis-set-other)
-  (add-hook 'beancount-mode-hook #'sis-set-other)
-  (add-hook 'xeft-mode-hook #'sis-set-other)
-  :bind
-  ("C-\\" . my/sis-switch))
-;; ============================================================
-;;  19. Fix: C-c C-c in *Org Note* buffer (log notes, etc.)
+;;  18. Fix: C-c C-c in *Org Note* buffer (log notes, etc.)
 ;; ============================================================
 
 ;; Doom's popup system can interfere with org-finish-function being
@@ -1220,20 +1161,6 @@ EXT can hold the file extension, in case LINK doesn't provide it.
   (if (string= (buffer-name) "*Org Note*")
       (org-store-log-note)
     (apply fn args)))
-
-;; ============================================================
-;;  20. Fix: Windows server sentinel error on exit
-;; ============================================================
-
-;; Silence the "Removing old connection file" error that occurs on Windows exit
-(advice-add 'server-stop-connections :around
-            (lambda (orig-fn &rest args)
-              (condition-case err
-                  (apply orig-fn args)
-                (file-missing nil))))
-
-;; Also suppress sentinel errors from server processes
-(setq server-process-query-function #'ignore)
 
 ;; Load secrets (org-gcal credentials etc.)
 (load! "secrets" doom-user-dir t)
