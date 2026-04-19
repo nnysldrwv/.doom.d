@@ -21,6 +21,47 @@
   (define-key evil-normal-state-map [down-mouse-1] nil)
   (define-key evil-motion-state-map [down-mouse-1] nil))
 
+;; Work around a native Windows crash when splitting Elfeed windows.
+(after! evil
+  (defun my/elfeed-buffer-p ()
+    "Return non-nil when the current buffer is an Elfeed buffer."
+    (derived-mode-p 'elfeed-search-mode 'elfeed-show-mode))
+
+  (evil-define-command my/evil-window-split-a (&optional count file)
+    "Like Doom's split advice, but avoid extra redraw in Elfeed on Windows."
+    :repeat nil
+    (interactive "P<f>")
+    (if (and (featurep :system 'windows)
+             (my/elfeed-buffer-p))
+        (let ((origwin (selected-window))
+              window-selection-change-functions)
+          (select-window (split-window origwin count 'below))
+          (unless evil-split-window-below
+            (select-window origwin))
+          (when file
+            (evil-edit file)))
+      (+evil-window-split-a count file)))
+
+  (evil-define-command my/evil-window-vsplit-a (&optional count file)
+    "Like Doom's vsplit advice, but avoid extra redraw in Elfeed on Windows."
+    :repeat nil
+    (interactive "P<f>")
+    (if (and (featurep :system 'windows)
+             (my/elfeed-buffer-p))
+        (let ((origwin (selected-window))
+              window-selection-change-functions)
+          (select-window (split-window origwin count 'right))
+          (unless evil-vsplit-window-right
+            (select-window origwin))
+          (when file
+            (evil-edit file)))
+      (+evil-window-vsplit-a count file)))
+
+  (advice-remove #'evil-window-split #'+evil-window-split-a)
+  (advice-remove #'evil-window-vsplit #'+evil-window-vsplit-a)
+  (advice-add #'evil-window-split :override #'my/evil-window-split-a)
+  (advice-add #'evil-window-vsplit :override #'my/evil-window-vsplit-a))
+
 ;; ============================================================
 ;;  1. User info
 ;; ============================================================
