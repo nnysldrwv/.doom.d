@@ -62,6 +62,32 @@
   (advice-add #'evil-window-split :override #'my/evil-window-split-a)
   (advice-add #'evil-window-vsplit :override #'my/evil-window-vsplit-a))
 
+;; Work around a native Windows crash when key-help commands read real keys
+;; while the system IME is open.
+(when (featurep :system 'windows)
+  (defun my/windows-disable-ime-for-key-help-a (fn &rest args)
+    "Temporarily close the Windows IME while FN reads a key sequence."
+    (let ((restore-ime
+           (and (fboundp 'w32-get-ime-open-status)
+                (fboundp 'w32-set-ime-open-status)
+                (ignore-errors (w32-get-ime-open-status)))))
+      (unwind-protect
+          (progn
+            (when restore-ime
+              (ignore-errors (w32-set-ime-open-status nil)))
+            (apply fn args))
+        (when restore-ime
+          (ignore-errors (w32-set-ime-open-status t))))))
+
+  (with-eval-after-load 'help-fns
+    (dolist (fn '(describe-key describe-key-briefly))
+      (advice-remove fn #'my/windows-disable-ime-for-key-help-a)
+      (advice-add fn :around #'my/windows-disable-ime-for-key-help-a)))
+
+  (with-eval-after-load 'helpful
+    (advice-remove 'helpful-key #'my/windows-disable-ime-for-key-help-a)
+    (advice-add 'helpful-key :around #'my/windows-disable-ime-for-key-help-a)))
+
 ;; ============================================================
 ;;  1. User info
 ;; ============================================================
@@ -358,6 +384,7 @@
         '(("~/org/inbox.org" :maxlevel . 1)
           (my/org-project-files :maxlevel . 2)
           (my/org-area-files :maxlevel . 2)
+          ("~/org/collections/books.org" :maxlevel . 2)
           (my/org-reference-files :maxlevel . 1)
           (my/org-notes-files :maxlevel . 1)))
   (setq org-refile-use-outline-path 'file
@@ -1108,6 +1135,8 @@ EXT can hold the file extension, in case LINK doesn't provide it.
 
 (after! markdown-mode
   (setq markdown-command "pandoc"
+        markdown-open-command
+        (when (featurep :system 'windows) "explorer.exe")
         markdown-fontify-code-blocks-natively t
         markdown-header-scaling t
         markdown-enable-wiki-links t
@@ -1120,6 +1149,7 @@ EXT can hold the file extension, in case LINK doesn't provide it.
 ;; ============================================================
 
 (map! :leader
+      :desc "org-capture" "X" nil
       ;; Gcal
       (:prefix ("G" . "gcal")
        :desc "Sync"   "s" #'org-gcal-sync
@@ -1129,6 +1159,7 @@ EXT can hold the file extension, in case LINK doesn't provide it.
 
       ;; Elfeed
       (:prefix ("o" . "open")
+       :desc "Org capture" "c" #'org-capture
        :desc "Elfeed" "e" #'elfeed)
 
       ;; Org-noter

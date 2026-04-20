@@ -36,7 +36,7 @@
        vc
 
        :term
-       vterm
+       ;; vterm
 
        :checkers
        syntax
@@ -53,6 +53,7 @@
        :lang
        emacs-lisp
        javascript
+       markdown
        (org +roam2 +journal +dragndrop +present)
        (python +lsp)
        sh
