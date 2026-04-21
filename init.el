@@ -36,7 +36,7 @@
        vc
 
        :term
-       ;; vterm
+       vterm
 
        :checkers
        syntax

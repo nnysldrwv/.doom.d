@@ -1210,6 +1210,13 @@ EXT can hold the file extension, in case LINK doesn't provide it.
           sis-do-get         #'w32-get-ime-open-status
           sis-do-set         #'w32-set-ime-open-status)
 
+    ;; Disable the 0.2 s idle poll timer. Enabling cursor-color / respect mode
+    ;; auto-turns it on, and on Windows its high-frequency w32-get-ime-open-status
+    ;; calls race with imm32.dll during buffer/window creation (SPC x → scratch)
+    ;; and hard-crash Emacs. `after-focus-change-function` below covers the only
+    ;; case we actually need resyncing for (focus returns from another app).
+    (setq sis-auto-refresh-seconds nil)
+
     ;; Windows: use w32-get-ime-open-status as the single source of truth.
     ;; Rime's inline_ascii/commit_code don't touch the Windows IME API,
     ;; so sis--current can drift out of sync — poll the API directly.
