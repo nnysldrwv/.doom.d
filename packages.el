@@ -9,3 +9,4 @@
 (package! nov)
 (package! org-noter)
 (package! powershell)
+(package! sis)

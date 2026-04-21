@@ -1193,5 +1193,62 @@ EXT can hold the file extension, in case LINK doesn't provide it.
       (org-store-log-note)
     (apply fn args)))
 
+;; ============================================================
+;;  19. Smart Input Source (sis) + Rime — Windows
+;; ============================================================
+
+(when (featurep :system 'windows)
+  (use-package! sis
+    :demand t
+    :config
+    ;; Skip sis's auto-detect (runs too early, before the w32 frame exists,
+    ;; so `(window-system)` is nil and `sis--ism` never gets set). Wire the
+    ;; Windows IME API directly — with both functions set, `sis--init-ism`
+    ;; flips `sis--ism` to t and the get/set path works from any frame.
+    (setq sis-english-source nil
+          sis-other-source   t
+          sis-do-get         #'w32-get-ime-open-status
+          sis-do-set         #'w32-set-ime-open-status)
+
+    ;; Windows: use w32-get-ime-open-status as the single source of truth.
+    ;; Rime's inline_ascii/commit_code don't touch the Windows IME API,
+    ;; so sis--current can drift out of sync — poll the API directly.
+    (defun sis-switch ()
+      "Switch between English and other, driven by the Windows IME API."
+      (interactive)
+      (setq sis--for-buffer-locked nil)
+      (if (w32-get-ime-open-status)
+          (sis--set-english)
+        (sis--set-other)))
+
+    (sis-global-cursor-color-mode t)
+    (when (fboundp 'modus-themes-get-color-value)
+      (setq sis-other-cursor-color   (modus-themes-get-color-value 'fg-alt)
+            sis-default-cursor-color (modus-themes-get-color-value 'border)))
+
+    (sis-global-respect-mode t)
+    (sis-global-context-mode t)
+    (sis-global-inline-mode  t)
+
+    (setq sis-respect-go-english-triggers (list #'org-agenda))
+
+    ;; Resync IME state after Emacs frame regains focus, in case another
+    ;; app toggled the system IME while Emacs was in the background.
+    (add-function :after after-focus-change-function
+                  (lambda () (sis--get)))
+
+    :hook
+    (org-capture-mode . sis-set-other))
+
+  ;; Bind C-\ everywhere evil might grab keys first. `map!` without a state
+  ;; modifier only binds global-map, which evil state maps can shadow.
+  (define-key global-map (kbd "C-\\") #'sis-switch)
+  (with-eval-after-load 'evil
+    (define-key evil-normal-state-map (kbd "C-\\") #'sis-switch)
+    (define-key evil-insert-state-map (kbd "C-\\") #'sis-switch)
+    (define-key evil-motion-state-map (kbd "C-\\") #'sis-switch)
+    (define-key evil-visual-state-map (kbd "C-\\") #'sis-switch)
+    (define-key evil-emacs-state-map  (kbd "C-\\") #'sis-switch)))
+
 ;; Load secrets (org-gcal credentials etc.)
 (load! "secrets" doom-user-dir t)
