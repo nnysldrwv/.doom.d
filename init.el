@@ -10,6 +10,7 @@
        company
        (vertico +icons)
 
+
        :ui
        doom
        doom-dashboard
@@ -34,9 +35,6 @@
        electric
        undo
        vc
-
-       :term
-       vterm
 
        :checkers
        syntax

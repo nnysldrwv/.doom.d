@@ -1259,3 +1259,26 @@ EXT can hold the file extension, in case LINK doesn't provide it.
 
 ;; Load secrets (org-gcal credentials etc.)
 (load! "secrets" doom-user-dir t)
+
+  ;; ========================================================
+  ;;  20. Scratch Buffer - org-mode default + lisp scratch
+  ;;
+  ;; 效果：
+  ;; - SPC-x → org-mode scratch buffer（临时笔记）
+  ;; - SPC-X → lisp scratch buffer（Elisp 测试）
+  ;; ========================================================
+  ;; Use org-mode as the default scratch buffer mode (better for notes)
+  (setq doom-scratch-default-major-mode 'org-mode)
+
+  ;; Add a separate lisp scratch buffer for Elisp testing
+  (defun my/open-lisp-scratch ()
+    "Open a lisp-interaction-mode scratch buffer for Elisp testing."
+    (interactive)
+    (let ((buf (get-buffer-create "*lisp-scratch*")))
+      (with-current-buffer buf
+        (unless (eq major-mode 'lisp-interaction-mode)
+          (lisp-interaction-mode)))
+      (switch-to-buffer buf)))
+
+  (map! :leader
+        :desc "Lisp scratch" "X" #'my/open-lisp-scratch)
