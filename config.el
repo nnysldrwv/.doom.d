@@ -9,6 +9,10 @@
 
 (prefer-coding-system 'utf-8-unix)
 (set-default-coding-systems 'utf-8-unix)
+(setq locale-coding-system 'utf-8-unix)
+(when (eq system-type 'windows-nt)
+  (setq file-name-coding-system 'utf-8-unix
+        default-file-name-coding-system 'utf-8-unix))
 
 (add-to-list 'process-coding-system-alist '("rg" utf-8 . utf-8))
 (add-to-list 'process-coding-system-alist '("git" utf-8 . utf-8))
@@ -61,6 +65,20 @@
   (advice-remove #'evil-window-vsplit #'+evil-window-vsplit-a)
   (advice-add #'evil-window-split :override #'my/evil-window-split-a)
   (advice-add #'evil-window-vsplit :override #'my/evil-window-vsplit-a))
+
+;; evil-org-mode bug: `evil-org-select-an-element' uses `(region-beginning)'
+;; unconditionally, which returns `(min point mark)' even when no region is
+;; active. In operator-pending mode (e.g. daR), that pulls the start back to
+;; a stale mark, so `daR' deletes from that mark to the end of the subtree
+;; instead of just the subtree.
+(after! evil-org
+  (defun evil-org-select-an-element (element)
+    "Select an org ELEMENT (fixed for operator-pending state)."
+    (let ((elem-begin (org-element-property :begin element)))
+      (list (if (evil-visual-state-p)
+                (min (region-beginning) elem-begin)
+              elem-begin)
+            (org-element-property :end element)))))
 
 ;; Work around a native Windows crash when key-help commands read real keys
 ;; while the system IME is open.
@@ -844,23 +862,108 @@ EXT can hold the file extension, in case LINK doesn't provide it.
                       (org-gcal-sync)))))
 
 ;; ============================================================
-;;  10. Org-roam
+;;  10. Denote
 ;; ============================================================
 
-(after! org-roam
-  (setq org-roam-directory "~/org/roam"
-        org-roam-completion-everywhere t
-        org-roam-capture-templates
-        '(("d" "Default" plain "%?"
-           :target (file+head "%<%Y%m%d%H%M%S>-${slug}.org"
-                              "#+title: ${title}\n#+date: %U\n#+filetags: \n\n")
-           :unnarrowed t)
-          ("f" "Fleeting" plain "%?"
-           :target (file+head "fleeting/%<%Y%m%d%H%M%S>-${slug}.org"
-                              "#+title: ${title}\n#+date: %U\n#+filetags: :fleeting:\n\n")
-           :unnarrowed t)))
-  (make-directory (expand-file-name "roam" org-directory) t)
-  (make-directory (expand-file-name "roam/fleeting" org-directory) t))
+(use-package! denote
+  ;; NOT lazy-loaded: we need denote-dired-directories and the dired-mode-hook
+  ;; in place as soon as any dired buffer opens, otherwise keyword highlighting
+  ;; silently no-ops until you first invoke a denote command.
+  :demand t
+  :init
+  (make-directory (expand-file-name "denote/" org-directory) t)
+  :config
+  (setq denote-directory (file-name-as-directory (expand-file-name org-directory))
+        denote-file-type 'org
+        denote-known-keywords '("emacs" "read")
+        denote-infer-keywords t
+        denote-sort-keywords t
+        ;; Prompt for subdir so new notes land in references/ | denote/ | notes/
+        denote-prompts '(subdirectory title keywords)
+        denote-date-prompt-use-org-read-date t
+        ;; Only scan references/, denote/, notes/ — skip everything else under ~/org/
+        denote-excluded-directories-regexp
+        (rx (or (seq bos ".")
+                (seq bos (or "areas" "collections" "data" "journal"
+                             "projects" "roam" "templates" "tmp") eos)))
+        denote-rename-confirmations nil
+        denote-backlinks-show-context t
+        denote-dired-directories (list denote-directory)
+        denote-dired-directories-include-subdirectories t)
+
+  ;; Windows-safe replacement for `denote-dired-mode-in-directories' — the
+  ;; stock version uses case-sensitive `string-prefix-p' against file-truename,
+  ;; which fails on Windows when drive-letter or path case disagrees
+  ;; (e.g. "c:/Users/..." vs "C:/Users/...").
+  (defun my/denote-dired-mode-maybe ()
+    "Enable `denote-dired-mode' when the current dired buffer is under a
+denote-dired directory, matching case-insensitively.
+
+Hooked onto `after-change-major-mode-hook' (append) rather than
+`dired-mode-hook' because the latter fires BEFORE
+`font-lock-global-mode' and `diredfl-global-mode' are applied to
+the buffer — anything we add to `font-lock-keywords' at that point
+gets reset by `font-lock-set-defaults' later, and diredfl's override
+faces cover ours. `after-change-major-mode-hook' runs those global
+modes first, so when our hook lands everything is settled."
+    (when (derived-mode-p 'dired-mode)
+      (let ((dir (file-name-as-directory (expand-file-name default-directory))))
+        (when (seq-some
+               (lambda (root)
+                 (let ((root (file-name-as-directory (expand-file-name root))))
+                   (or (string-equal-ignore-case dir root)
+                       (and denote-dired-directories-include-subdirectories
+                            (eq t (compare-strings
+                                   root 0 nil
+                                   dir  0 (length root)
+                                   t))))))  ; t = ignore case
+               denote-dired-directories)
+          ;; Order matters: disable diredfl BEFORE enabling denote-dired-mode.
+          ;; diredfl-mode's disable body calls `font-lock-refresh-defaults',
+          ;; which toggles font-lock off/on and wipes `font-lock-keywords' back
+          ;; to the mode default. If we enable denote-dired-mode first, its
+          ;; `font-lock-add-keywords' call gets erased by the subsequent
+          ;; diredfl disable.
+          (when (bound-and-true-p diredfl-mode)
+            (diredfl-mode -1))
+          (denote-dired-mode 1)
+          (font-lock-flush)))))
+
+  ;; append=t → run after font-lock-global-mode and diredfl-global-mode.
+  (add-hook 'after-change-major-mode-hook #'my/denote-dired-mode-maybe t))
+
+;; Disable dirvish globally — its pre-redisplay overlay attrs cover denote's
+;; font-lock-based filename highlighting, and user prefers plain dired anyway.
+(after! dirvish
+  (dirvish-override-dired-mode -1))
+
+;; ---- consult-notes: 多源统一检索 ----
+(use-package! consult-notes
+  :after (consult denote)
+  :commands (consult-notes consult-notes-search-in-all-notes)
+  :config
+  ;; Directory sources — narrow by key
+  (setq consult-notes-file-dir-sources
+        `(("Notes"      ?n ,(expand-file-name "notes/"      org-directory))
+          ("Denote"     ?d ,(expand-file-name "denote/"     org-directory))
+          ("References" ?r ,(expand-file-name "references/" org-directory))
+          ("Projects"   ?p ,(expand-file-name "projects/"   org-directory))
+          ("Areas"      ?a ,(expand-file-name "areas/"      org-directory))
+          ("Collections" ?c ,(expand-file-name "collections/" org-directory))))
+
+  ;; Surface headings from single-file inboxes
+  (setq consult-notes-org-headings-files
+        (list (expand-file-name "inbox.org"       org-directory)
+              (expand-file-name "append-note.org" org-directory)))
+  (consult-notes-org-headings-mode)
+
+  ;; Denote integration — adds ID/title/#keywords/dir columns
+  (when (locate-library "denote")
+    (consult-notes-denote-mode))
+
+  ;; Only text files from denote dir (Denote 3.x API)
+  (setq consult-notes-denote-files-function
+        (lambda () (denote-directory-files nil t t))))
 
 ;; Web article target for capture "w"
 (defun my/capture-web-article-target ()
@@ -1162,6 +1265,25 @@ EXT can hold the file extension, in case LINK doesn't provide it.
        :desc "Org capture" "c" #'org-capture
        :desc "Elfeed" "e" #'elfeed)
 
+      ;; Denote
+      (:prefix ("n" . "notes")
+       :desc "Consult notes (pick)"   "s" #'consult-notes
+       :desc "Consult notes (search)" "S" #'consult-notes-search-in-all-notes
+       (:prefix ("d" . "denote")
+        :desc "New note"              "n" #'denote
+        :desc "New note (choose type)" "N" #'denote-type
+        :desc "New note in subdir"    "D" #'denote-subdirectory
+        :desc "Open or create"        "f" #'denote-open-or-create
+        :desc "Insert link"           "i" #'denote-link-or-create
+        :desc "Insert link (region → title)" "I" #'denote-link
+        :desc "Add links (search)"    "L" #'denote-add-links
+        :desc "Backlinks"             "b" #'denote-backlinks
+        :desc "Rename file"           "r" #'denote-rename-file
+        :desc "Rename from front-matter" "R" #'denote-rename-file-using-front-matter
+        :desc "Add keywords"          "k" #'denote-keywords-add
+        :desc "Remove keywords"       "K" #'denote-keywords-remove
+        :desc "Dired in denote dir"   "d" #'denote-dired))
+
       ;; Org-noter
       :desc "org-noter" "N" #'org-noter)
 
@@ -1176,6 +1298,12 @@ EXT can hold the file extension, in case LINK doesn't provide it.
        :desc "Screenshot"     "s" #'org-download-screenshot
        :desc "Yank"           "y" #'org-download-yank
        :desc "Delete"         "d" #'org-download-delete)
+      ;; Denote link in org buffers
+      (:prefix ("d" . "denote")
+       :desc "Insert link"       "i" #'denote-link-or-create
+       :desc "Backlinks"         "b" #'denote-backlinks
+       :desc "Add keywords"      "k" #'denote-keywords-add
+       :desc "Rename (front-matter)" "r" #'denote-rename-file-using-front-matter)
       ;; Rich paste
       :desc "Paste rich text" "V" #'my/org-paste-rich
       ;; Archive
