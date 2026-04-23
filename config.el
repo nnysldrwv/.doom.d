@@ -937,6 +937,9 @@ modes first, so when our hook lands everything is settled."
 (after! dirvish
   (dirvish-override-dired-mode -1))
 
+(use-package! denote-org
+  :after (denote org))
+
 ;; ---- consult-notes: 多源统一检索 ----
 (use-package! consult-notes
   :after (consult denote)
@@ -1303,7 +1306,18 @@ modes first, so when our hook lands everything is settled."
        :desc "Insert link"       "i" #'denote-link-or-create
        :desc "Backlinks"         "b" #'denote-backlinks
        :desc "Add keywords"      "k" #'denote-keywords-add
-       :desc "Rename (front-matter)" "r" #'denote-rename-file-using-front-matter)
+       :desc "Rename (front-matter)" "r" #'denote-rename-file-using-front-matter
+       ;; denote-org: heading-level links + subtree extraction
+       :desc "Link to heading"        "h" #'denote-org-link-to-heading
+       :desc "Backlinks for heading"  "H" #'denote-org-backlinks-for-heading
+       :desc "Extract subtree to note" "x" #'denote-org-extract-org-subtree
+       ;; denote-org: dynamic blocks (update with C-c C-x C-u)
+       (:prefix ("o" . "dblock")
+        :desc "Links (by regexp)"        "l" #'denote-org-dblock-insert-links
+        :desc "Backlinks"                "b" #'denote-org-dblock-insert-backlinks
+        :desc "Missing links"            "m" #'denote-org-dblock-insert-missing-links
+        :desc "Files"                    "f" #'denote-org-dblock-insert-files
+        :desc "Files as headings"        "F" #'denote-org-dblock-insert-files-as-headings))
       ;; Rich paste
       :desc "Paste rich text" "V" #'my/org-paste-rich
       ;; Archive

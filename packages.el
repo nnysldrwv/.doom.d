@@ -11,5 +11,6 @@
 (package! powershell)
 (package! sis)
 (package! denote)
+(package! denote-org)
 (package! consult-notes
   :recipe (:host github :repo "mclear-tools/consult-notes"))
