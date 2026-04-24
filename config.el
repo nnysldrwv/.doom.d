@@ -202,7 +202,16 @@
 
   ;; pdf-tools: MSYS2 epdfinfo
   (setenv "PATH" (concat "C:\\Users\\fengxing.chen\\scoop\\apps\\msys2\\current\\mingw64\\bin" ";" (getenv "PATH")))
-  (setq pdf-info-epdfinfo-program "C:\\Users\\fengxing.chen\\scoop\\apps\\msys2\\current\\mingw64\\bin\\epdfinfo.exe"))
+  (setq pdf-info-epdfinfo-program "C:\\Users\\fengxing.chen\\scoop\\apps\\msys2\\current\\mingw64\\bin\\epdfinfo.exe")
+
+  ;; project.el / grep / locate all call bare `find`, which on Windows PATH
+  ;; resolves to C:\Windows\System32\FIND.EXE — a completely different tool
+  ;; (file-content search), whose Unix-style args trigger
+  ;; "FIND: Parameter format not correct". Point at GNU find from Git for
+  ;; Windows (same source as the unzip binary used for nov.el).
+  (let ((gnu-find "C:/Program Files/Git/usr/bin/find.exe"))
+    (when (file-executable-p gnu-find)
+      (setq find-program gnu-find))))
 
 ;; ============================================================
 ;;  5. General settings
@@ -1015,11 +1024,25 @@ modes first, so when our hook lands everything is settled."
 
 ;; Dired: show filenames only (hide permissions/size/time/owner columns).
 ;; `(` toggles details back on when you need them.
-;; Use an explicit `1` — bare `#'dired-hide-details-mode` in a hook can be
-;; treated as toggle by some code paths and end up disabled.
+;;
+;; Defer via `run-at-time 0' so we enable hide-details AFTER the whole
+;; mode-setup cascade finishes — in denote-managed dirs like
+;; ~/org/notes/, `my/denote-dired-mode-maybe' disables diredfl, enables
+;; denote-dired-mode and calls `font-lock-flush', and the subsequent
+;; jit-lock fontification is what lays down the `invisible' text
+;; properties that hide-details relies on. Enabling the mode inline
+;; (whether in dired-mode-hook or after-change-major-mode-hook) sets
+;; the invisibility spec too early in that cascade, so the flushed
+;; refontification never tags the detail columns as invisible.
 (defun my/dired-hide-details-on ()
-  (dired-hide-details-mode 1))
-(add-hook 'dired-mode-hook #'my/dired-hide-details-on)
+  (when (derived-mode-p 'dired-mode)
+    (run-at-time 0 nil
+                 (lambda (buf)
+                   (when (buffer-live-p buf)
+                     (with-current-buffer buf
+                       (dired-hide-details-mode 1))))
+                 (current-buffer))))
+(add-hook 'after-change-major-mode-hook #'my/dired-hide-details-on t)
 
 (use-package! denote-org
   :after (denote org))
