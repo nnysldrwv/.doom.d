@@ -588,6 +588,17 @@
    (t
     "sh -c 'if command -v xclip >/dev/null 2>&1; then xclip -selection clipboard -t image/png -o > \"$1\" 2>/dev/null || true; fi; if [ ! -s \"$1\" ]; then if command -v wl-paste >/dev/null 2>&1; then wl-paste --no-newline --type image/png > \"$1\" 2>/dev/null || true; fi; fi; if [ ! -s \"$1\" ]; then if command -v maim >/dev/null 2>&1; then maim -s \"$1\"; elif command -v grim >/dev/null 2>&1 && command -v slurp >/dev/null 2>&1; then grim -g \"$(slurp)\" \"$1\"; fi; fi' _ %s")))
 
+(defun my/org-download-denote-file-format (filename)
+  "Rewrite FILENAME to denote style: <id>--<slug><ext>.
+Delegates to `denote-format-file-name' so sluggify rules, separators,
+and the @@-identifier delimiter behavior all track denote itself.
+Used as `org-download-file-format-function'."
+  (let* ((ext  (or (file-name-extension filename t) ""))
+         (base (or (file-name-sans-extension filename) ""))
+         (id   (format-time-string denote-date-identifier-format)))
+    (file-name-nondirectory
+     (denote-format-file-name "./" id nil base ext nil))))
+
 (defun my/org-paste-rich ()
   "Paste rich text (HTML with images) from clipboard as Org content."
   (interactive)
@@ -663,12 +674,14 @@
     :commands (org-download-clipboard org-download-screenshot org-download-yank org-download-delete)
     :config
     (add-hook 'org-mode-hook 'org-download-enable)
-    (setq org-download-method 'attach
-          org-download-heading-lvl 0
-          org-download-timestamp "%Y%m%d%H%M%S-"
+    (setq org-download-method 'directory
+          org-download-image-dir (expand-file-name "data/" org-directory)
+          org-download-heading-lvl nil
+          org-download-timestamp ""
           org-download-image-org-width 800
           org-download-annotate-function (lambda (_link) "")
-          org-download-screenshot-method (my/org-download-screenshot-command))
+          org-download-screenshot-method (my/org-download-screenshot-command)
+          org-download-file-format-function #'my/org-download-denote-file-format)
 
     ;; Fix: org-download-dnd-fallback for Emacs 30+
     (when (fboundp 'dnd-handle-multiple-urls)
@@ -701,6 +714,69 @@ EXT can hold the file extension, in case LINK doesn't provide it.
          (expand-file-name
           (funcall org-download-file-format-function filename)
           dir))))))
+
+;; 任意文件拖入 org buffer → 复制到 ~/org/data/ 并用 denote 命名 +
+;; 在光标处插入 file: 链接。对 epub / pdf / zip 等非图片也生效。
+(defun my/org-dnd-copy-to-data (uri _action)
+  "Copy locally-dropped file URI into ~/org/data/ with a denote-style name,
+insert a `file:' link at point, and return 'copy.
+Only active in `org-mode'; returns nil elsewhere so the next handler runs."
+  (when (derived-mode-p 'org-mode)
+    (let ((src (ignore-errors (dnd-get-local-file-name uri t))))
+      (when (and src (file-regular-p src))
+        (let* ((dest-dir  (expand-file-name "data/" org-directory))
+               (dest-name (my/org-download-denote-file-format
+                           (file-name-nondirectory src)))
+               (dest      (expand-file-name dest-name dest-dir)))
+          (make-directory dest-dir t)
+          (copy-file src dest 1)
+          (insert (format "[[file:%s]]"
+                          (file-relative-name dest default-directory)))
+          'copy)))))
+
+;; Org 9.7+ 在 `org-setup-yank-dnd-handlers' 里用 `setq-local' 把
+;; "^file:///" 等 3 条前置到 buffer-local `dnd-protocol-alist'，走 org-attach
+;; 的桶路径。全局 `add-to-list' 压不住 buffer-local。改成在 `org-mode-hook'
+;; 里显式往 buffer-local 前面插我们的 handler。
+(defun my/org-prepend-flat-dnd-handler ()
+  "Make our flat-data DnD handler win over Org's builtin file: handlers."
+  (setq-local dnd-protocol-alist
+              (cons '("^file:" . my/org-dnd-copy-to-data)
+                    dnd-protocol-alist)))
+(add-hook 'org-mode-hook #'my/org-prepend-flat-dnd-handler)
+
+;; Markdown: 同样的扁平 + denote 命名流程。插入 ![alt](path) 或 [name](path)。
+(defconst my/markdown-image-extensions
+  '("png" "jpg" "jpeg" "gif" "svg" "webp" "bmp" "avif")
+  "Extensions treated as images for markdown DnD insertion.")
+
+(defun my/markdown-dnd-copy-to-data (uri _action)
+  "Copy locally-dropped file URI into ~/org/data/ with denote-style name,
+insert a markdown image / link at point, return 'copy.
+Only active in `markdown-mode'; returns nil elsewhere."
+  (when (derived-mode-p 'markdown-mode)
+    (let ((src (ignore-errors (dnd-get-local-file-name uri t))))
+      (when (and src (file-regular-p src))
+        (let* ((dest-dir  (expand-file-name "data/" org-directory))
+               (orig-name (file-name-nondirectory src))
+               (dest-name (my/org-download-denote-file-format orig-name))
+               (dest      (expand-file-name dest-name dest-dir))
+               (ext       (downcase (or (file-name-extension orig-name) "")))
+               (rel       (file-relative-name dest default-directory))
+               (label     (file-name-base orig-name)))
+          (make-directory dest-dir t)
+          (copy-file src dest 1)
+          (insert (if (member ext my/markdown-image-extensions)
+                      (format "![%s](%s)" label rel)
+                    (format "[%s](%s)" label rel)))
+          'copy)))))
+
+(defun my/markdown-prepend-flat-dnd-handler ()
+  "Prepend our flat-data DnD handler buffer-locally in markdown-mode."
+  (setq-local dnd-protocol-alist
+              (cons '("^file:" . my/markdown-dnd-copy-to-data)
+                    dnd-protocol-alist)))
+(add-hook 'markdown-mode-hook #'my/markdown-prepend-flat-dnd-handler)
 
 ;; ============================================================
 ;;  9. Org-gcal (Google Calendar sync)
