@@ -361,9 +361,9 @@
            :empty-lines 1 :jump-to-captured t)
           ("t" "Task" entry (file "~/org/inbox.org")
            "* TODO %?\n:PROPERTIES:\n:CREATED: %U\n:END:\n" :empty-lines 1)
-          ("j" "Journal" plain
-           (function my/journal-capture-goto-today)
-           "* %(format-time-string \"%H:%M\")\n%?"
+          ("j" "Journal" entry
+           (file my/journal-capture-target)
+           "* %<%H:%M>\n%?"
            :empty-lines 1 :jump-to-captured t)
           ("r" "r · 稍后读 [inbox]" entry (file "~/org/inbox.org")
            "* TODO [[%^{URL}][%^{Title}]]\n:PROPERTIES:\n:CREATED: %U\n:END:\n%?" :empty-lines 1)
@@ -881,10 +881,10 @@ EXT can hold the file extension, in case LINK doesn't provide it.
         ;; Prompt for subdir so new notes land in references/ | denote/ | notes/
         denote-prompts '(subdirectory title keywords)
         denote-date-prompt-use-org-read-date t
-        ;; Only scan references/, denote/, notes/ — skip everything else under ~/org/
+        ;; Only scan references/, denote/, notes/, journal/ — skip everything else under ~/org/
         denote-excluded-directories-regexp
         (rx (or (seq bos ".")
-                (seq bos (or "areas" "collections" "data" "journal"
+                (seq bos (or "areas" "collections" "data"
                              "projects" "roam" "templates" "tmp") eos)))
         denote-rename-confirmations nil
         denote-backlinks-show-context t
@@ -936,6 +936,14 @@ modes first, so when our hook lands everything is settled."
 ;; font-lock-based filename highlighting, and user prefers plain dired anyway.
 (after! dirvish
   (dirvish-override-dired-mode -1))
+
+;; Dired: show filenames only (hide permissions/size/time/owner columns).
+;; `(` toggles details back on when you need them.
+;; Use an explicit `1` — bare `#'dired-hide-details-mode` in a hook can be
+;; treated as toggle by some code paths and end up disabled.
+(defun my/dired-hide-details-on ()
+  (dired-hide-details-mode 1))
+(add-hook 'dired-mode-hook #'my/dired-hide-details-on)
 
 (use-package! denote-org
   :after (denote org))
@@ -1060,33 +1068,28 @@ modes first, so when our hook lands everything is settled."
   (setq rmh-elfeed-org-files (list (expand-file-name "~/org/collections/elfeed.org"))))
 
 ;; ============================================================
-;;  12. Journal — org-journal
+;;  12. Journal — denote-journal
 ;; ============================================================
 
-(after! org-journal
-  (setq org-journal-dir "~/org/journal/"
-        org-journal-file-type 'daily
-        org-journal-file-format "%Y-%m-%d.org"
-        org-journal-date-format "%Y-%m-%d"
-        org-journal-file-header "#+title: %Y-%m-%d\n#+filetags: :journal:\n"
-        org-journal-start-on-weekday 1
-        org-journal-carryover-items nil))
+(use-package! denote-journal
+  :after denote
+  :config
+  (setq denote-journal-directory (expand-file-name "journal/" org-directory)
+        denote-journal-keyword "journal"
+        denote-journal-title-format 'day-date-month-year))
 
-(defun my/journal-capture-goto-today ()
-  "Open today's journal for org-capture. Before 03:00 uses previous day."
+(defun my/journal-capture-target ()
+  "Return path to today's denote-journal entry for `org-capture'.
+Before 03:00 falls back to the previous day, matching the prior
+org-journal behaviour. Creates the file with denote-journal's standard
+front-matter if it does not yet exist."
   (let* ((now  (decode-time))
          (hour (nth 2 now))
          (time (if (< hour 3)
                    (time-subtract (current-time) (seconds-to-time 86400))
-                 (current-time)))
-         (file (expand-file-name
-                (format-time-string "%Y-%m-%d.org" time)
-                "~/org/journal/")))
-    (set-buffer (org-capture-target-buffer file))
-    (when (= (buffer-size) 0)
-      (insert (format "#+title: %s\n#+filetags: :journal:\n"
-                      (format-time-string "%Y-%m-%d" time))))
-    (goto-char (point-max))))
+                 (current-time))))
+    (denote-journal-path-to-new-or-existing-entry
+     (format-time-string "%Y-%m-%d" time))))
 
 ;; ============================================================
 ;;  13. Chinese calendar (cal-china-x)
@@ -1255,7 +1258,7 @@ modes first, so when our hook lands everything is settled."
 ;; ============================================================
 
 (map! :leader
-      :desc "org-capture" "X" nil
+      ;; :desc "org-capture" "X" nil
       ;; Gcal
       (:prefix ("G" . "gcal")
        :desc "Sync"   "s" #'org-gcal-sync
@@ -1265,7 +1268,7 @@ modes first, so when our hook lands everything is settled."
 
       ;; Elfeed
       (:prefix ("o" . "open")
-       :desc "Org capture" "c" #'org-capture
+       ;; :desc "Org capture" "c" #'org-capture
        :desc "Elfeed" "e" #'elfeed)
 
       ;; Denote
@@ -1285,7 +1288,8 @@ modes first, so when our hook lands everything is settled."
         :desc "Rename from front-matter" "R" #'denote-rename-file-using-front-matter
         :desc "Add keywords"          "k" #'denote-keywords-add
         :desc "Remove keywords"       "K" #'denote-keywords-remove
-        :desc "Dired in denote dir"   "d" #'denote-dired))
+        :desc "Dired in denote dir"   "d" #'denote-dired
+        :desc "Today's journal"       "j" #'denote-journal-new-or-existing-entry))
 
       ;; Org-noter
       :desc "org-noter" "N" #'org-noter)
@@ -1422,5 +1426,5 @@ modes first, so when our hook lands everything is settled."
           (lisp-interaction-mode)))
       (switch-to-buffer buf)))
 
-  (map! :leader
-        :desc "Lisp scratch" "X" #'my/open-lisp-scratch)
+  ;; (map! :leader
+  ;;       :desc "Lisp scratch" "X" #'my/open-lisp-scratch)

@@ -52,7 +52,7 @@
        emacs-lisp
        javascript
        markdown
-       (org +journal +dragndrop +present)
+       (org +dragndrop +present)
        (python +lsp)
        sh
        web

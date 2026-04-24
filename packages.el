@@ -12,5 +12,6 @@
 (package! sis)
 (package! denote)
 (package! denote-org)
+(package! denote-journal)
 (package! consult-notes
   :recipe (:host github :repo "mclear-tools/consult-notes"))
