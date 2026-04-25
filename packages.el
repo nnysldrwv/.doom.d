@@ -13,5 +13,6 @@
 (package! denote)
 (package! denote-org)
 (package! denote-journal)
+(package! denote-markdown)
 (package! consult-notes
   :recipe (:host github :repo "mclear-tools/consult-notes"))

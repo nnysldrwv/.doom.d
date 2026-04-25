@@ -1047,6 +1047,13 @@ modes first, so when our hook lands everything is settled."
 (use-package! denote-org
   :after (denote org))
 
+(use-package! denote-markdown
+  :after (denote markdown-mode)
+  :commands (denote-markdown-convert-links-to-file-paths
+             denote-markdown-convert-links-to-denote-type
+             denote-markdown-convert-links-to-obsidian-type
+             denote-markdown-convert-obsidian-links-to-denote-type))
+
 ;; ---- consult-notes: 多源统一检索 ----
 (use-package! consult-notes
   :after (consult denote)
@@ -1425,6 +1432,20 @@ front-matter if it does not yet exist."
       :desc "Paste rich text" "V" #'my/org-paste-rich
       ;; Archive
       :desc "Archive done tasks" "A" #'my/org-archive-done-tasks)
+
+;; Markdown-mode local keybindings — denote-markdown link conversion
+(map! :after markdown-mode
+      :map markdown-mode-map
+      :localleader
+      (:prefix ("d" . "denote")
+       :desc "Insert link"              "i" #'denote-link-or-create
+       :desc "Backlinks"                "b" #'denote-backlinks
+       :desc "Rename (front-matter)"    "r" #'denote-rename-file-using-front-matter
+       ;; Link conversion (denote-markdown)
+       :desc "denote: → file path"      "f" #'denote-markdown-convert-links-to-file-paths
+       :desc "file path → denote:"      "F" #'denote-markdown-convert-links-to-denote-type
+       :desc "denote: → Obsidian"       "o" #'denote-markdown-convert-links-to-obsidian-type
+       :desc "Obsidian → denote:"       "O" #'denote-markdown-convert-obsidian-links-to-denote-type))
 
 ;; ============================================================
 ;;  18. Fix: C-c C-c in *Org Note* buffer (log notes, etc.)
