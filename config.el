@@ -1,110 +1,107 @@
 ;;; config.el -*- lexical-binding: t; -*-
-;;
-;; Migrated from Emacs Prelude sean-config.el → Doom Emacs
-;; Backup at ~/.emacs.d.prelude-backup/
 
 ;; ============================================================
 ;;  0. Windows: force UTF-8 for external processes (rg, git, etc.)
 ;; ============================================================
 
-(prefer-coding-system 'utf-8-unix)
-(set-default-coding-systems 'utf-8-unix)
-(setq locale-coding-system 'utf-8-unix)
-(when (eq system-type 'windows-nt)
-  (setq file-name-coding-system 'utf-8-unix
-        default-file-name-coding-system 'utf-8-unix))
+;; (prefer-coding-system 'utf-8-unix)
+;; (set-default-coding-systems 'utf-8-unix)
+;; (setq locale-coding-system 'utf-8-unix)
+;; (when (eq system-type 'windows-nt)
+;;   (setq file-name-coding-system 'utf-8-unix
+;;         default-file-name-coding-system 'utf-8-unix))
 
-(add-to-list 'process-coding-system-alist '("rg" utf-8 . utf-8))
-(add-to-list 'process-coding-system-alist '("git" utf-8 . utf-8))
-(add-to-list 'process-coding-system-alist '("fd" utf-8 . utf-8))
+;; (add-to-list 'process-coding-system-alist '("rg" utf-8 . utf-8))
+;; (add-to-list 'process-coding-system-alist '("git" utf-8 . utf-8))
+;; (add-to-list 'process-coding-system-alist '("fd" utf-8 . utf-8))
 
-;; NOTE: SPC s f (locate) unavailable on Windows, use SPC SPC instead
+;; ;; NOTE: SPC s f (locate) unavailable on Windows, use SPC SPC instead
 
-;; Disable evil mouse drag to avoid CJK font rendering crash
-(after! evil
-  (define-key evil-normal-state-map [down-mouse-1] nil)
-  (define-key evil-motion-state-map [down-mouse-1] nil))
+;; ;; Disable evil mouse drag to avoid CJK font rendering crash
+;; (after! evil
+;;   (define-key evil-normal-state-map [down-mouse-1] nil)
+;;   (define-key evil-motion-state-map [down-mouse-1] nil))
 
-;; Work around a native Windows crash when splitting Elfeed windows.
-(after! evil
-  (defun my/elfeed-buffer-p ()
-    "Return non-nil when the current buffer is an Elfeed buffer."
-    (derived-mode-p 'elfeed-search-mode 'elfeed-show-mode))
+;; ;; Work around a native Windows crash when splitting Elfeed windows.
+;; (after! evil
+;;   (defun my/elfeed-buffer-p ()
+;;     "Return non-nil when the current buffer is an Elfeed buffer."
+;;     (derived-mode-p 'elfeed-search-mode 'elfeed-show-mode))
 
-  (evil-define-command my/evil-window-split-a (&optional count file)
-    "Like Doom's split advice, but avoid extra redraw in Elfeed on Windows."
-    :repeat nil
-    (interactive "P<f>")
-    (if (and (featurep :system 'windows)
-             (my/elfeed-buffer-p))
-        (let ((origwin (selected-window))
-              window-selection-change-functions)
-          (select-window (split-window origwin count 'below))
-          (unless evil-split-window-below
-            (select-window origwin))
-          (when file
-            (evil-edit file)))
-      (+evil-window-split-a count file)))
+;;   (evil-define-command my/evil-window-split-a (&optional count file)
+;;     "Like Doom's split advice, but avoid extra redraw in Elfeed on Windows."
+;;     :repeat nil
+;;     (interactive "P<f>")
+;;     (if (and (featurep :system 'windows)
+;;              (my/elfeed-buffer-p))
+;;         (let ((origwin (selected-window))
+;;               window-selection-change-functions)
+;;           (select-window (split-window origwin count 'below))
+;;           (unless evil-split-window-below
+;;             (select-window origwin))
+;;           (when file
+;;             (evil-edit file)))
+;;       (+evil-window-split-a count file)))
 
-  (evil-define-command my/evil-window-vsplit-a (&optional count file)
-    "Like Doom's vsplit advice, but avoid extra redraw in Elfeed on Windows."
-    :repeat nil
-    (interactive "P<f>")
-    (if (and (featurep :system 'windows)
-             (my/elfeed-buffer-p))
-        (let ((origwin (selected-window))
-              window-selection-change-functions)
-          (select-window (split-window origwin count 'right))
-          (unless evil-vsplit-window-right
-            (select-window origwin))
-          (when file
-            (evil-edit file)))
-      (+evil-window-vsplit-a count file)))
+;;   (evil-define-command my/evil-window-vsplit-a (&optional count file)
+;;     "Like Doom's vsplit advice, but avoid extra redraw in Elfeed on Windows."
+;;     :repeat nil
+;;     (interactive "P<f>")
+;;     (if (and (featurep :system 'windows)
+;;              (my/elfeed-buffer-p))
+;;         (let ((origwin (selected-window))
+;;               window-selection-change-functions)
+;;           (select-window (split-window origwin count 'right))
+;;           (unless evil-vsplit-window-right
+;;             (select-window origwin))
+;;           (when file
+;;             (evil-edit file)))
+;;       (+evil-window-vsplit-a count file)))
 
-  (advice-remove #'evil-window-split #'+evil-window-split-a)
-  (advice-remove #'evil-window-vsplit #'+evil-window-vsplit-a)
-  (advice-add #'evil-window-split :override #'my/evil-window-split-a)
-  (advice-add #'evil-window-vsplit :override #'my/evil-window-vsplit-a))
+;;   (advice-remove #'evil-window-split #'+evil-window-split-a)
+;;   (advice-remove #'evil-window-vsplit #'+evil-window-vsplit-a)
+;;   (advice-add #'evil-window-split :override #'my/evil-window-split-a)
+;;   (advice-add #'evil-window-vsplit :override #'my/evil-window-vsplit-a))
 
-;; evil-org-mode bug: `evil-org-select-an-element' uses `(region-beginning)'
-;; unconditionally, which returns `(min point mark)' even when no region is
-;; active. In operator-pending mode (e.g. daR), that pulls the start back to
-;; a stale mark, so `daR' deletes from that mark to the end of the subtree
-;; instead of just the subtree.
-(after! evil-org
-  (defun evil-org-select-an-element (element)
-    "Select an org ELEMENT (fixed for operator-pending state)."
-    (let ((elem-begin (org-element-property :begin element)))
-      (list (if (evil-visual-state-p)
-                (min (region-beginning) elem-begin)
-              elem-begin)
-            (org-element-property :end element)))))
+;; ;; evil-org-mode bug: `evil-org-select-an-element' uses `(region-beginning)'
+;; ;; unconditionally, which returns `(min point mark)' even when no region is
+;; ;; active. In operator-pending mode (e.g. daR), that pulls the start back to
+;; ;; a stale mark, so `daR' deletes from that mark to the end of the subtree
+;; ;; instead of just the subtree.
+;; (after! evil-org
+;;   (defun evil-org-select-an-element (element)
+;;     "Select an org ELEMENT (fixed for operator-pending state)."
+;;     (let ((elem-begin (org-element-property :begin element)))
+;;       (list (if (evil-visual-state-p)
+;;                 (min (region-beginning) elem-begin)
+;;               elem-begin)
+;;             (org-element-property :end element)))))
 
-;; Work around a native Windows crash when key-help commands read real keys
-;; while the system IME is open.
-(when (featurep :system 'windows)
-  (defun my/windows-disable-ime-for-key-help-a (fn &rest args)
-    "Temporarily close the Windows IME while FN reads a key sequence."
-    (let ((restore-ime
-           (and (fboundp 'w32-get-ime-open-status)
-                (fboundp 'w32-set-ime-open-status)
-                (ignore-errors (w32-get-ime-open-status)))))
-      (unwind-protect
-          (progn
-            (when restore-ime
-              (ignore-errors (w32-set-ime-open-status nil)))
-            (apply fn args))
-        (when restore-ime
-          (ignore-errors (w32-set-ime-open-status t))))))
+;; ;; Work around a native Windows crash when key-help commands read real keys
+;; ;; while the system IME is open.
+;; (when (featurep :system 'windows)
+;;   (defun my/windows-disable-ime-for-key-help-a (fn &rest args)
+;;     "Temporarily close the Windows IME while FN reads a key sequence."
+;;     (let ((restore-ime
+;;            (and (fboundp 'w32-get-ime-open-status)
+;;                 (fboundp 'w32-set-ime-open-status)
+;;                 (ignore-errors (w32-get-ime-open-status)))))
+;;       (unwind-protect
+;;           (progn
+;;             (when restore-ime
+;;               (ignore-errors (w32-set-ime-open-status nil)))
+;;             (apply fn args))
+;;         (when restore-ime
+;;           (ignore-errors (w32-set-ime-open-status t))))))
 
-  (with-eval-after-load 'help-fns
-    (dolist (fn '(describe-key describe-key-briefly))
-      (advice-remove fn #'my/windows-disable-ime-for-key-help-a)
-      (advice-add fn :around #'my/windows-disable-ime-for-key-help-a)))
+;;   (with-eval-after-load 'help-fns
+;;     (dolist (fn '(describe-key describe-key-briefly))
+;;       (advice-remove fn #'my/windows-disable-ime-for-key-help-a)
+;;       (advice-add fn :around #'my/windows-disable-ime-for-key-help-a)))
 
-  (with-eval-after-load 'helpful
-    (advice-remove 'helpful-key #'my/windows-disable-ime-for-key-help-a)
-    (advice-add 'helpful-key :around #'my/windows-disable-ime-for-key-help-a)))
+;;   (with-eval-after-load 'helpful
+;;     (advice-remove 'helpful-key #'my/windows-disable-ime-for-key-help-a)
+;;     (advice-add 'helpful-key :around #'my/windows-disable-ime-for-key-help-a)))
 
 ;; ============================================================
 ;;  1. User info
@@ -117,44 +114,44 @@
 ;;  2. Fonts — Maple Mono NF CN (中英等宽，自带 CJK + Nerd Font)
 ;; ============================================================
 
-(defun my/first-available-font (candidates)
-  "Return the first font family from CANDIDATES that is available."
-  (catch 'found
-    (dolist (font candidates)
-      (when (find-font (font-spec :family font))
-        (throw 'found font)))
-    nil))
+;; (defun my/first-available-font (candidates)
+;;   "Return the first font family from CANDIDATES that is available."
+;;   (catch 'found
+;;     (dolist (font candidates)
+;;       (when (find-font (font-spec :family font))
+;;         (throw 'found font)))
+;;     nil))
 
 (setq doom-font (font-spec :family "Maple Mono NF CN" :size 17)
       doom-variable-pitch-font (font-spec :family "LXGW WenKai Screen" :size 19)
       doom-big-font (font-spec :family "Maple Mono NF CN" :size 24))
 
-;; CJK + emoji fontset (after GUI frame is ready)
-(defun my/setup-cjk-fonts (&optional _frame)
-  "Configure CJK and emoji fonts for Doom."
-  (when (display-graphic-p)
-    (let ((cjk-font (my/first-available-font
-                     '("等距更纱黑体 SC" "Sarasa Mono SC"
-                       "霞鹜文楷等宽" "LXGW WenKai Mono"
-                       "Microsoft YaHei UI" "Microsoft YaHei"
-                       "Noto Sans SC"))))
-      (when cjk-font
-        (dolist (charset '(kana han cjk-misc bopomofo))
-          (set-fontset-font t charset (font-spec :family cjk-font) nil 'prepend))
-        (setq face-font-rescale-alist
-              (list (cons (regexp-quote cjk-font) 1.0)))))
+;; ;; CJK + emoji fontset (after GUI frame is ready)
+;; (defun my/setup-cjk-fonts (&optional _frame)
+;;   "Configure CJK and emoji fonts for Doom."
+;;   (when (display-graphic-p)
+;;     (let ((cjk-font (my/first-available-font
+;;                      '("等距更纱黑体 SC" "Sarasa Mono SC"
+;;                        "霞鹜文楷等宽" "LXGW WenKai Mono"
+;;                        "Microsoft YaHei UI" "Microsoft YaHei"
+;;                        "Noto Sans SC"))))
+;;       (when cjk-font
+;;         (dolist (charset '(kana han cjk-misc bopomofo))
+;;           (set-fontset-font t charset (font-spec :family cjk-font) nil 'prepend))
+;;         (setq face-font-rescale-alist
+;;               (list (cons (regexp-quote cjk-font) 1.0)))))
 
-    (let ((emoji-font (my/first-available-font
-                       '("Segoe UI Emoji" "Apple Color Emoji" "Noto Color Emoji")))
-          (symbol-font (my/first-available-font
-                        '("Segoe UI Symbol" "Apple Symbols" "Symbola"))))
-      (when emoji-font
-        (set-fontset-font t 'emoji (font-spec :family emoji-font) nil 'prepend))
-      (when symbol-font
-        (set-fontset-font t 'symbol (font-spec :family symbol-font) nil 'prepend)))))
+;;     (let ((emoji-font (my/first-available-font
+;;                        '("Segoe UI Emoji" "Apple Color Emoji" "Noto Color Emoji")))
+;;           (symbol-font (my/first-available-font
+;;                         '("Segoe UI Symbol" "Apple Symbols" "Symbola"))))
+;;       (when emoji-font
+;;         (set-fontset-font t 'emoji (font-spec :family emoji-font) nil 'prepend))
+;;       (when symbol-font
+;;         (set-fontset-font t 'symbol (font-spec :family symbol-font) nil 'prepend)))))
 
-(add-hook 'after-setting-font-hook #'my/setup-cjk-fonts)
-(add-hook 'doom-init-ui-hook #'my/setup-cjk-fonts)
+;; (add-hook 'after-setting-font-hook #'my/setup-cjk-fonts)
+;; (add-hook 'doom-init-ui-hook #'my/setup-cjk-fonts)
 
 ;; ============================================================
 ;;  3. Theme
@@ -663,21 +660,6 @@
         (when (re-search-forward (format "^\\* %s$" (regexp-quote section)) nil t)
           (line-beginning-position)))))
 
-  (defun my/org-todo-select ()
-    "Prompt for a TODO state instead of cycling."
-    (interactive)
-    (unless (derived-mode-p 'org-mode)
-      (user-error "Not in Org mode"))
-    (let* ((current (org-get-todo-state))
-           (choice (completing-read
-                    (if current
-                        (format "TODO state (current %s): " current)
-                      "TODO state: ")
-                    org-todo-keywords-1
-                    nil t nil nil current)))
-      (when (and choice (not (string-empty-p choice)))
-        (org-todo choice))))
-
   (defun my/books-org-rebucket-current-entry ()
     "Move the current books entry to the section implied by its TODO state."
     (interactive)
@@ -871,51 +853,52 @@ Used as `org-download-file-format-function'."
 (add-hook 'org-agenda-finalize-hook #'my/org-agenda-align-tags-pixel)
 
 ;; org-download — 走 org-attach 体系
-(after! org
-  (use-package! org-download
-    :commands (org-download-clipboard org-download-screenshot org-download-yank org-download-delete)
-    :config
-    (add-hook 'org-mode-hook 'org-download-enable)
-    (setq org-download-method 'directory
-          org-download-image-dir (expand-file-name "data/" org-directory)
-          org-download-heading-lvl nil
-          org-download-timestamp ""
-          org-download-image-org-width 800
-          org-download-annotate-function (lambda (_link) "")
-          org-download-screenshot-method (my/org-download-screenshot-command)
-          org-download-file-format-function #'my/org-download-denote-file-format)
+;; (after! org
+  ;; (use-package! org-download
+(after! org-download
+  :commands (org-download-clipboard org-download-screenshot org-download-yank org-download-delete)
+  :config
+  (add-hook 'org-mode-hook 'org-download-enable)
+  (setq org-download-method 'directory
+        org-download-image-dir (expand-file-name "data/" org-directory)
+        org-download-heading-lvl nil
+        org-download-timestamp ""
+        org-download-image-org-width 800
+        org-download-annotate-function (lambda (_link) "")
+        org-download-screenshot-method (my/org-download-screenshot-command)
+        org-download-file-format-function #'my/org-download-denote-file-format)
 
-    ;; Fix: org-download-dnd-fallback for Emacs 30+
-    (when (fboundp 'dnd-handle-multiple-urls)
-      (defun org-download-dnd-fallback (uri action)
-        (let ((dnd-protocol-alist
-               (rassq-delete-all
-                'org-download-dnd
-                (copy-alist dnd-protocol-alist))))
-          (dnd-handle-multiple-urls
-           (selected-window) (list uri) action))))
+  ;; Fix: org-download-dnd-fallback for Emacs 30+
+  (when (fboundp 'dnd-handle-multiple-urls)
+    (defun org-download-dnd-fallback (uri action)
+      (let ((dnd-protocol-alist
+             (rassq-delete-all
+              'org-download-dnd
+              (copy-alist dnd-protocol-alist))))
+        (dnd-handle-multiple-urls
+         (selected-window) (list uri) action))))
 
-    ;; Fix: Full percent-decoding for non-ASCII filenames
-    (defun org-download--fullname (link &optional ext)
-      "Return the file name where LINK will be saved to.
+  ;; Fix: Full percent-decoding for non-ASCII filenames
+  (defun org-download--fullname (link &optional ext)
+    "Return the file name where LINK will be saved to.
 EXT can hold the file extension, in case LINK doesn't provide it.
 [patched] Full percent-decoding for non-ASCII filenames."
-      (let ((filename
-             (decode-coding-string
-              (url-unhex-string
-               (file-name-nondirectory
-                (car (url-path-and-query
-                      (url-generic-parse-url link)))))
-              'utf-8))
-            (dir (org-download--dir)))
-        (when (string-match ".*?\\.\\(?:png\\|jpg\\)\\(.*\\)$" filename)
-          (setq filename (replace-match "" nil nil filename 1)))
-        (when ext
-          (setq filename (concat (file-name-sans-extension filename) "." ext)))
-        (abbreviate-file-name
-         (expand-file-name
-          (funcall org-download-file-format-function filename)
-          dir))))))
+    (let ((filename
+           (decode-coding-string
+            (url-unhex-string
+             (file-name-nondirectory
+              (car (url-path-and-query
+                    (url-generic-parse-url link)))))
+            'utf-8))
+          (dir (org-download--dir)))
+      (when (string-match ".*?\\.\\(?:png\\|jpg\\)\\(.*\\)$" filename)
+        (setq filename (replace-match "" nil nil filename 1)))
+      (when ext
+        (setq filename (concat (file-name-sans-extension filename) "." ext)))
+      (abbreviate-file-name
+       (expand-file-name
+        (funcall org-download-file-format-function filename)
+        dir)))))
 
 ;; 任意文件拖入 org buffer → 复制到 ~/org/data/ 并用 denote 命名 +
 ;; 在光标处插入 file: 链接。对 epub / pdf / zip 等非图片也生效。
@@ -1137,7 +1120,8 @@ Only active in `markdown-mode'; returns nil elsewhere."
   (run-with-timer 120 1800
                   (lambda ()
                     (when (not org-gcal--sync-lock)
-                      (org-gcal-sync)))))
+                      (org-gcal-sync)
+                      (my/org-gcal-auto-post)))))
 
 ;; ============================================================
 ;;  10. Denote
@@ -1323,7 +1307,7 @@ modes first, so when our hook lands everything is settled."
 ;;  11. Elfeed & Elfeed-org
 ;; ============================================================
 
-(use-package! elfeed
+(after! elfeed
   :commands elfeed
   :config
   (require 'subr-x)
@@ -1627,7 +1611,7 @@ front-matter if it does not yet exist."
   (advice-add 'nov-save-place :around #'my/nov-save-place-a))
 
 ;; org-noter
-(use-package! org-noter
+(after! org-noter
   :commands org-noter
   :config
   (setq org-noter-notes-search-path '("~/org/references/")
@@ -1779,7 +1763,7 @@ front-matter if it does not yet exist."
         :desc "Files"                    "f" #'denote-org-dblock-insert-files
         :desc "Files as headings"        "F" #'denote-org-dblock-insert-files-as-headings))
       ;; Todo
-      :desc "Select TODO state" "t" #'my/org-todo-select
+      :desc "TODO state" "t" #'org-todo
       ;; Rich paste
       :desc "Paste rich text" "V" #'my/org-paste-rich
       ;; Archive
@@ -1878,8 +1862,30 @@ front-matter if it does not yet exist."
 ;; Load secrets (org-gcal credentials etc.)
 (load! "secrets" doom-user-dir t)
 
+;; ============================================================
+;;  20. Ace-window — 多 window 快速跳转与高亮
+;; ============================================================
+
+(use-package! ace-window
+  :config
+  (setq aw-keys '(?a ?s ?d ?f ?g ?h ?j ?k ?l)
+        aw-scope 'frame
+        aw-background t)
+
+  ;; 覆盖默认的 other-window (C-x o)
+  (global-set-key [remap other-window] #'ace-window)
+
+  ;; 在 window 左上角显示编号（比 mode-line 更直观）
+  (setq aw-display-mode-overlay t
+        aw-leading-char-style 'char)
+
+  ;; 配合 evil：在 motion/normal 态下也能用
+  (after! evil
+    (define-key evil-motion-state-map (kbd "C-w w") #'ace-window)
+    (define-key evil-normal-state-map (kbd "C-w w") #'ace-window)))
+
   ;; ========================================================
-  ;;  20. Scratch Buffer - org-mode default + lisp scratch
+  ;;  21. Scratch Buffer - org-mode default + lisp scratch
   ;;
   ;; 效果：
   ;; - SPC-x → org-mode scratch buffer（临时笔记）
