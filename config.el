@@ -236,13 +236,14 @@
 
   ;; Todo keywords
   (setq org-todo-keywords
-        '((sequence "TODO(t)" "NEXT(n)" "WAITING(w!)" "HOLD(h@/!)" "|" "DONE(d!)" "CANCELLED(c@)")))
+        '((sequence "TODO(t)" "NEXT(n)" "WAITING(w!)" "HOLD(h@/!)" "|" "DONE(d!)" "DROPPED(x@)" "CANCELLED(c@)")))
   (setq org-todo-keyword-faces
         '(("TODO"      :foreground "#2952a3" :weight bold)
           ("NEXT"      :foreground "#c0392b" :weight bold)
           ("WAITING"   :foreground "#8b6914" :weight bold)
           ("HOLD"      :foreground "#6c6c6c" :weight bold)
           ("DONE"      :foreground "#2e7d32" :weight bold)
+          ("DROPPED"   :foreground "#8d6e63" :weight bold)
           ("CANCELLED" :foreground "#9e9e9e" :weight bold)))
 
   (setq org-log-done 'time
@@ -376,9 +377,40 @@
            :empty-lines 1 :jump-to-captured t)
           ("r" "r · 稍后读 [inbox]" entry (file "~/org/inbox.org")
            "* TODO [[%^{URL}][%^{Title}]]\n:PROPERTIES:\n:CREATED: %U\n:END:\n%?" :empty-lines 1)
-          ("m" "Movie" entry (file+headline "~/org/collections/media.org" "观影记录")
-           "* %^{片名}\n:PROPERTIES:\n:评分: %^{评分|⭐⭐⭐|⭐⭐⭐⭐|⭐⭐⭐⭐⭐|⭐⭐|⭐}\n:END:\n%U\n%?"
-           :empty-lines 1)
+          ("m" "Media")
+          ("mm" "电影 · 想看" entry
+           (file+olp "~/org/collections/media.org" "影视动漫" "电影" "想看")
+           "**** TODO %^{片名}\n:PROPERTIES:\n:添加时间: %U\n:END:\n%?"
+           :empty-lines 1 :jump-to-captured t)
+          ("mM" "电影 · 看完" entry
+           (file+olp "~/org/collections/media.org" "影视动漫" "电影" "看完")
+           "**** DONE %^{片名}\n:PROPERTIES:\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
+           :empty-lines 1 :jump-to-captured t)
+          ("mt" "电视剧 · 想看" entry
+           (file+olp "~/org/collections/media.org" "影视动漫" "电视剧" "想看")
+           "**** TODO %^{片名}\n:PROPERTIES:\n:添加时间: %U\n:END:\n%?"
+           :empty-lines 1 :jump-to-captured t)
+          ("mT" "电视剧 · 看完" entry
+           (file+olp "~/org/collections/media.org" "影视动漫" "电视剧" "看完")
+           "**** DONE %^{片名}\n:PROPERTIES:\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
+           :empty-lines 1 :jump-to-captured t)
+          ("ma" "动漫 · 想看" entry
+           (file+olp "~/org/collections/media.org" "影视动漫" "动漫" "想看")
+           "**** TODO %^{片名}\n:PROPERTIES:\n:添加时间: %U\n:END:\n%?"
+           :empty-lines 1 :jump-to-captured t)
+          ("mA" "动漫 · 看完" entry
+           (file+olp "~/org/collections/media.org" "影视动漫" "动漫" "看完")
+           "**** DONE %^{片名}\n:PROPERTIES:\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
+           :empty-lines 1 :jump-to-captured t)
+          ("b" "Books")
+          ("bb" "书 · 待阅读" entry
+           (file+olp "~/org/collections/books.org" "待阅读")
+           "*** TODO %^{书名}\n:PROPERTIES:\n:作者: %^{作者}\n:类型: %^{类型|小说|非虚构|理财|网文|漫画|其他}\n:来源: %^{来源|微信读书|豆瓣|Z-Library|实体书|其他}\n:添加时间: %U\n:END:\n%?"
+           :empty-lines 1 :jump-to-captured t)
+          ("bB" "书 · 阅读中" entry
+           (file+olp "~/org/collections/books.org" "阅读中")
+           "*** READING %^{书名}\n:PROPERTIES:\n:作者: %^{作者}\n:类型: %^{类型|小说|非虚构|理财|网文|漫画|其他}\n:来源: %^{来源|微信读书|豆瓣|Z-Library|实体书|其他}\n:添加时间: %U\n:END:\n%?"
+           :empty-lines 1 :jump-to-captured t)
           ("w" "w · 精读笔记 [ref/]" plain (function my/capture-web-article-target)
            "%?"
            :empty-lines 1 :jump-to-captured t)
@@ -503,6 +535,167 @@
                       (let ((temporary-file-directory dir))
                         (funcall orig-fn prefix suffix))
                     (funcall orig-fn prefix suffix)))))
+
+  ;; ---- Force org-babel shell blocks to use Git bash on Windows ----
+  ;; Default shell-file-name is cmdproxy.exe → cmd.exe, which can't handle "\"
+  ;; line continuations, $VAR expansion, or the "TOKEN=val" preamble that :var emits.
+  ;; 8.3 short path avoids the space in "Program Files" — ob-shell's
+  ;; org-babel-eval uses (format "%s %s" shell-file-name ...) without quoting.
+  (defvar my/org-babel-bash nil)
+  (setq my/org-babel-bash "C:/PROGRA~1/Git/usr/bin/bash.exe")
+  (after! ob-shell
+    (define-advice org-babel-execute:shell
+        (:around (orig body params) use-bash-on-windows)
+      (if (and (eq system-type 'windows-nt)
+               (file-exists-p my/org-babel-bash))
+          (let ((shell-file-name my/org-babel-bash)
+                (shell-command-switch "-c")
+                (explicit-shell-file-name my/org-babel-bash))
+            (funcall orig body params))
+        (funcall orig body params)))
+    (define-advice org-babel-execute:bash
+        (:around (orig body params) use-bash-on-windows)
+      (if (and (eq system-type 'windows-nt)
+               (file-exists-p my/org-babel-bash))
+          (let ((shell-file-name my/org-babel-bash)
+                (shell-command-switch "-c")
+                (explicit-shell-file-name my/org-babel-bash))
+            (funcall orig body params))
+        (funcall orig body params))))
+
+  ;; ---- Media library auto-rebucket on TODO state change ----
+  (defun my/media-org-file-p ()
+    "Return non-nil when visiting the media library file."
+    (and (buffer-file-name)
+         (file-equal-p (expand-file-name "~/org/collections/media.org")
+                       (expand-file-name (buffer-file-name)))))
+
+  (defun my/media-org-target-section-for-state (state)
+    "Map TODO STATE to a media library section name."
+    (pcase state
+      ((or "TODO" "NEXT") "想看")
+      ("DOING" "在看")
+      ("DONE" "看完")
+      ((or "DROPPED" "CANCELLED") "已放弃")
+      (_ nil)))
+
+  (defun my/media-org-current-entry-context ()
+    "Return plist for the current media entry, or nil when not applicable."
+    (save-excursion
+      (org-back-to-heading t)
+      (when (= (org-outline-level) 4)
+        (let (category section)
+          (save-excursion
+            (while (org-up-heading-safe)
+              (pcase (org-outline-level)
+                (3 (setq section (org-get-heading t t t t)))
+                (2 (setq category (org-get-heading t t t t))))))
+          (when (and (member category '("电影" "电视剧" "动漫"))
+                     (member section '("想看" "在看" "看完" "已放弃")))
+            (list :category category :section section))))))
+
+  (defun my/media-org-find-section-position (category section)
+    "Return buffer position of CATEGORY -> SECTION in media.org."
+    (save-excursion
+      (save-restriction
+        (goto-char (point-min))
+        (when (re-search-forward "^\\* 影视动漫$" nil t)
+          (org-narrow-to-subtree)
+          (goto-char (point-min))
+          (when (re-search-forward (format "^\\*\\* %s$" (regexp-quote category)) nil t)
+            (org-narrow-to-subtree)
+            (goto-char (point-min))
+            (when (re-search-forward (format "^\\*\\*\\* %s$" (regexp-quote section)) nil t)
+              (line-beginning-position)))))))
+
+  (defun my/media-org-rebucket-current-entry ()
+    "Move the current media entry to the section implied by its TODO state."
+    (interactive)
+    (when-let* ((context (and (my/media-org-file-p)
+                              (my/media-org-current-entry-context)))
+                (target-section (my/media-org-target-section-for-state org-state))
+                (category (plist-get context :category))
+                (current-section (plist-get context :section)))
+      (unless (equal current-section target-section)
+        (let ((level (org-outline-level)))
+          (org-cut-subtree)
+          (when-let ((target-pos (my/media-org-find-section-position category target-section)))
+            (goto-char target-pos)
+            (org-end-of-subtree t t)
+            (unless (bolp)
+              (insert "\n"))
+            (org-paste-subtree level))))))
+
+  (add-hook 'org-after-todo-state-change-hook #'my/media-org-rebucket-current-entry)
+
+  (defun my/books-org-file-p ()
+    "Return non-nil when visiting the books collection file."
+    (and (buffer-file-name)
+         (file-equal-p (expand-file-name "~/org/collections/books.org")
+                       (expand-file-name (buffer-file-name)))))
+
+  (defun my/books-org-target-section-for-state (state)
+    "Map TODO STATE to a books collection section name."
+    (pcase state
+      ((or "TODO" "NEXT" "WAITING") "待阅读")
+      ("READING" "阅读中")
+      ("DONE" "已读完")
+      ((or "DROPPED" "HOLD" "CANCELLED") "已放弃")
+      (_ nil)))
+
+  (defun my/books-org-current-entry-context ()
+    "Return plist for the current books entry, or nil when not applicable."
+    (save-excursion
+      (org-back-to-heading t)
+      (when (= (org-outline-level) 2)
+        (let (section)
+          (save-excursion
+            (when (org-up-heading-safe)
+              (setq section (org-get-heading t t t t))))
+          (when (member section '("待阅读" "阅读中" "已读完" "已放弃"))
+            (list :section section))))))
+
+  (defun my/books-org-find-section-position (section)
+    "Return buffer position of SECTION in books.org."
+    (save-excursion
+      (save-restriction
+        (goto-char (point-min))
+        (when (re-search-forward (format "^\\* %s$" (regexp-quote section)) nil t)
+          (line-beginning-position)))))
+
+  (defun my/org-todo-select ()
+    "Prompt for a TODO state instead of cycling."
+    (interactive)
+    (unless (derived-mode-p 'org-mode)
+      (user-error "Not in Org mode"))
+    (let* ((current (org-get-todo-state))
+           (choice (completing-read
+                    (if current
+                        (format "TODO state (current %s): " current)
+                      "TODO state: ")
+                    org-todo-keywords-1
+                    nil t nil nil current)))
+      (when (and choice (not (string-empty-p choice)))
+        (org-todo choice))))
+
+  (defun my/books-org-rebucket-current-entry ()
+    "Move the current books entry to the section implied by its TODO state."
+    (interactive)
+    (when-let* ((context (and (my/books-org-file-p)
+                              (my/books-org-current-entry-context)))
+                (target-section (my/books-org-target-section-for-state org-state))
+                (current-section (plist-get context :section)))
+      (unless (equal current-section target-section)
+        (let ((level (org-outline-level)))
+          (org-cut-subtree)
+          (when-let ((target-pos (my/books-org-find-section-position target-section)))
+            (goto-char target-pos)
+            (org-end-of-subtree t t)
+            (unless (bolp)
+              (insert "\n"))
+            (org-paste-subtree level))))))
+
+  (add-hook 'org-after-todo-state-change-hook #'my/books-org-rebucket-current-entry)
 
   ;; ---- Archive done tasks ----
   (defun my/org-entry-done-or-cancelled-p ()
@@ -865,7 +1058,7 @@ Only active in `markdown-mode'; returns nil elsewhere."
 
   (defun my/org-gcal-todo-to-gcal-status (todo-state)
     (cond
-     ((member todo-state '("CANCELLED"))  "cancelled")
+     ((member todo-state '("DROPPED" "CANCELLED"))  "cancelled")
      ((member todo-state '("TODO" "NEXT" "WAITING" "HOLD" "DONE")) "confirmed")
      (t nil)))
 
@@ -1133,6 +1326,7 @@ modes first, so when our hook lands everything is settled."
 (use-package! elfeed
   :commands elfeed
   :config
+  (require 'subr-x)
   (setq elfeed-db-directory (expand-file-name "~/org/collections/.elfeed")
         elfeed-curl-max-connections 4)
   (setq-default elfeed-search-filter "@1-month-ago +unread")
@@ -1146,6 +1340,155 @@ modes first, so when our hook lands everything is settled."
       (setf elfeed-db nil)
       (elfeed-db-load)))
   (advice-add 'elfeed-db-save :before #'my/elfeed-db-sanitize-before-save)
+
+  (defvar my/elfeed-feed-history nil
+    "Minibuffer history for feed selection commands.")
+
+  (defun my/elfeed-current-entry ()
+    "Return the current Elfeed entry in search or show buffers."
+    (cond
+     ((derived-mode-p 'elfeed-show-mode) elfeed-show-entry)
+     ((derived-mode-p 'elfeed-search-mode) (elfeed-search-selected :ignore-region))
+     (t nil)))
+
+  (defun my/elfeed-feed-display-title (feed)
+    "Return a human-readable title for FEED."
+    (or (elfeed-meta feed :title)
+        (elfeed-feed-title feed)
+        (elfeed-feed-url feed)
+        "Unknown feed"))
+
+  (defun my/elfeed-url-origin (url)
+    "Return the scheme and host portion of URL, ending with a slash."
+    (when (and url (string-match "\\`\\(https?://[^/]+\\)" url))
+      (concat (match-string 1 url) "/")))
+
+  (defun my/elfeed-guess-homepage (feed-url)
+    "Best-effort homepage guess for FEED-URL."
+    (when feed-url
+      (let ((homepage (car (split-string feed-url "[?#]" t))))
+        (dolist (pattern '("/index\\.xml/?$"
+                           "/atom\\.xml/?$"
+                           "/rss\\.xml/?$"
+                           "/feed\\.xml/?$"
+                           "/feeds?/[^/]+\\(?:\\.xml\\|\\.atom\\|\\.rss\\)?/?$"
+                           "/\\(?:feed\\|rss\\|atom\\)/?$"))
+          (setq homepage (replace-regexp-in-string pattern "/" homepage t t)))
+        (unless (string-match-p "/$" homepage)
+          (setq homepage
+                (replace-regexp-in-string "/[^/]+\\(?:\\.xml\\|\\.rss\\|\\.atom\\)?$"
+                                          "/"
+                                          homepage
+                                          t
+                                          t)))
+        (replace-regexp-in-string "/+$" "/" homepage t t))))
+
+  (defun my/elfeed-entry-homepage (entry)
+    "Return a homepage URL for ENTRY."
+    (when-let* ((feed (elfeed-entry-feed entry))
+                (feed-url (elfeed-feed-url feed)))
+      (let* ((entry-url (elfeed-entry-link entry))
+             (feed-origin (my/elfeed-url-origin feed-url))
+             (entry-origin (my/elfeed-url-origin entry-url)))
+        (cond
+         ;; Prefer the article host when the feed comes from a proxy or bridge.
+         ((and entry-origin feed-origin (not (string= entry-origin feed-origin)))
+          entry-origin)
+         (t
+          (or (my/elfeed-guess-homepage feed-url)
+              entry-origin
+              feed-origin))))))
+
+  (defun my/elfeed-browse-homepage ()
+    "Open the homepage of the current entry's feed."
+    (interactive)
+    (if-let ((entry (my/elfeed-current-entry)))
+        (if-let ((homepage (my/elfeed-entry-homepage entry)))
+            (browse-url homepage)
+          (user-error "Could not infer a homepage for this feed"))
+      (user-error "No Elfeed entry at point")))
+
+  (defun my/elfeed-toggle-unread ()
+    "Toggle the `unread' tag on the current Elfeed entry or entries."
+    (interactive)
+    (cond
+     ((derived-mode-p 'elfeed-search-mode)
+      (elfeed-search-toggle-all 'unread))
+     ((derived-mode-p 'elfeed-show-mode)
+      (if (elfeed-tagged-p 'unread elfeed-show-entry)
+          (elfeed-show-untag 'unread)
+        (elfeed-show-tag 'unread)))
+     (t
+      (user-error "Not in an Elfeed buffer"))))
+
+  (defun my/elfeed-feed-candidates ()
+    "Return an alist of display string to feed URL for Elfeed feeds."
+    (let ((table (make-hash-table :test 'equal)))
+      (with-elfeed-db-visit (entry feed)
+        (let* ((url (elfeed-feed-url feed))
+               (title (my/elfeed-feed-display-title feed))
+               (current (or (gethash url table)
+                            (list :url url :title title :all 0 :unread 0)))
+               (all (1+ (plist-get current :all)))
+               (unread (if (elfeed-tagged-p 'unread entry)
+                           (1+ (plist-get current :unread))
+                         (plist-get current :unread))))
+          (puthash url
+                   (list :url url :title title :all all :unread unread)
+                   table)))
+      (sort
+       (let (candidates)
+         (maphash
+          (lambda (url data)
+            (push (cons (format "[%d/%d] %s\t%s"
+                                (plist-get data :unread)
+                                (plist-get data :all)
+                                (plist-get data :title)
+                                url)
+                        url)
+                  candidates))
+          table)
+         candidates)
+       (lambda (a b) (string-lessp (car a) (car b))))))
+
+  (defun my/elfeed-read-feed-url ()
+    "Prompt for a feed URL from the current Elfeed database."
+    (let* ((all-feeds "[All feeds]")
+           (candidates (my/elfeed-feed-candidates))
+           (choices (cons all-feeds (mapcar #'car candidates)))
+           (choice (if (require 'consult nil t)
+                       (consult--read
+                        choices
+                        :prompt "Feed: "
+                        :sort nil
+                        :require-match t
+                        :history 'my/elfeed-feed-history)
+                     (completing-read "Feed: " choices nil t nil 'my/elfeed-feed-history))))
+      (unless (equal choice all-feeds)
+        (cdr (assoc choice candidates)))))
+
+  (defun my/elfeed-replace-feed-filter (filter feed-url)
+    "Replace feed-specific clauses in FILTER with FEED-URL."
+    (let ((parts (cl-remove-if (lambda (part) (string-prefix-p "=" part))
+                               (split-string (string-trim (or filter "")) "[ \t\n]+" t))))
+      (string-join
+       (append parts
+               (when feed-url
+                 (list (concat "=" (regexp-quote feed-url)))))
+       " ")))
+
+  (defun my/elfeed-search-filter-by-feed ()
+    "Use `consult' or `completing-read' to filter Elfeed by feed."
+    (interactive)
+    (unless (derived-mode-p 'elfeed-search-mode)
+      (user-error "Feed filtering is only available in elfeed-search"))
+    (let* ((feed-url (my/elfeed-read-feed-url))
+           (new-filter (my/elfeed-replace-feed-filter elfeed-search-filter feed-url)))
+      (elfeed-search-set-filter new-filter)
+      (message (if feed-url
+                   "Filtered Elfeed to %s"
+                 "Cleared feed-specific filter")
+               (or feed-url "all feeds"))))
 
   ;; mpv integration
   (defun my/elfeed-play-with-mpv ()
@@ -1164,8 +1507,15 @@ modes first, so when our hook lands everything is settled."
               (elfeed-search-untag-all-unread)))
         (message "No link found."))))
 
-  (map! :map elfeed-search-mode-map "v" #'my/elfeed-play-with-mpv)
-  (map! :map elfeed-show-mode-map   "v" #'my/elfeed-play-with-mpv))
+  (map! :map elfeed-search-mode-map
+        :desc "Filter by feed"      "F" #'my/elfeed-search-filter-by-feed
+        :desc "Browse feed homepage" "B" #'my/elfeed-browse-homepage
+        :desc "Toggle unread"       "R" #'my/elfeed-toggle-unread
+        :desc "Play with mpv"       "v" #'my/elfeed-play-with-mpv)
+  (map! :map elfeed-show-mode-map
+        :desc "Browse feed homepage" "B" #'my/elfeed-browse-homepage
+        :desc "Toggle unread"       "R" #'my/elfeed-toggle-unread
+        :desc "Play with mpv"       "v" #'my/elfeed-play-with-mpv))
 
 (use-package! elfeed-org
   :after elfeed
@@ -1428,6 +1778,8 @@ front-matter if it does not yet exist."
         :desc "Missing links"            "m" #'denote-org-dblock-insert-missing-links
         :desc "Files"                    "f" #'denote-org-dblock-insert-files
         :desc "Files as headings"        "F" #'denote-org-dblock-insert-files-as-headings))
+      ;; Todo
+      :desc "Select TODO state" "t" #'my/org-todo-select
       ;; Rich paste
       :desc "Paste rich text" "V" #'my/org-paste-rich
       ;; Archive
