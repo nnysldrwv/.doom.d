@@ -33,6 +33,7 @@
        fold
        snippets
        word-wrap
+       multiple-cursors        
 
        :emacs
        dired
@@ -68,4 +69,5 @@
        (calendar +org-gcal)
        (rss +org)
        :config
+       literate
        (default +bindings +smartparens))

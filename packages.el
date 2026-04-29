@@ -1,4 +1,3 @@
-;; -*- no-byte-compile: t; -*-
 ;;; packages.el
 
 (package! cal-china-x)
