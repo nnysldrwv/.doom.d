@@ -103,6 +103,10 @@
 ;;     (advice-remove 'helpful-key #'my/windows-disable-ime-for-key-help-a)
 ;;     (advice-add 'helpful-key :around #'my/windows-disable-ime-for-key-help-a)))
 
+;; 把之前AI写的一些东西备注掉了，下面是自己加的
+;; (prefer-coding-system 'utf-8)
+;; (set-default-coding-systems 'utf-8)
+;; (set-file-name-coding-system 'utf-8)
 ;; ============================================================
 ;;  1. User info
 ;; ============================================================
@@ -158,7 +162,8 @@
 ;; ============================================================
 
 ;; (setq doom-theme 'modus-operandi)
-(setq doom-theme 'modus-operandi-tinted)
+;; (setq doom-theme 'modus-operandi-tinted)
+(setq doom-theme 'modus-operandi-tritanopia)
 
 ;; ============================================================
 ;;  4. Windows-specific performance tuning
@@ -853,52 +858,51 @@ Used as `org-download-file-format-function'."
 (add-hook 'org-agenda-finalize-hook #'my/org-agenda-align-tags-pixel)
 
 ;; org-download — 走 org-attach 体系
-;; (after! org
-  ;; (use-package! org-download
-(after! org-download
-  :commands (org-download-clipboard org-download-screenshot org-download-yank org-download-delete)
-  :config
-  (add-hook 'org-mode-hook 'org-download-enable)
-  (setq org-download-method 'directory
-        org-download-image-dir (expand-file-name "data/" org-directory)
-        org-download-heading-lvl nil
-        org-download-timestamp ""
-        org-download-image-org-width 800
-        org-download-annotate-function (lambda (_link) "")
-        org-download-screenshot-method (my/org-download-screenshot-command)
-        org-download-file-format-function #'my/org-download-denote-file-format)
+(after! org
+  (use-package! org-download
+    :commands (org-download-clipboard org-download-screenshot org-download-yank org-download-delete)
+    :config
+    (add-hook 'org-mode-hook 'org-download-enable)
+    (setq org-download-method 'directory
+          org-download-image-dir (expand-file-name "data/" org-directory)
+          org-download-heading-lvl nil
+          org-download-timestamp ""
+          org-download-image-org-width 800
+          org-download-annotate-function (lambda (_link) "")
+          org-download-screenshot-method (my/org-download-screenshot-command)
+          org-download-file-format-function #'my/org-download-denote-file-format)
 
-  ;; Fix: org-download-dnd-fallback for Emacs 30+
-  (when (fboundp 'dnd-handle-multiple-urls)
-    (defun org-download-dnd-fallback (uri action)
-      (let ((dnd-protocol-alist
-             (rassq-delete-all
-              'org-download-dnd
-              (copy-alist dnd-protocol-alist))))
-        (dnd-handle-multiple-urls
-         (selected-window) (list uri) action))))
+    ;; Fix: org-download-dnd-fallback for Emacs 30+
+    (when (fboundp 'dnd-handle-multiple-urls)
+      (defun org-download-dnd-fallback (uri action)
+        (let ((dnd-protocol-alist
+               (rassq-delete-all
+                'org-download-dnd
+                (copy-alist dnd-protocol-alist))))
+          (dnd-handle-multiple-urls
+           (selected-window) (list uri) action))))
 
-  ;; Fix: Full percent-decoding for non-ASCII filenames
-  (defun org-download--fullname (link &optional ext)
-    "Return the file name where LINK will be saved to.
+    ;; Fix: Full percent-decoding for non-ASCII filenames
+    (defun org-download--fullname (link &optional ext)
+      "Return the file name where LINK will be saved to.
 EXT can hold the file extension, in case LINK doesn't provide it.
 [patched] Full percent-decoding for non-ASCII filenames."
-    (let ((filename
-           (decode-coding-string
-            (url-unhex-string
-             (file-name-nondirectory
-              (car (url-path-and-query
-                    (url-generic-parse-url link)))))
-            'utf-8))
-          (dir (org-download--dir)))
-      (when (string-match ".*?\\.\\(?:png\\|jpg\\)\\(.*\\)$" filename)
-        (setq filename (replace-match "" nil nil filename 1)))
-      (when ext
-        (setq filename (concat (file-name-sans-extension filename) "." ext)))
-      (abbreviate-file-name
-       (expand-file-name
-        (funcall org-download-file-format-function filename)
-        dir)))))
+      (let ((filename
+             (decode-coding-string
+              (url-unhex-string
+               (file-name-nondirectory
+                (car (url-path-and-query
+                      (url-generic-parse-url link)))))
+              'utf-8))
+            (dir (org-download--dir)))
+        (when (string-match ".*?\\.\\(?:png\\|jpg\\)\\(.*\\)$" filename)
+          (setq filename (replace-match "" nil nil filename 1)))
+        (when ext
+          (setq filename (concat (file-name-sans-extension filename) "." ext)))
+        (abbreviate-file-name
+         (expand-file-name
+          (funcall org-download-file-format-function filename)
+          dir))))))
 
 ;; 任意文件拖入 org buffer → 复制到 ~/org/data/ 并用 denote 命名 +
 ;; 在光标处插入 file: 链接。对 epub / pdf / zip 等非图片也生效。
@@ -1192,7 +1196,12 @@ modes first, so when our hook lands everything is settled."
           (font-lock-flush)))))
 
   ;; append=t → run after font-lock-global-mode and diredfl-global-mode.
-  (add-hook 'after-change-major-mode-hook #'my/denote-dired-mode-maybe t))
+  (add-hook 'after-change-major-mode-hook #'my/denote-dired-mode-maybe t)
+
+  ;; Strip newlines from the complete filename — catches \n wherever it enters
+  ;; the pipeline (title prompt, slug, or upstream callers).
+  (advice-add 'denote-format-file-name :filter-return
+              (lambda (filename) (replace-regexp-in-string "[\n\r]" "" filename))))
 
 ;; Disable dirvish globally — its pre-redisplay overlay attrs cover denote's
 ;; font-lock-based filename highlighting, and user prefers plain dired anyway.
@@ -1513,6 +1522,15 @@ modes first, so when our hook lands everything is settled."
 
 (use-package! denote-journal
   :after denote
+  :hook (calendar-mode . denote-journal-calendar-mode)
+  :init
+  (with-eval-after-load 'calendar
+    (define-key calendar-mode-map (kbd "f") #'denote-journal-calendar-find-file)
+    (define-key calendar-mode-map (kbd "n") #'denote-journal-calendar-new-or-existing)
+    (with-eval-after-load 'evil
+      (evil-define-key '(normal motion emacs) calendar-mode-map
+        (kbd "F") #'denote-journal-calendar-find-file
+        (kbd "N") #'denote-journal-calendar-new-or-existing)))
   :config
   (setq denote-journal-directory (expand-file-name "journal/" org-directory)
         denote-journal-keyword "journal"
@@ -1904,5 +1922,38 @@ front-matter if it does not yet exist."
           (lisp-interaction-mode)))
       (switch-to-buffer buf)))
 
-  ;; (map! :leader
-  ;;       :desc "Lisp scratch" "X" #'my/open-lisp-scratch)
+;; ============================================================
+;;  22. Agent-shell — Claude Code in Emacs
+;; ============================================================
+
+(require 'acp)
+(require 'agent-shell)
+
+(setq agent-shell-preferred-agent-config
+      (agent-shell-anthropic-make-claude-code-config))
+
+(setq agent-shell-anthropic-authentication
+      (agent-shell-anthropic-make-authentication
+       :api-key (lambda () my/athenai-api-key)))
+
+(setq agent-shell-anthropic-claude-environment
+      (agent-shell-make-environment-variables
+       "ANTHROPIC_BASE_URL" "https://athenai.mihoyo.com/v1"
+       "ANTHROPIC_MODEL" "claude-sonnet-4-6"
+       "ANTHROPIC_SMALL_FAST_MODEL" "claude-sonnet-4-6"))
+
+;; Keyboard: SPC o s → start Claude Code agent shell
+;; Keyboard: SPC o c → start Codex agent shell
+
+(setq agent-shell-openai-authentication
+      (agent-shell-openai-make-authentication
+       :api-key (lambda () my/athenai-api-key)))
+
+(setq agent-shell-openai-codex-environment
+      (agent-shell-make-environment-variables
+       "OPENAI_BASE_URL" "https://athenai.mihoyo.com/v1"))
+
+(map! :leader
+      (:prefix ("o" . "open")
+       :desc "Claude Code" "s" #'agent-shell-anthropic-start-claude-code
+       :desc "Codex"       "c" #'agent-shell-openai-start-codex))

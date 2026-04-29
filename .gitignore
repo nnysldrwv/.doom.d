@@ -114,3 +114,4 @@ Temporary Items
 
 # VOrg workspace index database
 .vorg.db
+/.agent-shell/

@@ -11,3 +11,6 @@
 (package! denote-markdown)
 (package! consult-notes
   :recipe (:host github :repo "mclear-tools/consult-notes"))
+(package! shell-maker)
+(package! acp)
+(package! agent-shell)
