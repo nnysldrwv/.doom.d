@@ -203,15 +203,13 @@
         org-habit-show-habits-only-for-today nil)
 ;; Todo keywords
 (setq org-todo-keywords
-      '((sequence "TODO(t)" "NEXT(n)" "WAITING(w!)" "HOLD(h@/!)" "|" "DONE(d!)" "DROPPED(x@)" "CANCELLED(c@)")))
+      '((sequence "TODO(t)" "NEXT(n)" "PROG(p!)" "|" "DONE(d!)" "FAIL(f@)")))
 (setq org-todo-keyword-faces
-      '(("TODO"      :foreground "#2952a3" :weight bold)
-        ("NEXT"      :foreground "#c0392b" :weight bold)
-        ("WAITING"   :foreground "#8b6914" :weight bold)
-        ("HOLD"      :foreground "#6c6c6c" :weight bold)
-        ("DONE"      :foreground "#2e7d32" :weight bold)
-        ("DROPPED"   :foreground "#8d6e63" :weight bold)
-        ("CANCELLED" :foreground "#9e9e9e" :weight bold)))
+      '(("TODO" :foreground "#2952a3" :weight bold)
+        ("NEXT" :foreground "#e67e22" :weight bold)
+        ("PROG" :foreground "#c0392b" :weight bold)
+        ("DONE" :foreground "#2e7d32" :weight bold)
+        ("FAIL" :foreground "#9e9e9e" :weight bold)))
 
 (setq org-log-done 'time
       org-log-into-drawer t)
@@ -225,6 +223,7 @@
 ;; Inline images
 (setq image-use-external-converter t
       org-image-actual-width '(600))
+(setq org-modern-star nil)
 ;; ---- org-attach: 统一附件管理 ----
 (require 'org-attach)
 (setq org-attach-id-dir (expand-file-name "data/" org-directory)
@@ -1234,6 +1233,8 @@ modes first, so when our hook lands everything is settled."
     (or (re-search-backward "^\\* My Notes" nil t) (goto-char (point-max)))
     (forward-line 1)))
 (after! elfeed
+  :commands elfeed
+  :config
   (require 'subr-x)
   (setq elfeed-db-directory (expand-file-name "~/org/collections/.elfeed")
         elfeed-curl-max-connections 4)
