@@ -821,17 +821,23 @@ Used as `org-download-file-format-function'."
           (dnd-handle-multiple-urls
            (selected-window) (list uri) action))))
 
-    ;; Fix: Full percent-decoding for non-ASCII filenames
+    ;; Fix: Full percent-decoding for non-ASCII filenames.
+    ;; Also fixes Windows local paths: url-generic-parse-url treats "C:" as a
+    ;; URL scheme, so url-path-and-query can return nil for C:/... paths.
+    ;; Use file-name-nondirectory directly for absolute local paths.
     (defun org-download--fullname (link &optional ext)
       "Return the file name where LINK will be saved to.
 EXT can hold the file extension, in case LINK doesn't provide it.
-[patched] Full percent-decoding for non-ASCII filenames."
+[patched] Robust Windows path handling + full percent-decoding."
       (let ((filename
              (decode-coding-string
               (url-unhex-string
                (file-name-nondirectory
-                (car (url-path-and-query
-                      (url-generic-parse-url link)))))
+                (if (file-name-absolute-p link)
+                    link
+                  (or (car (url-path-and-query
+                            (url-generic-parse-url link)))
+                      link))))
               'utf-8))
             (dir (org-download--dir)))
         (when (string-match ".*?\\.\\(?:png\\|jpg\\)\\(.*\\)$" filename)
@@ -841,7 +847,16 @@ EXT can hold the file extension, in case LINK doesn't provide it.
         (abbreviate-file-name
          (expand-file-name
           (funcall org-download-file-format-function filename)
-          dir))))))
+          dir))))
+
+    ;; Fix: org-download-clipboard on Windows ignores user's screenshot-method
+    ;; and hard-requires ImageMagick. Since our PowerShell method already reads
+    ;; from clipboard, just bypass the override and call org-download-screenshot.
+    (when (featurep :system 'windows)
+      (defadvice! my/org-download-clipboard-use-powershell (&optional basename)
+        :override #'org-download-clipboard
+        (org-id-get-create)
+        (org-download-screenshot basename)))))
 ;; 任意文件拖入 org buffer → 复制到 ~/org/data/ 并用 denote 命名 +
 ;; 在光标处插入 file: 链接。对 epub / pdf / zip 等非图片也生效。
 (defun my/org-dnd-copy-to-data (uri _action)
@@ -1232,7 +1247,7 @@ modes first, so when our hook lands everything is settled."
     (goto-char (point-max))
     (or (re-search-backward "^\\* My Notes" nil t) (goto-char (point-max)))
     (forward-line 1)))
-(after! elfeed
+(use-package! elfeed
   :commands elfeed
   :config
   (require 'subr-x)
@@ -1458,6 +1473,34 @@ front-matter if it does not yet exist."
                  (current-time))))
     (denote-journal-path-to-new-or-existing-entry
      (format-time-string "%Y-%m-%d" time))))
+(defvar my/weather-location "上海"
+  "wttr.in 查询地点，中英文均可。")
+
+(defun my/get-weather ()
+  "从 wttr.in 获取天气，返回紧凑单行字符串，格式：上海: ⛅️  +22°C"
+  (let ((coding-system-for-read 'utf-8))
+    (string-trim
+     (shell-command-to-string
+      (format "curl -s --max-time 5 \"https://wttr.in/%s?format=3\""
+              (url-hexify-string my/weather-location))))))
+
+(defun my/insert-weather ()
+  "在光标处插入当前天气（M-x my/insert-weather）。"
+  (interactive)
+  (insert (my/get-weather)))
+
+(defun my/denote-journal-auto-weather ()
+  "新建 journal 文件时自动在末尾追加天气。"
+  (when (and (buffer-file-name)
+             (string-match-p "__journal" (buffer-file-name)))
+    (save-excursion
+      (goto-char (point-max))
+      (unless (bolp) (insert "\n"))
+      (insert "\n** 天气\n")
+      (insert (my/get-weather))
+      (insert "\n"))))
+
+(add-hook 'denote-after-new-note-hook #'my/denote-journal-auto-weather)
 (use-package! cal-china-x
   :after calendar
   :config
