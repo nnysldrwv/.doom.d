@@ -142,32 +142,28 @@ Using Maple Mono NF CN for monospace (CJK + Nerd Font all-in-one) and LXGW WenKa
       doom-variable-pitch-font (font-spec :family "LXGW WenKai Screen" :size 19)
       doom-big-font (font-spec :family "Maple Mono NF CN" :size 24))
 
-;; ;; CJK + emoji fontset (after GUI frame is ready)
-;; (defun my/setup-cjk-fonts (&optional _frame)
-;;   "Configure CJK and emoji fonts for Doom."
-;;   (when (display-graphic-p)
-;;     (let ((cjk-font (my/first-available-font
-;;                      '("等距更纱黑体 SC" "Sarasa Mono SC"
-;;                        "霞鹜文楷等宽" "LXGW WenKai Mono"
-;;                        "Microsoft YaHei UI" "Microsoft YaHei"
-;;                        "Noto Sans SC"))))
-;;       (when cjk-font
-;;         (dolist (charset '(kana han cjk-misc bopomofo))
-;;           (set-fontset-font t charset (font-spec :family cjk-font) nil 'prepend))
-;;         (setq face-font-rescale-alist
-;;               (list (cons (regexp-quote cjk-font) 1.0)))))
+;; CJK font override — must run AFTER unicode-fonts-setup (depth -90)
+;; Change `my/cjk-mono-font' to pick a different CJK font
+(defvar my/cjk-mono-font "Maple Mono NF CN"
+  "CJK font for monospace contexts (code, fixed-pitch).")
 
-;;     (let ((emoji-font (my/first-available-font
-;;                        '("Segoe UI Emoji" "Apple Color Emoji" "Noto Color Emoji")))
-;;           (symbol-font (my/first-available-font
-;;                         '("Segoe UI Symbol" "Apple Symbols" "Symbola"))))
-;;       (when emoji-font
-;;         (set-fontset-font t 'emoji (font-spec :family emoji-font) nil 'prepend))
-;;       (when symbol-font
-;;         (set-fontset-font t 'symbol (font-spec :family symbol-font) nil 'prepend)))))
+(defun my/setup-cjk-fonts (&optional _frame)
+  "Force CJK characters to use a specific font."
+  (when (display-graphic-p)
+    (let ((font-family (or my/cjk-mono-font
+                           (catch 'found
+                             (dolist (f '("Maple Mono NF CN" "Sarasa Mono SC"
+                                          "霞鹜文楷等宽" "LXGW WenKai Mono"
+                                          "Noto Sans CJK SC"))
+                               (when (find-font (font-spec :family f))
+                                 (throw 'found f)))
+                             nil))))
+      (when font-family
+        (dolist (charset '(kana han cjk-misc bopomofo))
+          (set-fontset-font t charset (font-spec :family font-family) nil 'prepend))))))
 
-;; (add-hook 'after-setting-font-hook #'my/setup-cjk-fonts)
-;; (add-hook 'doom-init-ui-hook #'my/setup-cjk-fonts)
+;; Depth 0 = runs after unicode-fonts (depth -90), so prepend wins
+(add-hook 'after-setting-font-hook #'my/setup-cjk-fonts 0)
 #+end_src
 
 * 3. Theme
@@ -252,11 +248,12 @@ VC, process creation, file I/O, rendering, and large file handling.
 #+begin_src emacs-lisp
   ;; Todo keywords
   (setq org-todo-keywords
-        '((sequence "TODO(t)" "NEXT(n)" "PROG(p!)" "|" "DONE(d!)" "FAIL(f@)")))
+        '((sequence "TODO(t)" "NEXT(n)" "PROG(p!)" "WAIT(w@/!)" "|" "DONE(d!)" "FAIL(f@)")))
   (setq org-todo-keyword-faces
         '(("TODO" :foreground "#2952a3" :weight bold)
           ("NEXT" :foreground "#e67e22" :weight bold)
           ("PROG" :foreground "#c0392b" :weight bold)
+          ("WAIT" :foreground "#8b6914" :weight bold)
           ("DONE" :foreground "#2e7d32" :weight bold)
           ("FAIL" :foreground "#9e9e9e" :weight bold)))
 
@@ -279,12 +276,29 @@ VC, process creation, file I/O, rendering, and large file handling.
 #+end_src
 
 ** Org-Modern / Org-Pretty
-org-modern 和 org-indent-mode 同时开着会冲突，产生缩进错位。
-最快的修法，在 ~/.doom.d/config.el 加：
-(setq org-modern-star nil)
-这样禁掉 org-modern 的星号替换，让 org-indent-mode 单独处理缩进，对齐就正常了。
+org-modern 的 heading 美化（star/keyword/priority/todo/tag）会和 org-indent-mode 的
+line-prefix 冲突，Windows CJK 字体下同级标题对不齐。禁用这些 heading 相关功能，
+改由 org-superstar 处理 bullet，org-modern 只负责 block/table 美化。
 #+begin_src emacs-lisp
-(setq org-modern-star nil)
+;; org-modern headings 和 org-indent-mode 都会改 heading 可见属性，
+;; Windows CJK 字体下冲突导致同级标题对不齐。关掉 heading 美化，让
+;; org-superstar 专门管 bullet，org-indent 单独管缩进。
+(setq org-modern-star nil
+      org-modern-hide-stars nil
+      org-modern-keyword nil
+      org-modern-priority nil
+      org-modern-todo nil
+      org-modern-tag nil)
+;; org-superstar: 只替换 bullet 字符，不动字体度量，对齐不会歪
+(setq org-superstar-headline-bullets-list '(?◉ ?○ ?⚬ ?◈ ?◇)
+      org-superstar-cycle-headline-bullets nil
+      org-superstar-remove-leading-stars nil
+      org-superstar-todo-bullet-alist
+      '(("TODO" . ?☐) ("NEXT" . ?▶) ("PROG" . ?◉) ("WAIT" . ?⏳)
+        ("DONE" . ?☑) ("FAIL" . ?✗))
+      org-superstar-item-bullet-alist
+      '((?* . ?•) (?+ . ?➤) (?- . ?–)))
+(add-hook 'org-mode-hook #'org-superstar-mode)
 #+end_src
 
 ** Org-attach

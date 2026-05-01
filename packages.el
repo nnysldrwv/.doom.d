@@ -1,6 +1,7 @@
 ;;; packages.el
 
 (package! cal-china-x)
+(package! org-superstar)
 (package! nov)
 (package! powershell)
 (package! sis)
