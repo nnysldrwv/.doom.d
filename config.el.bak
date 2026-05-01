@@ -361,42 +361,42 @@
          "* TODO [[%^{URL}][%^{Title}]]\n:PROPERTIES:\n:CREATED: %U\n:END:\n%?" :empty-lines 1)
         ("m" "Media")
         ("mm" "电影 · 想看" entry
-         (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "电影" "想看")
+         (file+olp "~/org/collections/media.org" "影视动漫" "电影" "想看")
          "**** TODO %^{片名}\n:PROPERTIES:\n:添加时间: %U\n:END:\n%?"
          :empty-lines 1 :jump-to-captured t)
         ("mM" "电影 · 看完" entry
-         (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "电影" "看完")
+         (file+olp "~/org/collections/media.org" "影视动漫" "电影" "看完")
          "**** DONE %^{片名}\n:PROPERTIES:\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
          :empty-lines 1 :jump-to-captured t)
         ("mt" "电视剧 · 想看" entry
-         (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "电视剧" "想看")
+         (file+olp "~/org/collections/media.org" "影视动漫" "电视剧" "想看")
          "**** TODO %^{片名}\n:PROPERTIES:\n:添加时间: %U\n:END:\n%?"
          :empty-lines 1 :jump-to-captured t)
         ("mT" "电视剧 · 看完" entry
-         (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "电视剧" "看完")
+         (file+olp "~/org/collections/media.org" "影视动漫" "电视剧" "看完")
          "**** DONE %^{片名}\n:PROPERTIES:\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
          :empty-lines 1 :jump-to-captured t)
         ("ma" "动漫 · 想看" entry
-         (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "动漫" "想看")
+         (file+olp "~/org/collections/media.org" "影视动漫" "动漫" "想看")
          "**** TODO %^{片名}\n:PROPERTIES:\n:添加时间: %U\n:END:\n%?"
          :empty-lines 1 :jump-to-captured t)
         ("mA" "动漫 · 看完" entry
-         (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "动漫" "看完")
+         (file+olp "~/org/collections/media.org" "影视动漫" "动漫" "看完")
          "**** DONE %^{片名}\n:PROPERTIES:\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
          :empty-lines 1 :jump-to-captured t)
         ("b" "Books")
         ("bb" "书 · 待阅读" entry
-         (file+olp "~/org/notes/20260101T000010--reading-list__read_index.org" "待阅读")
+         (file+olp "~/org/collections/books.org" "待阅读")
          "*** TODO %^{书名}\n:PROPERTIES:\n:作者: %^{作者}\n:类型: %^{类型|小说|非虚构|理财|网文|漫画|其他}\n:来源: %^{来源|微信读书|豆瓣|Z-Library|实体书|其他}\n:添加时间: %U\n:END:\n%?"
          :empty-lines 1 :jump-to-captured t)
         ("bB" "书 · 阅读中" entry
-         (file+olp "~/org/notes/20260101T000010--reading-list__read_index.org" "阅读中")
+         (file+olp "~/org/collections/books.org" "阅读中")
          "*** READING %^{书名}\n:PROPERTIES:\n:作者: %^{作者}\n:类型: %^{类型|小说|非虚构|理财|网文|漫画|其他}\n:来源: %^{来源|微信读书|豆瓣|Z-Library|实体书|其他}\n:添加时间: %U\n:END:\n%?"
          :empty-lines 1 :jump-to-captured t)
         ("w" "w · 精读笔记 [ref/]" plain (function my/capture-web-article-target)
          "%?"
          :empty-lines 1 :jump-to-captured t)
-        ("h" "Habit" entry (file "~/org/notes/20260101T000010--habits-hub__habit_index.org")
+        ("h" "Habit" entry (file "~/org/areas/habits.org")
          (function my/org-capture-habit)
          :empty-lines 1)
         ("pl" "Protocol: Read later" entry (file "~/org/inbox.org")
@@ -419,8 +419,11 @@
 
 (setq org-refile-targets
       '(("~/org/inbox.org" :maxlevel . 1)
-        ("~/org/append-note.org" :maxlevel . 1)
-        (my/org-notes-files :maxlevel . 2)))
+        (my/org-project-files :maxlevel . 2)
+        (my/org-area-files :maxlevel . 2)
+        ("~/org/collections/books.org" :maxlevel . 2)
+        (my/org-reference-files :maxlevel . 1)
+        (my/org-notes-files :maxlevel . 1)))
 (setq org-refile-use-outline-path 'file
       org-outline-path-complete-in-steps nil
       org-refile-allow-creating-parent-nodes 'confirm
@@ -538,16 +541,16 @@
 (defun my/media-org-file-p ()
   "Return non-nil when visiting the media library file."
   (and (buffer-file-name)
-       (file-equal-p (expand-file-name "~/org/notes/20260101T000010--media-collection__index.org")
+       (file-equal-p (expand-file-name "~/org/collections/media.org")
                      (expand-file-name (buffer-file-name)))))
 
 (defun my/media-org-target-section-for-state (state)
   "Map TODO STATE to a media library section name."
   (pcase state
     ((or "TODO" "NEXT") "想看")
-    ("PROG" "在看")
+    ("DOING" "在看")
     ("DONE" "看完")
-    ("FAIL" "已放弃")
+    ((or "DROPPED" "CANCELLED") "已放弃")
     (_ nil)))
 
 (defun my/media-org-current-entry-context ()
@@ -601,7 +604,7 @@
 (defun my/books-org-file-p ()
   "Return non-nil when visiting the books collection file."
   (and (buffer-file-name)
-       (file-equal-p (expand-file-name "~/org/notes/20260101T000010--reading-list__read_index.org")
+       (file-equal-p (expand-file-name "~/org/collections/books.org")
                      (expand-file-name (buffer-file-name)))))
 
 (defun my/books-org-target-section-for-state (state)
@@ -825,12 +828,7 @@ Used as `org-download-file-format-function'."
           org-download-image-org-width 800
           org-download-annotate-function (lambda (_link) "")
           org-download-screenshot-method (my/org-download-screenshot-command)
-          org-download-file-format-function #'my/org-download-denote-file-format
-          org-download-link-format-function
-          (lambda (filename)
-            (format "[[file:%s]]\n"
-                    (org-link-escape
-                     (file-relative-name filename default-directory)))))
+          org-download-file-format-function #'my/org-download-denote-file-format)
 
     ;; Fix: org-download-dnd-fallback for Emacs 30+
     (when (fboundp 'dnd-handle-multiple-urls)
@@ -1127,7 +1125,7 @@ Only active in `markdown-mode'; returns nil elsewhere."
 
         ;; 形态标记（2，用于非 denote 的特殊文件）
         "journal"      ; 日记（journal/ 下专用）
-        "document")    ; 附件/扫描件/材料（data/ 下专用）
+        "document"))   ; 附件/扫描件/材料（data/ 下专用）
   
         denote-infer-keywords nil ;防止手滑加新keywords 
         denote-sort-keywords t
@@ -1140,6 +1138,7 @@ Only active in `markdown-mode'; returns nil elsewhere."
         (rx (or (seq bos ".")
                 (seq bos (or "data" "investment" "templates" "tmp") eos)))
         denote-rename-confirmations nil
+        denote-backlinks-show-context t
         denote-dired-directories (list denote-directory)
         denote-dired-directories-include-subdirectories t)
 ;; Windows-safe replacement for `denote-dired-mode-in-directories' — the
@@ -1256,15 +1255,14 @@ modes first, so when our hook lands everything is settled."
                         (when (re-search-forward "<title>\\([^<]*\\)</title>" nil t)
                           (string-trim (match-string 1)))))
                     (read-string "Title: ")))
-         (id (format-time-string "%Y%m%dT%H%M%S"))
          (slug (replace-regexp-in-string "[^a-zA-Z0-9一-鿿]+" "-"
                                          (downcase (string-trim title)) t t))
          (slug (replace-regexp-in-string "^-\\|-$" "" slug))
-         (file (expand-file-name (format "notes/%s--%s__read.org" id slug) org-directory)))
+         (file (expand-file-name (concat "references/" slug ".org") org-directory)))
     (set-buffer (org-capture-target-buffer file))
     (when (= (buffer-size) 0)
-      (insert (format "#+title: %s\n#+date: [%s]\n#+filetags: :read:\n#+identifier: %s\n\n* Source\n%s\n\n* Summary\n\n* My Notes\n"
-                      title (format-time-string "%Y-%m-%d %a") id url)))
+      (insert (format "#+title: %s\n#+filetags: :ref:\n#+created: %s\n\n* Source\n%s\n\n* Summary\n\n* My Notes\n"
+                      title (format-time-string "[%Y-%m-%d %a]") url)))
     (goto-char (point-max))
     (or (re-search-backward "^\\* My Notes" nil t) (goto-char (point-max)))
     (forward-line 1)))
@@ -1281,12 +1279,11 @@ modes first, so when our hook lands everything is settled."
                  (replace-regexp-in-string
                   "[^a-zA-Z0-9一-鿿]+" "-"
                   (downcase (string-trim title)) t t)))
-         (id    (format-time-string "%Y%m%dT%H%M%S"))
-         (file  (expand-file-name (format "notes/%s--%s__read.org" id slug) org-directory)))
+         (file  (expand-file-name (concat "references/" slug ".org") org-directory)))
     (set-buffer (org-capture-target-buffer file))
     (when (= (buffer-size) 0)
-      (insert (format "#+title: %s\n#+date: [%s]\n#+filetags: :read:\n#+identifier: %s\n\n* Source\n%s\n\n* Summary\n\n* My Notes\n"
-                      title (format-time-string "%Y-%m-%d %a") id url)))
+      (insert (format "#+title: %s\n#+filetags: :ref:\n#+created: %s\n\n* Source\n%s\n\n* Summary\n\n* My Notes\n"
+                      title (format-time-string "[%Y-%m-%d %a]") url)))
     (goto-char (point-max))
     (or (re-search-backward "^\\* My Notes" nil t) (goto-char (point-max)))
     (forward-line 1)))
@@ -1294,7 +1291,7 @@ modes first, so when our hook lands everything is settled."
   :commands elfeed
   :config
   (require 'subr-x)
-  (setq elfeed-db-directory (expand-file-name "~/org/.elfeed")
+  (setq elfeed-db-directory (expand-file-name "~/org/collections/.elfeed")
         elfeed-curl-max-connections 4)
   (setq-default elfeed-search-filter "@1-month-ago +unread")
   (add-hook 'elfeed-search-mode-hook #'elfeed-update)
@@ -1487,7 +1484,7 @@ modes first, so when our hook lands everything is settled."
   :after elfeed
   :config
   (elfeed-org)
-  (setq rmh-elfeed-org-files (list (expand-file-name "~/org/notes/20260101T000010--elfeed__emacs_index.org"))))
+  (setq rmh-elfeed-org-files (list (expand-file-name "~/org/collections/elfeed.org"))))
 (use-package! denote-journal
   :after denote
   :hook (calendar-mode . denote-journal-calendar-mode)
@@ -1615,14 +1612,14 @@ front-matter if it does not yet exist."
 (after! org-noter
   :commands org-noter
   :config
-  (setq org-noter-notes-search-path '("~/org/notes/")
+  (setq org-noter-notes-search-path '("~/org/references/")
         org-noter-default-notes-file-names '("notes.org")
         org-noter-auto-save-last-location t
         org-noter-notes-window-location 'horizontal-split
         org-noter-highlight-selected-text t)
 
   (defun my/org-noter-create-session-in-references (&optional arg document-file-name)
-    "Create org-noter session, always placing notes in ~/org/notes/."
+    "Create org-noter session, always placing notes in ~/org/references/."
     (let* ((document-file-name (or (run-hook-with-args-until-success
                                     'org-noter-get-buffer-file-name-hook major-mode)
                                    document-file-name))
@@ -1630,7 +1627,7 @@ front-matter if it does not yet exist."
                               (error "This buffer does not seem to be visiting any file")))
            (document-name (file-name-nondirectory document-path))
            (document-base (file-name-base document-name))
-           (notes-dir (expand-file-name "~/org/notes/"))
+           (notes-dir (expand-file-name "~/org/references/"))
            (notes-file (expand-file-name (concat document-base ".org") notes-dir)))
       (make-directory notes-dir t)
       (unless (file-exists-p notes-file)
