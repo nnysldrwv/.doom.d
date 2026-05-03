@@ -228,25 +228,25 @@
 ;; Inline images
 (setq image-use-external-converter t
       org-image-actual-width '(600))
-;; org-modern headings 和 org-indent-mode 都会改 heading 可见属性，
-;; Windows CJK 字体下冲突导致同级标题对不齐。关掉 heading 美化，让
-;; org-superstar 专门管 bullet，org-indent 单独管缩进。
-(setq org-modern-star nil
-      org-modern-hide-stars nil
-      org-modern-keyword nil
-      org-modern-priority nil
-      org-modern-todo nil
-      org-modern-tag nil)
-;; org-superstar: 只替换 bullet 字符，不动字体度量，对齐不会歪
-(setq org-superstar-headline-bullets-list '(?◉ ?○ ?⚬ ?◈ ?◇)
-      org-superstar-cycle-headline-bullets nil
-      org-superstar-remove-leading-stars nil
-      org-superstar-todo-bullet-alist
-      '(("TODO" . ?☐) ("NEXT" . ?▶) ("PROG" . ?◉) ("WAIT" . ?⏳)
-        ("DONE" . ?☑) ("FAIL" . ?✗))
-      org-superstar-item-bullet-alist
-      '((?* . ?•) (?+ . ?➤) (?- . ?–)))
-(add-hook 'org-mode-hook #'org-superstar-mode)
+;; ;; org-modern headings 和 org-indent-mode 都会改 heading 可见属性，
+;; ;; Windows CJK 字体下冲突导致同级标题对不齐。关掉 heading 美化，让
+;; ;; org-superstar 专门管 bullet，org-indent 单独管缩进。
+;; (setq org-modern-star nil
+;;       org-modern-hide-stars nil
+;;       org-modern-keyword nil
+;;       org-modern-priority nil
+;;       org-modern-todo nil
+;;       org-modern-tag nil)
+;; ;; org-superstar: 只替换 bullet 字符，不动字体度量，对齐不会歪
+;; (setq org-superstar-headline-bullets-list '(?◉ ?○ ?⚬ ?◈ ?◇)
+;;       org-superstar-cycle-headline-bullets nil
+;;       org-superstar-remove-leading-stars nil
+;;       org-superstar-todo-bullet-alist
+;;       '(("TODO" . ?☐) ("NEXT" . ?▶) ("PROG" . ?◉) ("WAIT" . ?⏳)
+;;         ("DONE" . ?☑) ("FAIL" . ?✗))
+;;       org-superstar-item-bullet-alist
+;;       '((?* . ?•) (?+ . ?➤) (?- . ?–)))
+;; (add-hook 'org-mode-hook #'org-superstar-mode)
 ;; ---- org-attach: 统一附件管理 ----
 (require 'org-attach)
 (setq org-attach-id-dir (expand-file-name "data/" org-directory)

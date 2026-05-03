@@ -10,7 +10,6 @@
        (company +childframe)
        (vertico +icons)
 
-
        :ui
        doom
        doom-dashboard
@@ -58,7 +57,7 @@
        emacs-lisp
        javascript
        markdown
-       (org +dragndrop +present +noter +pandoc +pretty)
+       (org +dragndrop +present +noter +pandoc)
        (python +lsp)
        sh
        web

@@ -1,7 +1,7 @@
-;;; packages.el
-
+;; -*- no-byte-compile: t; -*-
+;;; $DOOMDIR/packages.el
 (package! cal-china-x)
-(package! org-superstar)
+;; (package! org-superstar)
 (package! nov)
 (package! powershell)
 (package! sis)
@@ -14,3 +14,4 @@
 (package! shell-maker)
 (package! acp)
 (package! agent-shell)
+(package! gcmh)
