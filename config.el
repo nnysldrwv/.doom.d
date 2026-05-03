@@ -1,4 +1,25 @@
 ;;; config.el -*- lexical-binding: t; -*-
+(use-package! gcmh
+  :init
+  (setq gcmh-idle-delay 5
+        gcmh-high-cons-threshold (* 256 1024 1024))  ; 256MB during idle
+  :config
+  (gcmh-mode 1))
+
+(setq gc-cons-threshold 200000000) ; previous 33554432
+;; credentials
+(setq user-full-name "Sean Yuan"
+      user-mail-address "yuanxiang424@gmail.com")
+
+;; autosave and backup
+(setq auto-save-default t
+      make-backup-files t)
+
+;; kill emacs without confiming
+(setq confirm-kill-emacs nil)
+(map! :map minibuffer-local-map
+      "C-k" #'delete-minibuffer-contents
+      "C-p" #'yank)
 ;; (prefer-coding-system 'utf-8-unix)
 ;; (set-default-coding-systems 'utf-8-unix)
 ;; (setq locale-coding-system 'utf-8-unix)
@@ -97,21 +118,6 @@
 ;;   (with-eval-after-load 'helpful
 ;;     (advice-remove 'helpful-key #'my/windows-disable-ime-for-key-help-a)
 ;;     (advice-add 'helpful-key :around #'my/windows-disable-ime-for-key-help-a)))
-
-;; 把之前AI写的一些东西备注掉了，下面是自己加的
-;; (prefer-coding-system 'utf-8)
-;; (set-default-coding-systems 'utf-8)
-;; (set-file-name-coding-system 'utf-8)
-;; credentials
-(setq user-full-name "Sean Yuan"
-      user-mail-address "yuanxiang424@gmail.com")
-
-;; autosave and backup
-(setq auto-save-default t
-      make-backup-files t)
-
-;; kill emacs without confiming
-(setq confirm-kill-emacs nil)
 ;; (defun my/first-available-font (candidates)
 ;;   "Return the first font family from CANDIDATES that is available."
 ;;   (catch 'found
@@ -275,7 +281,6 @@
       org-agenda-tags-column -200)
       (setq org-agenda-files '("~/org/inbox.org"
                                "~/org/append-note.org"
-                               "~/org/notes/"
                                "~/org/.calendar"))
 (setq org-default-notes-file "~/org/inbox.org")
 
@@ -1132,8 +1137,8 @@ Only active in `markdown-mode'; returns nil elsewhere."
         denote-infer-keywords nil ;防止手滑加新keywords 
         denote-sort-keywords t
         
-        ;; Prompt for subdir so new notes land in references/ | denote/ | notes/
-        denote-prompts '(subdirectory title keywords)
+        ;; New notes land directly in denote-directory, no subdir prompt
+        denote-prompts '(title keywords)
         denote-date-prompt-use-org-read-date t
         ;; Only scan references/, denote/, notes/, journal/ — skip everything else under ~/org/
         denote-excluded-directories-regexp
