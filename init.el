@@ -7,38 +7,41 @@
 (doom! :input
 
        :completion
-       (company +childframe)
+       ;; (company +childframe)
+       corfu
        (vertico +icons)
 
        :ui
        doom
-       doom-dashboard
+       ;; doom-dashboard
        hl-todo
        modeline
        nav-flash
        ophints
-       (popup +all)
+       (popup +all +defaults)
        treemacs
-       (vc-gutter +pretty)
-       vi-tilde-fringe
-       (window-select)
-       workspaces
+       ;; (vc-gutter +pretty)
+       ;; vi-tilde-fringe
+       window-select
+       ;; workspaces
        ;; (emoji +ascii +github +unicode)
        unicode
+       zen
 
        :editor
        (evil +everywhere)
        file-templates
        fold
+       (format +onsave)
        snippets
        word-wrap
        multiple-cursors        
 
        :emacs
-       dired
-       electric
+       ;; dired
+       ;; electric
        undo
-       vc
+       ;; vc
        (ibuffer +icons)
 
        :checkers
@@ -55,18 +58,23 @@
 
        :lang
        emacs-lisp
-       javascript
+       ;; javascript
        markdown
-       (org +dragndrop +present +noter +pandoc)
+       (org
+        +dragndrop
+        +present
+        +noter
+        +pandoc)
        (python +lsp)
        sh
-       web
+       ;; web
        yaml
-       cc
+       ;; cc
 
        :app
        (calendar +org-gcal)
        (rss +org)
+
        :config
        literate
        (default +bindings +smartparens))

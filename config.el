@@ -15,109 +15,71 @@
 (setq auto-save-default t
       make-backup-files t)
 
-;; kill emacs without confiming
-(setq confirm-kill-emacs nil)
-(map! :map minibuffer-local-map
-      "C-k" #'delete-minibuffer-contents
-      "C-p" #'yank)
-;; (prefer-coding-system 'utf-8-unix)
-;; (set-default-coding-systems 'utf-8-unix)
-;; (setq locale-coding-system 'utf-8-unix)
-;; (when (eq system-type 'windows-nt)
-;;   (setq file-name-coding-system 'utf-8-unix
-;;         default-file-name-coding-system 'utf-8-unix))
+(setq confirm-kill-emacs nil ; 关闭 emacs 时无需额外确认
+      system-time-locale "C" ; 设置系统时间显示方式
+      pop-up-windows nil     ; no pop-up window
+      scroll-margin 2        ; It's nice to maintain a little margin
+      widget-image-enable nil)
+;; Set package archives
+(use-package! package
+  :config
+  (setq package-archives '(("gnu" . "http://elpa.emacs-china.org/gnu/")
+                           ("melpa" . "http://elpa.emacs-china.org/melpa/")))
+  (package-initialize))
 
-;; (add-to-list 'process-coding-system-alist '("rg" utf-8 . utf-8))
-;; (add-to-list 'process-coding-system-alist '("git" utf-8 . utf-8))
-;; (add-to-list 'process-coding-system-alist '("fd" utf-8 . utf-8))
+;; Package Management
+(use-package! use-package
+  :custom
+  (use-package-always-ensure nil)
+  (package-native-compile t)
+  (warning-minimum-level :emergency))
 
-;; ;; NOTE: SPC s f (locate) unavailable on Windows, use SPC SPC instead
+;; J 合并行时，中文之间不插入多余空格
+(defun my/evil-join-cjk-advice (&rest _)
+  "Remove unwanted space between CJK characters after evil-join."
+  (save-excursion
+    (beginning-of-line)
+    (while (re-search-forward "\\(\\cc\\) \\(\\cc\\)" (line-end-position) t)
+      (replace-match "\\1\\2"))))
 
-;; ;; Disable evil mouse drag to avoid CJK font rendering crash
-;; (after! evil
-;;   (define-key evil-normal-state-map [down-mouse-1] nil)
-;;   (define-key evil-motion-state-map [down-mouse-1] nil))
+(advice-add 'evil-join :after #'my/evil-join-cjk-advice)
 
-;; ;; Work around a native Windows crash when splitting Elfeed windows.
-;; (after! evil
-;;   (defun my/elfeed-buffer-p ()
-;;     "Return non-nil when the current buffer is an Elfeed buffer."
-;;     (derived-mode-p 'elfeed-search-mode 'elfeed-show-mode))
+;; Shut up
+(setq byte-compile-warnings '(not obsolete))
+(setq warning-suppress-log-types '((comp) (bytecomp)))
+(setq native-comp-async-report-warnings-errors 'silent)
+(setq inhibit-startup-echo-area-message (user-login-name))
+(setq visible-bell t)
+(setq ring-bell-function 'ignore)
+(setq set-message-beep 'silent)
 
-;;   (evil-define-command my/evil-window-split-a (&optional count file)
-;;     "Like Doom's split advice, but avoid extra redraw in Elfeed on Windows."
-;;     :repeat nil
-;;     (interactive "P<f>")
-;;     (if (and (featurep :system 'windows)
-;;              (my/elfeed-buffer-p))
-;;         (let ((origwin (selected-window))
-;;               window-selection-change-functions)
-;;           (select-window (split-window origwin count 'below))
-;;           (unless evil-split-window-below
-;;             (select-window origwin))
-;;           (when file
-;;             (evil-edit file)))
-;;       (+evil-window-split-a count file)))
+;; encoding system
+(prefer-coding-system 'utf-8)
+(set-default-coding-systems 'utf-8)
+(setq default-buffer-file-coding-system 'utf-8)
 
-;;   (evil-define-command my/evil-window-vsplit-a (&optional count file)
-;;     "Like Doom's vsplit advice, but avoid extra redraw in Elfeed on Windows."
-;;     :repeat nil
-;;     (interactive "P<f>")
-;;     (if (and (featurep :system 'windows)
-;;              (my/elfeed-buffer-p))
-;;         (let ((origwin (selected-window))
-;;               window-selection-change-functions)
-;;           (select-window (split-window origwin count 'right))
-;;           (unless evil-vsplit-window-right
-;;             (select-window origwin))
-;;           (when file
-;;             (evil-edit file)))
-;;       (+evil-window-vsplit-a count file)))
+;; 删除文件先进垃圾筒
+(setq delete-by-moving-to-trash t)
 
-;;   (advice-remove #'evil-window-split #'+evil-window-split-a)
-;;   (advice-remove #'evil-window-vsplit #'+evil-window-vsplit-a)
-;;   (advice-add #'evil-window-split :override #'my/evil-window-split-a)
-;;   (advice-add #'evil-window-vsplit :override #'my/evil-window-vsplit-a))
+(setq word-wrap-by-category t)
 
-;; ;; evil-org-mode bug: `evil-org-select-an-element' uses `(region-beginning)'
-;; ;; unconditionally, which returns `(min point mark)' even when no region is
-;; ;; active. In operator-pending mode (e.g. daR), that pulls the start back to
-;; ;; a stale mark, so `daR' deletes from that mark to the end of the subtree
-;; ;; instead of just the subtree.
-;; (after! evil-org
-;;   (defun evil-org-select-an-element (element)
-;;     "Select an org ELEMENT (fixed for operator-pending state)."
-;;     (let ((elem-begin (org-element-property :begin element)))
-;;       (list (if (evil-visual-state-p)
-;;                 (min (region-beginning) elem-begin)
-;;               elem-begin)
-;;             (org-element-property :end element)))))
+;; 在 Org mode 中禁用自适应换行缩进，实现左对齐
+(add-hook 'org-mode-hook (lambda () (adaptive-wrap-prefix-mode -1)))
 
-;; ;; Work around a native Windows crash when key-help commands read real keys
-;; ;; while the system IME is open.
-;; (when (featurep :system 'windows)
-;;   (defun my/windows-disable-ime-for-key-help-a (fn &rest args)
-;;     "Temporarily close the Windows IME while FN reads a key sequence."
-;;     (let ((restore-ime
-;;            (and (fboundp 'w32-get-ime-open-status)
-;;                 (fboundp 'w32-set-ime-open-status)
-;;                 (ignore-errors (w32-get-ime-open-status)))))
-;;       (unwind-protect
-;;           (progn
-;;             (when restore-ime
-;;               (ignore-errors (w32-set-ime-open-status nil)))
-;;             (apply fn args))
-;;         (when restore-ime
-;;           (ignore-errors (w32-set-ime-open-status t))))))
 
-;;   (with-eval-after-load 'help-fns
-;;     (dolist (fn '(describe-key describe-key-briefly))
-;;       (advice-remove fn #'my/windows-disable-ime-for-key-help-a)
-;;       (advice-add fn :around #'my/windows-disable-ime-for-key-help-a)))
+;; 打开文件时, 光标自动定位到上次停留的位置
+(save-place-mode 1)
 
-;;   (with-eval-after-load 'helpful
-;;     (advice-remove 'helpful-key #'my/windows-disable-ime-for-key-help-a)
-;;     (advice-add 'helpful-key :around #'my/windows-disable-ime-for-key-help-a)))
+(global-auto-revert-mode)
+
+(setq initial-major-mode 'org-mode) ;; org!
+(setq initial-scratch-message nil)
+
+;; Smooth mouse scrolling
+(setq mouse-wheel-scroll-amount '(2 ((shift) . 1))  ; scroll two lines at a time
+      mouse-wheel-progressive-speed nil             ; don't accelerate scrolling
+      mouse-wheel-follow-mouse t                    ; scroll window under mouse
+      scroll-step 1)
 ;; (defun my/first-available-font (candidates)
 ;;   "Return the first font family from CANDIDATES that is available."
 ;;   (catch 'found
@@ -126,9 +88,9 @@
 ;;         (throw 'found font)))
 ;;     nil))
 
-(setq doom-font (font-spec :family "Maple Mono NF CN" :size 17)
-      doom-variable-pitch-font (font-spec :family "LXGW WenKai Screen" :size 19)
-      doom-big-font (font-spec :family "Maple Mono NF CN" :size 24))
+(setq doom-font (font-spec :family "Maple Mono NF CN" :size 24)
+      doom-variable-pitch-font (font-spec :family "LXGW WenKai Screen" :size 26)
+      doom-big-font (font-spec :family "Maple Mono NF CN" :size 30))
 
 ;; CJK font override — must run AFTER unicode-fonts-setup (depth -90)
 ;; Change `my/cjk-mono-font' to pick a different CJK font
@@ -154,7 +116,99 @@
 (add-hook 'after-setting-font-hook #'my/setup-cjk-fonts 0)
 ;; (setq doom-theme 'modus-operandi)
 ;; (setq doom-theme 'modus-operandi-tinted)
-(setq doom-theme 'modus-operandi-tritanopia)
+;; (setq doom-theme 'modus-operandi-tritanopia)
+(setq doom-theme 'ef-day)
+
+(use-package! doom-modeline
+  :custom
+  (doom-modeline-buffer-encoding nil)
+  (doom-modeline-enable-word-count nil)
+  (doom-modeline-height 10))
+
+;; 全局打开visual line
+(global-visual-line-mode)
+
+(setq display-line-numbers-type nil)
+
+(show-paren-mode t)
+(setq use-short-answers t)
+
+(blink-cursor-mode 0)
+(fringe-mode '(0 . 0)) ;; No fringe
+
+;; 指定启动时的窗口位置和大小
+(setq initial-frame-alist '((top . 10)
+                            (left . 1200)
+                            (width . 500)
+                            (height .240)))
+
+;; 新开窗口时默认是左右结构
+(setq split-height-threshold nil)
+(setq split-width-threshold 0)
+
+(menu-bar-mode -1)
+(tool-bar-mode -1)
+(scroll-bar-mode -1)
+
+(setq-default x-stretch-cursor t
+              x-underline-at-descent-line t)
+(use-package! corfu
+  :init (global-corfu-mode)
+  :config
+  (setq corfu-auto-complete t))
+
+(use-package! dired
+  :commands (dired dired-jump)
+  :after evil-collection
+  :config
+  (evil-collection-define-key 'normal 'dired-mode-map
+    "h" 'dired-up-directory
+    "l" 'dired-find-file))
+
+(use-package! dired-narrow
+  :after dired
+  :config
+  (evil-define-key 'normal dired-mode-map (kbd "/") #'dired-narrow))
+
+;; MINIBUFFER COMPLETION
+(use-package! vertico
+  :init (vertico-mode)
+  :custom
+  (vertico-sort-function 'vertico-sort-history-alpha))
+
+;; Search for partial matches in any order
+(use-package! orderless
+  :custom
+  (completion-styles '(orderless basic))
+  (completion-category-defaults nil)
+  (completion-category-overrides
+   '((file (styles partial-completion)))))
+
+;; Improve keyboard shortcut discoverability
+(use-package! which-key
+  :config (which-key-mode)
+  :custom
+  (which-key-max-description-length 40)
+  (which-key-lighter nil)
+  (which-key-sort-order 'which-key-description-order))
+
+;; Consult convenience functions
+(use-package! consult
+  :bind
+  (("C-c M-x" . consult-mode-command)
+   ("C-c h" . consult-history)
+   ("C-c k" . consult-kmacro)
+   ("C-c m" . consult-man)
+   ("C-c i" . consult-info)
+   ([remap Info-search] . consult-info)))
+
+;; Improved help buffers
+(use-package! helpful
+  :bind
+  (("C-h f" . helpful-function)
+   ("C-h x" . helpful-command)
+   ("C-h k" . helpful-key)
+   ("C-h v" . helpful-variable)))
 (when (featurep :system 'windows)
   ;; VC / Git
   (setq auto-revert-check-vc-info nil
@@ -200,7 +254,6 @@
   (let ((gnu-find "C:/Program Files/Git/usr/bin/find.exe"))
     (when (file-executable-p gnu-find)
       (setq find-program gnu-find))))
-(setq system-time-locale "C")
 (setq org-directory "~/org")
 
 (after! org
@@ -225,15 +278,47 @@
 (setq org-log-done 'time
       org-log-into-drawer t)
 ;; Display (only set what Doom doesn't already handle)
-(setq org-confirm-babel-evaluate nil
-      org-return-follows-link t
-      org-startup-folded 'content
-      org-hide-emphasis-markers t
-      org-ellipsis " ▾")
+  (setq org-confirm-babel-evaluate nil
+        org-return-follows-link t
+        org-startup-folded 'content
+        org-hide-emphasis-markers t
+        org-ellipsis " ▾")
 
-;; Inline images
-(setq image-use-external-converter t
-      org-image-actual-width '(600))
+  ;; Inline images
+  (setq image-use-external-converter t
+        org-image-actual-width '(600))
+
+;; 关闭indent
+(after! org
+  (custom-set-variables '(org-startup-indented nil)))
+
+(use-package! spacious-padding
+  :custom (line-spacing 3)
+  :init (spacious-padding-mode 1))
+
+(use-package! pangu-spacing
+  :config
+  (global-pangu-spacing-mode 1)
+  ;; 在中英文符号之间, 真正地插入空格
+  (setq pangu-spacing-real-insert-separtor t))
+
+(use-package! olivetti
+  :hook (org-mode . olivetti-mode)
+  :config (setq olivetti-body-width 92))
+
+(use-package! ultra-scroll
+  :init
+  (setq scroll-conservatively 101 ; important!
+        scroll-margin 0)
+  :config
+  (ultra-scroll-mode 1))
+;; Show hidden emphasis markers
+(use-package! org-appear
+  :hook (org-mode . org-appear-mode)
+  :config
+  (setq org-appear-autoemphasis t
+        org-appear-autosubmarkers t
+        org-appear-autolinks nil))
 ;; ;; org-modern headings 和 org-indent-mode 都会改 heading 可见属性，
 ;; ;; Windows CJK 字体下冲突导致同级标题对不齐。关掉 heading 美化，让
 ;; ;; org-superstar 专门管 bullet，org-indent 单独管缩进。
@@ -280,6 +365,7 @@
 (setq org-agenda-inhibit-startup t
       org-agenda-tags-column -200)
       (setq org-agenda-files '("~/org/inbox.org"
+                               "~/org/notes/20260101T000010--habits-hub__habit_index.org"
                                "~/org/append-note.org"
                                "~/org/.calendar"))
 (setq org-default-notes-file "~/org/inbox.org")
@@ -724,15 +810,150 @@
       (message "Archived %d done/cancelled task(s) in %s"
                count (file-name-nondirectory (buffer-file-name))))))
 ;; Hide redundant tags in agenda
-(setq org-agenda-hide-tags-regexp "personal\\|habit")
+  (setq org-agenda-hide-tags-regexp "personal\\|habit")
 
-;; ---- CJK emphasis fix (中文加粗/高亮) ----
-(setcar org-emphasis-regexp-components
-        " \t('\"{[:alpha:][:nonascii:]")
-(setcar (nthcdr 1 org-emphasis-regexp-components)
-        "[:alpha:][:nonascii:]- \t.,:!?;'\")}\\")
-(org-set-emph-re 'org-emphasis-regexp-components
-                 org-emphasis-regexp-components))
+  ;; ;; ---- CJK emphasis fix (中文加粗/高亮) ----
+  ;; (setcar org-emphasis-regexp-components
+  ;;         " \t('\"{[:alpha:][:nonascii:]")
+  ;; (setcar (nthcdr 1 org-emphasis-regexp-components)
+  ;;         "[:alpha:][:nonascii:]- \t.,:!?;'\")}\\")
+  ;; (org-set-emph-re 'org-emphasis-regexp-components
+  ;;                  org-emphasis-regexp-components))
+
+;; 从ljg配置里抄的
+(after! org
+  ;; @Eli 帮忙写的解决标记符号前后空格问题的代码, 感谢.
+  (setq org-emphasis-regexp-components '("-[:space:]('\"{[:nonascii:]"
+                                         "-[:space:].,:!?;'\")}\\[[:nonascii:]"
+                                         "[:space:]"
+                                         "."
+                                         1))
+  (setq org-match-substring-regexp
+        (concat
+         ;; 限制上标和下标的匹配范围，org 中对其的介绍见：(org) Subscripts and superscripts
+         "\\([0-9a-zA-Zα-γΑ-Ω]\\)\\([_^]\\)\\("
+         "\\(?:" (org-create-multibrace-regexp "{" "}" org-match-sexp-depth) "\\)"
+         "\\|"
+         "\\(?:" (org-create-multibrace-regexp "(" ")" org-match-sexp-depth) "\\)"
+         "\\|"
+         "\\(?:\\*\\|[+-]?[[:alnum:].,\\]*[[:alnum:]]\\)\\)"))
+  (org-set-emph-re 'org-emphasis-regexp-components org-emphasis-regexp-components)
+  (org-element-update-syntax))
+
+
+(after! org
+  ;; 标记字符前后空格优化问题
+  (defun eli/org-do-emphasis-faces (limit)
+    "Run through the buffer and emphasize strings."
+    (let ((quick-re (format "\\([%s]\\|^\\)\\([~=*/_+]\\)"
+                            (car org-emphasis-regexp-components))))
+      (catch :exit
+        (while (re-search-forward quick-re limit t)
+          (let* ((marker (match-string 2))
+                 (verbatim? (member marker '("~" "="))))
+            (when (save-excursion
+                    (goto-char (match-beginning 0))
+                    (and
+                     ;; Do not match if preceded by org-emphasis
+                     (not (save-excursion
+                            (forward-char 1)
+                            (get-pos-property (point) 'org-emphasis)))
+                     ;; Do not match in latex fragments.
+                     ;; (not (org-inside-LaTeX-fragment-p))
+                     ;; Do not match in Drawer.
+                     (not (org-match-line
+                           "^[    ]*:\\(\\(?:\\w\\|[-_]\\)+\\):[      ]*"))
+                     ;; Do not match table hlines.
+                     (not (and (equal marker "+")
+                               (org-match-line
+                                "[ \t]*\\(|[-+]+|?\\|\\+[-+]+\\+\\)[ \t]*$")))
+                     ;; Do not match headline stars.  Do not consider
+                     ;; stars of a headline as closing marker for bold
+                     ;; markup either.
+                     (not (and (equal marker "*")
+                               (save-excursion
+                                 (forward-char)
+                                 (skip-chars-backward "*")
+                                 (looking-at-p org-outline-regexp-bol))))
+                     ;; Match full emphasis markup regexp.
+                     (looking-at (if verbatim? org-verbatim-re org-emph-re))
+                     ;; Do not span over paragraph boundaries.
+                     (not (string-match-p org-element-paragraph-separate
+                                          (match-string 2)))
+                     ;; Do not span over cells in table rows.
+                     (not (and (save-match-data (org-match-line "[ \t]*|"))
+                               (string-match-p "|" (match-string 4))))))
+              (pcase-let ((`(,_ ,face ,_) (assoc marker org-emphasis-alist))
+                          (m (if org-hide-emphasis-markers 4 2)))
+                (font-lock-prepend-text-property
+                 (match-beginning m) (match-end m) 'face face)
+                (when verbatim?
+                  (org-remove-flyspell-overlays-in
+                   (match-beginning 0) (match-end 0))
+                  (when (and (org-fold-core-folding-spec-p 'org-link)
+                             (org-fold-core-folding-spec-p 'org-link-description))
+                    (org-fold-region (match-beginning 0) (match-end 0) nil 'org-link)
+                    (org-fold-region (match-beginning 0) (match-end 0) nil 'org-link-description))
+                  (remove-text-properties (match-beginning 2) (match-end 2)
+                                          '(display t invisible t intangible t)))
+                (add-text-properties (match-beginning 2) (match-end 2)
+                                     '(font-lock-multiline t org-emphasis t))
+                (when (and org-hide-emphasis-markers
+                           (not (org-at-comment-p)))
+                  (add-text-properties (match-end 4) (match-beginning 5)
+                                       '(invisible t))
+                  (add-text-properties (match-beginning 3) (match-end 3)
+                                       '(invisible t)))
+                (throw :exit t))))))))
+
+  (advice-add #'org-do-emphasis-faces :override #'eli/org-do-emphasis-faces)
+
+  (defun eli/org-element--parse-generic-emphasis (mark type)
+    "Parse emphasis object at point, if any.
+
+MARK is the delimiter string used.  TYPE is a symbol among
+`bold', `code', `italic', `strike-through', `underline', and
+`verbatim'.
+
+Assume point is at first MARK."
+    (save-excursion
+      (let ((origin (point)))
+        (unless (bolp) (forward-char -1))
+        (let ((opening-re
+               (rx-to-string
+                `(seq (or line-start (any space ?- ?\( ?' ?\" ?\{ nonascii))
+                  ,mark
+                  (not space)))))
+          (when (looking-at opening-re)
+            (goto-char (1+ origin))
+            (let ((closing-re
+                   (rx-to-string
+                    `(seq
+                      (not space)
+                      (group ,mark)
+                      (or (any space ?- ?. ?, ?\; ?: ?! ?? ?' ?\" ?\) ?\} ?\\ ?\[
+                               nonascii)
+                          line-end)))))
+              (when (re-search-forward closing-re nil t)
+                (let ((closing (match-end 1)))
+                  (goto-char closing)
+                  (let* ((post-blank (skip-chars-forward " \t"))
+                         (contents-begin (1+ origin))
+                         (contents-end (1- closing)))
+                    (list type
+                          (append
+                           (list :begin origin
+                                 :end (point)
+                                 :post-blank post-blank)
+                           (if (memq type '(code verbatim))
+                               (list :value
+                                     (and (memq type '(code verbatim))
+                                          (buffer-substring
+                                           contents-begin contents-end)))
+                             (list :contents-begin contents-begin
+                                   :contents-end contents-end)))))))))))))
+
+  (advice-add #'org-element--parse-generic-emphasis :override #'eli/org-element--parse-generic-emphasis))
 (defun my/org-download-screenshot-command ()
   "Platform-appropriate screenshot command for org-download."
   (cond
@@ -797,26 +1018,26 @@ Used as `org-download-file-format-function'."
              (message "OK: plain text pasted (macOS fallback)"))))
         (t (message "WARN: pbpaste not found")))))
     (_ (message "WARN: rich text clipboard not implemented for this platform"))))
-;; Pixel-aligned agenda tags (fix CJK misalignment)
-(defun my/org-agenda-align-tags-pixel ()
-  "Right-align agenda tags using pixel-based display alignment."
-  ;; Windows Emacs 30.2 is currently crashing in agenda display paths on this
-  ;; machine, so keep the safer default spacing there.
-  (unless (eq system-type 'windows-nt)
-    (let ((inhibit-read-only t)
-          (target-pixel (- (window-text-width nil t)
-                           (* 2 (string-pixel-width " ")))))
-      (save-excursion
-        (goto-char (point-min))
-        (while (re-search-forward "\\([ \t]+\\)\\(:[[:alnum:]_@#%:]+:\\)[ \t]*$" nil t)
-          (let* ((tags-str (match-string 2))
-                 (tags-pixel (string-pixel-width tags-str))
-                 (align-to (- target-pixel tags-pixel)))
-            (when (> align-to 0)
-              (put-text-property (match-beginning 1) (match-end 1)
-                                 'display `(space :align-to (,align-to))))))))))
+;; ;; Pixel-aligned agenda tags (fix CJK misalignment)
+;; (defun my/org-agenda-align-tags-pixel ()
+;;   "Right-align agenda tags using pixel-based display alignment."
+;;   ;; Windows Emacs 30.2 is currently crashing in agenda display paths on this
+;;   ;; machine, so keep the safer default spacing there.
+;;   (unless (eq system-type 'windows-nt)
+;;     (let ((inhibit-read-only t)
+;;           (target-pixel (- (window-text-width nil t)
+;;                            (* 2 (string-pixel-width " ")))))
+;;       (save-excursion
+;;         (goto-char (point-min))
+;;         (while (re-search-forward "\\([ \t]+\\)\\(:[[:alnum:]_@#%:]+:\\)[ \t]*$" nil t)
+;;           (let* ((tags-str (match-string 2))
+;;                  (tags-pixel (string-pixel-width tags-str))
+;;                  (align-to (- target-pixel tags-pixel)))
+;;             (when (> align-to 0)
+;;               (put-text-property (match-beginning 1) (match-end 1)
+;;                                  'display `(space :align-to (,align-to))))))))))
 
-(add-hook 'org-agenda-finalize-hook #'my/org-agenda-align-tags-pixel)
+;; (add-hook 'org-agenda-finalize-hook #'my/org-agenda-align-tags-pixel)
 ;; org-download — 走 org-attach 体系
 (after! org
   (use-package! org-download
@@ -1250,6 +1471,19 @@ modes first, so when our hook lands everything is settled."
   ;; Only text files from denote dir (Denote 3.x API)
   (setq consult-notes-denote-files-function
         (lambda () (denote-directory-files nil t t))))
+
+(after! consult-notes
+  ;; 禁用 consult 的默认排序，保留 source 提供的顺序
+  (consult-customize consult-notes :sort nil)
+
+  ;; 让 denote 文件列表按修改时间降序排列
+  (setq consult-notes-denote-files-function
+        (lambda ()
+          (sort (denote-directory-files)
+                (lambda (a b)
+                  (time-less-p
+                   (file-attribute-modification-time (file-attributes b))
+                   (file-attribute-modification-time (file-attributes a))))))))
 ;; Web article target for capture "w"
 (defun my/capture-web-article-target ()
   "Target function for org-capture: reference note from clipboard URL."
@@ -1855,16 +2089,16 @@ front-matter if it does not yet exist."
   (after! evil
     (define-key evil-motion-state-map (kbd "C-w w") #'ace-window)
     (define-key evil-normal-state-map (kbd "C-w w") #'ace-window)))
-(setq doom-scratch-default-major-mode 'org-mode)
+;; (setq doom-scratch-default-major-mode 'org-mode)
 
-(defun my/open-lisp-scratch ()
-  "Open a lisp-interaction-mode scratch buffer for Elisp testing."
-  (interactive)
-  (let ((buf (get-buffer-create "*lisp-scratch*")))
-    (with-current-buffer buf
-      (unless (eq major-mode 'lisp-interaction-mode)
-        (lisp-interaction-mode)))
-    (switch-to-buffer buf)))
+;; (defun my/open-lisp-scratch ()
+;;   "Open a lisp-interaction-mode scratch buffer for Elisp testing."
+;;   (interactive)
+;;   (let ((buf (get-buffer-create "*lisp-scratch*")))
+;;     (with-current-buffer buf
+;;       (unless (eq major-mode 'lisp-interaction-mode)
+;;         (lisp-interaction-mode)))
+;;     (switch-to-buffer buf)))
 (require 'acp)
 (require 'agent-shell)
 
@@ -1883,16 +2117,27 @@ front-matter if it does not yet exist."
 
 ;; Keyboard: SPC o s → start Claude Code agent shell
 ;; Keyboard: SPC o c → start Codex agent shell
-
-(setq agent-shell-openai-authentication
-      (agent-shell-openai-make-authentication
-       :api-key (lambda () my/athenai-api-key)))
-
-(setq agent-shell-openai-codex-environment
-      (agent-shell-make-environment-variables
-       "OPENAI_BASE_URL" "https://athenai.mihoyo.com/v1"))
-
 (map! :leader
       (:prefix ("o" . "open")
        :desc "Claude Code" "s" #'agent-shell-anthropic-start-claude-code
        :desc "Codex"       "c" #'agent-shell-openai-start-codex))
+
+;; ── Buffer 内 Evil 友好键位 ──────────────────────────────────
+;; insert mode：RET = 换行（防误发），S-RET = 发送
+;; normal mode：RET = 发送（vim 习惯），q = 关 buffer
+(map! :map agent-shell-mode-map
+      :i "RET"   #'newline
+      :i "S-RET" #'shell-maker-submit
+      :n "RET"   #'shell-maker-submit
+      :n "q"     #'quit-window
+      :nv "gr"   #'agent-shell-send-dwim)
+
+;; ── Diff buffer 自动进 emacs-state ──────────────────────────
+;; 看 agent 改动时按 y/n/p/q 不用先切 insert
+(add-hook 'diff-mode-hook
+          (lambda ()
+            (when (string-match-p "\\*agent-shell-diff\\*" (buffer-name))
+              (evil-emacs-state))))
+;; ── Viewport view-mode 自动进 emacs-state ───────────────────
+;; view 模式大量单字母键 (n/p/f/b/r/y/1-9/m/a/c/q) 会被 evil normal state 拦截
+(evil-set-initial-state 'agent-shell-viewport-view-mode 'emacs))
