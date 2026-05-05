@@ -26,6 +26,9 @@ tramp
 .custom.el
 .private.el
 secrets.el
+config.el
+init.el
+*bak.*
 
 # Org-mode
 .org-id-locations
