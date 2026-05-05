@@ -1,62 +1,17 @@
 ;;; config.el -*- lexical-binding: t; -*-
+
 (use-package! gcmh
   :init
   (setq gcmh-idle-delay 5
         gcmh-high-cons-threshold (* 256 1024 1024))  ; 256MB during idle
   :config
   (gcmh-mode 1))
-
-(setq gc-cons-threshold 200000000) ; previous 33554432
-;; credentials
 (setq user-full-name "Sean Yuan"
       user-mail-address "yuanxiang424@gmail.com")
-
-;; autosave and backup
-(setq auto-save-default t
-      make-backup-files t)
-
-(setq confirm-kill-emacs nil ; 关闭 emacs 时无需额外确认
-      system-time-locale "C" ; 设置系统时间显示方式
-      pop-up-windows nil     ; no pop-up window
-      scroll-margin 2        ; It's nice to maintain a little margin
-      widget-image-enable nil)
-;; Set package archives
-(use-package! package
-  :config
-  (setq package-archives '(("gnu" . "http://elpa.emacs-china.org/gnu/")
-                           ("melpa" . "http://elpa.emacs-china.org/melpa/")))
-  (package-initialize))
-
-;; Package Management
-(use-package! use-package
-  :custom
-  (use-package-always-ensure nil)
-  (package-native-compile t)
-  (warning-minimum-level :emergency))
-
-;; J 合并行时，中文之间不插入多余空格
-(defun my/evil-join-cjk-advice (&rest _)
-  "Remove unwanted space between CJK characters after evil-join."
-  (save-excursion
-    (beginning-of-line)
-    (while (re-search-forward "\\(\\cc\\) \\(\\cc\\)" (line-end-position) t)
-      (replace-match "\\1\\2"))))
-
-(advice-add 'evil-join :after #'my/evil-join-cjk-advice)
-
-;; Shut up
-(setq byte-compile-warnings '(not obsolete))
-(setq warning-suppress-log-types '((comp) (bytecomp)))
-(setq native-comp-async-report-warnings-errors 'silent)
-(setq inhibit-startup-echo-area-message (user-login-name))
-(setq visible-bell t)
-(setq ring-bell-function 'ignore)
-(setq set-message-beep 'silent)
-
-;; encoding system
-(prefer-coding-system 'utf-8)
-(set-default-coding-systems 'utf-8)
-(setq default-buffer-file-coding-system 'utf-8)
+(load! "secrets" doom-user-dir t)
+(setq confirm-kill-emacs nil       ; 关闭 emacs 时无需额外确认
+      system-time-locale "C"       ; 设置系统时间显示方式
+      scroll-margin 2)             ; 保留少量滚动边距
 
 ;; 删除文件先进垃圾筒
 (setq delete-by-moving-to-trash t)
@@ -66,149 +21,33 @@
 ;; 在 Org mode 中禁用自适应换行缩进，实现左对齐
 (add-hook 'org-mode-hook (lambda () (adaptive-wrap-prefix-mode -1)))
 
-
-;; 打开文件时, 光标自动定位到上次停留的位置
-(save-place-mode 1)
-
-(global-auto-revert-mode)
-
-(setq initial-major-mode 'org-mode) ;; org!
+(setq initial-major-mode 'org-mode)
 (setq initial-scratch-message nil)
 
 ;; Smooth mouse scrolling
-(setq mouse-wheel-scroll-amount '(2 ((shift) . 1))  ; scroll two lines at a time
-      mouse-wheel-progressive-speed nil             ; don't accelerate scrolling
-      mouse-wheel-follow-mouse t                    ; scroll window under mouse
+(setq mouse-wheel-scroll-amount '(2 ((shift) . 1))
+      mouse-wheel-progressive-speed nil
+      mouse-wheel-follow-mouse t
       scroll-step 1)
-;; (defun my/first-available-font (candidates)
-;;   "Return the first font family from CANDIDATES that is available."
-;;   (catch 'found
-;;     (dolist (font candidates)
-;;       (when (find-font (font-spec :family font))
-;;         (throw 'found font)))
-;;     nil))
+(prefer-coding-system 'utf-8)
+(set-default-coding-systems 'utf-8)
+(setq default-buffer-file-coding-system 'utf-8)
+(setq byte-compile-warnings '(not obsolete))
+(setq warning-suppress-log-types '((comp) (bytecomp)))
+(setq native-comp-async-report-warnings-errors 'silent)
+(setq inhibit-startup-echo-area-message (user-login-name))
+(setq visible-bell t)
+(setq ring-bell-function 'ignore)
+(setq set-message-beep 'silent)
+;; J 合并行时，中文之间不插入多余空格
+(defun my/evil-join-cjk-advice (&rest _)
+  "Remove unwanted space between CJK characters after evil-join."
+  (save-excursion
+    (beginning-of-line)
+    (while (re-search-forward "\\(\\cc\\) \\(\\cc\\)" (line-end-position) t)
+      (replace-match "\\1\\2"))))
 
-(setq doom-font (font-spec :family "Maple Mono NF CN" :size 24)
-      doom-variable-pitch-font (font-spec :family "LXGW WenKai Screen" :size 26)
-      doom-big-font (font-spec :family "Maple Mono NF CN" :size 30))
-
-;; CJK font override — must run AFTER unicode-fonts-setup (depth -90)
-;; Change `my/cjk-mono-font' to pick a different CJK font
-(defvar my/cjk-mono-font "Maple Mono NF CN"
-  "CJK font for monospace contexts (code, fixed-pitch).")
-
-(defun my/setup-cjk-fonts (&optional _frame)
-  "Force CJK characters to use a specific font."
-  (when (display-graphic-p)
-    (let ((font-family (or my/cjk-mono-font
-                           (catch 'found
-                             (dolist (f '("Maple Mono NF CN" "Sarasa Mono SC"
-                                          "霞鹜文楷等宽" "LXGW WenKai Mono"
-                                          "Noto Sans CJK SC"))
-                               (when (find-font (font-spec :family f))
-                                 (throw 'found f)))
-                             nil))))
-      (when font-family
-        (dolist (charset '(kana han cjk-misc bopomofo))
-          (set-fontset-font t charset (font-spec :family font-family) nil 'prepend))))))
-
-;; Depth 0 = runs after unicode-fonts (depth -90), so prepend wins
-(add-hook 'after-setting-font-hook #'my/setup-cjk-fonts 0)
-;; (setq doom-theme 'modus-operandi)
-;; (setq doom-theme 'modus-operandi-tinted)
-;; (setq doom-theme 'modus-operandi-tritanopia)
-(setq doom-theme 'ef-day)
-
-(use-package! doom-modeline
-  :custom
-  (doom-modeline-buffer-encoding nil)
-  (doom-modeline-enable-word-count nil)
-  (doom-modeline-height 10))
-
-;; 全局打开visual line
-(global-visual-line-mode)
-
-(setq display-line-numbers-type nil)
-
-(show-paren-mode t)
-(setq use-short-answers t)
-
-(blink-cursor-mode 0)
-(fringe-mode '(0 . 0)) ;; No fringe
-
-;; 指定启动时的窗口位置和大小
-(setq initial-frame-alist '((top . 10)
-                            (left . 1200)
-                            (width . 500)
-                            (height .240)))
-
-;; 新开窗口时默认是左右结构
-(setq split-height-threshold nil)
-(setq split-width-threshold 0)
-
-(menu-bar-mode -1)
-(tool-bar-mode -1)
-(scroll-bar-mode -1)
-
-(setq-default x-stretch-cursor t
-              x-underline-at-descent-line t)
-(use-package! corfu
-  :init (global-corfu-mode)
-  :config
-  (setq corfu-auto-complete t))
-
-(use-package! dired
-  :commands (dired dired-jump)
-  :after evil-collection
-  :config
-  (evil-collection-define-key 'normal 'dired-mode-map
-    "h" 'dired-up-directory
-    "l" 'dired-find-file))
-
-(use-package! dired-narrow
-  :after dired
-  :config
-  (evil-define-key 'normal dired-mode-map (kbd "/") #'dired-narrow))
-
-;; MINIBUFFER COMPLETION
-(use-package! vertico
-  :init (vertico-mode)
-  :custom
-  (vertico-sort-function 'vertico-sort-history-alpha))
-
-;; Search for partial matches in any order
-(use-package! orderless
-  :custom
-  (completion-styles '(orderless basic))
-  (completion-category-defaults nil)
-  (completion-category-overrides
-   '((file (styles partial-completion)))))
-
-;; Improve keyboard shortcut discoverability
-(use-package! which-key
-  :config (which-key-mode)
-  :custom
-  (which-key-max-description-length 40)
-  (which-key-lighter nil)
-  (which-key-sort-order 'which-key-description-order))
-
-;; Consult convenience functions
-(use-package! consult
-  :bind
-  (("C-c M-x" . consult-mode-command)
-   ("C-c h" . consult-history)
-   ("C-c k" . consult-kmacro)
-   ("C-c m" . consult-man)
-   ("C-c i" . consult-info)
-   ([remap Info-search] . consult-info)))
-
-;; Improved help buffers
-(use-package! helpful
-  :bind
-  (("C-h f" . helpful-function)
-   ("C-h x" . helpful-command)
-   ("C-h k" . helpful-key)
-   ("C-h v" . helpful-variable)))
+(advice-add 'evil-join :after #'my/evil-join-cjk-advice)
 (when (featurep :system 'windows)
   ;; VC / Git
   (setq auto-revert-check-vc-info nil
@@ -247,13 +86,92 @@
   (setq pdf-info-epdfinfo-program "C:\\Users\\fengxing.chen\\scoop\\apps\\msys2\\current\\mingw64\\bin\\epdfinfo.exe")
 
   ;; project.el / grep / locate all call bare `find`, which on Windows PATH
-  ;; resolves to C:\Windows\System32\FIND.EXE — a completely different tool
-  ;; (file-content search), whose Unix-style args trigger
-  ;; "FIND: Parameter format not correct". Point at GNU find from Git for
-  ;; Windows (same source as the unzip binary used for nov.el).
+  ;; resolves to C:\Windows\System32\FIND.EXE — a completely different tool.
   (let ((gnu-find "C:/Program Files/Git/usr/bin/find.exe"))
     (when (file-executable-p gnu-find)
       (setq find-program gnu-find))))
+(setq doom-theme 'ef-day)
+
+(use-package! doom-modeline
+  :custom
+  (doom-modeline-buffer-encoding nil)
+  (doom-modeline-enable-word-count nil)
+  ;; (doom-modeline-height 10)
+)
+
+;; 全局 visual line
+(global-visual-line-mode)
+
+(setq display-line-numbers-type nil
+      use-short-answers t)
+
+(fringe-mode '(0 . 0)) ;; No fringe
+
+;; 指定启动时的窗口位置和大小
+(setq initial-frame-alist '((top . 10)
+                            (left . 1200)
+                            (width . 500)
+                            (height . 240)))
+
+;; 新开窗口时默认是左右结构
+(setq split-height-threshold nil)
+(setq split-width-threshold 0)
+
+(menu-bar-mode -1)
+(tool-bar-mode -1)
+(scroll-bar-mode -1)
+
+(setq-default x-stretch-cursor t
+              x-underline-at-descent-line t)
+(defun my/first-available-font (candidates)
+  "Return the first font family from CANDIDATES that is available."
+  (catch 'found
+    (dolist (font candidates)
+      (when (find-font (font-spec :family font))
+        (throw 'found font)))
+    nil))
+
+(setq doom-font (font-spec :family "Maple Mono NF CN" :size 24)
+      doom-variable-pitch-font (font-spec :family "LXGW WenKai Screen" :size 26)
+      doom-big-font (font-spec :family "Maple Mono NF CN" :size 30))
+
+;; CJK font override — must run AFTER unicode-fonts-setup (depth -90)
+(defvar my/cjk-mono-font "Maple Mono NF CN"
+  "CJK font for monospace contexts (code, fixed-pitch).")
+
+(defun my/setup-cjk-fonts (&optional _frame)
+  "Force CJK characters to use a specific font."
+  (when (display-graphic-p)
+    (let ((font-family (or my/cjk-mono-font
+                           (my/first-available-font
+                            '("Maple Mono NF CN" "Sarasa Mono SC"
+                              "霞鹜文楷等宽" "LXGW WenKai Mono"
+                              "Noto Sans CJK SC")))))
+      (when font-family
+        (dolist (charset '(kana han cjk-misc bopomofo))
+          (set-fontset-font t charset (font-spec :family font-family) nil 'prepend))))))
+
+;; Depth 0 = runs after unicode-fonts (depth -90), so prepend wins
+(add-hook 'after-setting-font-hook #'my/setup-cjk-fonts 0)
+(use-package! dired-narrow
+  :after dired
+  :config
+  (evil-define-key 'normal dired-mode-map (kbd "/") #'dired-narrow))
+(use-package! ace-window
+  :config
+  (setq aw-keys '(?a ?s ?d ?f ?g ?h ?j ?k ?l)
+        aw-scope 'frame
+        aw-background t)
+
+  ;; 覆盖默认的 other-window (C-x o)
+  (global-set-key [remap other-window] #'ace-window)
+
+  (setq aw-display-mode-overlay t
+        aw-leading-char-style 'char)
+
+  (after! evil
+    (define-key evil-motion-state-map (kbd "C-w w") #'ace-window)
+    (define-key evil-normal-state-map (kbd "C-w w") #'ace-window)))
 (setq org-directory "~/org")
 
 (after! org
@@ -264,20 +182,22 @@
         org-habit-preceding-days 21
         org-habit-following-days 7
         org-habit-show-habits-only-for-today nil)
-;; Todo keywords
-(setq org-todo-keywords
-      '((sequence "TODO(t)" "NEXT(n)" "PROG(p!)" "WAIT(w@/!)" "|" "DONE(d!)" "FAIL(f@)")))
-(setq org-todo-keyword-faces
-      '(("TODO" :foreground "#2952a3" :weight bold)
-        ("NEXT" :foreground "#e67e22" :weight bold)
-        ("PROG" :foreground "#c0392b" :weight bold)
-        ("WAIT" :foreground "#8b6914" :weight bold)
-        ("DONE" :foreground "#2e7d32" :weight bold)
-        ("FAIL" :foreground "#9e9e9e" :weight bold)))
 
-(setq org-log-done 'time
-      org-log-into-drawer t)
-;; Display (only set what Doom doesn't already handle)
+  ;; ---- TODO keywords ----
+  (setq org-todo-keywords
+        '((sequence "TODO(t)" "NEXT(n)" "PROG(p!)" "WAIT(w@/!)" "|" "DONE(d!)" "FAIL(f@)")))
+  (setq org-todo-keyword-faces
+        '(("TODO" :foreground "#2952a3" :weight bold)
+          ("NEXT" :foreground "#e67e22" :weight bold)
+          ("PROG" :foreground "#c0392b" :weight bold)
+          ("WAIT" :foreground "#8b6914" :weight bold)
+          ("DONE" :foreground "#2e7d32" :weight bold)
+          ("FAIL" :foreground "#9e9e9e" :weight bold)))
+
+  (setq org-log-done 'time
+        org-log-into-drawer t)
+
+  ;; ---- Display ----
   (setq org-confirm-babel-evaluate nil
         org-return-follows-link t
         org-startup-folded 'content
@@ -288,541 +208,59 @@
   (setq image-use-external-converter t
         org-image-actual-width '(600))
 
-;; 关闭indent
-(after! org
   (custom-set-variables '(org-startup-indented nil)))
-
-(use-package! spacious-padding
-  :custom (line-spacing 3)
-  :init (spacious-padding-mode 1))
-
-(use-package! pangu-spacing
-  :config
-  (global-pangu-spacing-mode 1)
-  ;; 在中英文符号之间, 真正地插入空格
-  (setq pangu-spacing-real-insert-separtor t))
-
-(use-package! olivetti
-  :hook (org-mode . olivetti-mode)
-  :config (setq olivetti-body-width 92))
-
-(use-package! ultra-scroll
-  :init
-  (setq scroll-conservatively 101 ; important!
-        scroll-margin 0)
-  :config
-  (ultra-scroll-mode 1))
-;; Show hidden emphasis markers
-(use-package! org-appear
-  :hook (org-mode . org-appear-mode)
-  :config
-  (setq org-appear-autoemphasis t
-        org-appear-autosubmarkers t
-        org-appear-autolinks nil))
-;; ;; org-modern headings 和 org-indent-mode 都会改 heading 可见属性，
-;; ;; Windows CJK 字体下冲突导致同级标题对不齐。关掉 heading 美化，让
-;; ;; org-superstar 专门管 bullet，org-indent 单独管缩进。
-;; (setq org-modern-star nil
-;;       org-modern-hide-stars nil
-;;       org-modern-keyword nil
-;;       org-modern-priority nil
-;;       org-modern-todo nil
-;;       org-modern-tag nil)
-;; ;; org-superstar: 只替换 bullet 字符，不动字体度量，对齐不会歪
-;; (setq org-superstar-headline-bullets-list '(?◉ ?○ ?⚬ ?◈ ?◇)
-;;       org-superstar-cycle-headline-bullets nil
-;;       org-superstar-remove-leading-stars nil
-;;       org-superstar-todo-bullet-alist
-;;       '(("TODO" . ?☐) ("NEXT" . ?▶) ("PROG" . ?◉) ("WAIT" . ?⏳)
-;;         ("DONE" . ?☑) ("FAIL" . ?✗))
-;;       org-superstar-item-bullet-alist
-;;       '((?* . ?•) (?+ . ?➤) (?- . ?–)))
-;; (add-hook 'org-mode-hook #'org-superstar-mode)
-;; ---- org-attach: 统一附件管理 ----
-(require 'org-attach)
-(setq org-attach-id-dir (expand-file-name "data/" org-directory)
-      org-attach-method 'cp
-      org-attach-use-inheritance t
-      org-attach-store-link-p 'attached
-      org-attach-auto-tag nil)
-
-;; Fix attachment 链接中文乱码
-(defun my/org-attach-store-link-decoded (&rest _)
-  "Fix stored links from `org-attach-attach' to include decoded description."
-  (when org-stored-links
-    (let ((latest (car org-stored-links)))
-      (when (and (stringp (car latest))
-                 (string-prefix-p "attachment:" (car latest))
-                 (or (null (cadr latest)) (string= (cadr latest) "")))
-        (setcar (cdr latest)
-                (decode-coding-string
-                 (url-unhex-string
-                  (file-name-nondirectory
-                   (substring (car latest) (length "attachment:"))))
-                 'utf-8))))))
-(advice-add 'org-attach-attach :after #'my/org-attach-store-link-decoded)
-;; Agenda
-(setq org-agenda-inhibit-startup t
-      org-agenda-tags-column -200)
-      (setq org-agenda-files '("~/org/inbox.org"
-                               "~/org/notes/20260101T000010--habits-hub__habit_index.org"
-                               "~/org/append-note.org"
-                               "~/org/.calendar"))
-(setq org-default-notes-file "~/org/inbox.org")
-
-;; Archive
-(setq org-archive-location
-      (concat (expand-file-name ".archive/" org-directory)
-              "%s_archive.org::"))
-
-;; Time grid in agenda
-(setq org-agenda-use-time-grid t
-      org-agenda-show-current-time-in-grid t
-      org-agenda-time-grid
-      '((daily today)
-        (600 800 1000 1200 1400 1600 1800 2000 2200)
-        " ┄┄┄┄┄ " "┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄")
-      org-agenda-current-time-string
-      "◀── now ─────────────────────")
-;; ---- Append Note helper ----
-(defun my/append-note-goto-bottom ()
-  "Move point to end of append-note.org with date separator."
-  (let ((today-sep (format-time-string "-- %Y-%m-%d --")))
-    (goto-char (point-max))
-    (unless (save-excursion
-              (goto-char (point-min))
-              (search-forward today-sep nil t))
-      (unless (bolp) (insert "\n"))
-      (insert "\n" today-sep "\n")))
-  (goto-char (point-max)))
-
-(defun my/append-note-open-at-end-h ()
-  "Always place point at the end when visiting append-note.org."
-  (when (and buffer-file-name
-             (file-equal-p buffer-file-name
-                           (expand-file-name "~/org/append-note.org")))
-    (goto-char (point-max))))
-
-(add-hook 'find-file-hook #'my/append-note-open-at-end-h t)
-;; ---- Habit capture helper ----
-(defun my/org-capture-habit ()
-  "Generate a capture template for a habit."
-  (let* ((name (read-string "Habit 名称: "))
-         (raw  (read-string "提醒时间 (HH:MM): "))
-         (repeat (completing-read "重复周期: "
-                                  '(".+1d  — 每天（从完成日起）"
-                                    ".+2d  — 每2天"
-                                    ".+1w  — 每周"
-                                    ".+2w  — 每2周"
-                                    ".+1m  — 每月"
-                                    "++1d  — 每天（固定日期）"
-                                    "++1w  — 每周（固定星期）"
-                                    ".+1d/2d — 每天，最多隔2天"
-                                    ".+1d/3d — 每天，最多隔3天")
-                                  nil t))
-         (repeat-val (car (split-string repeat " ")))
-         (parts (split-string raw ":"))
-         (hour (string-to-number (nth 0 parts)))
-         (min  (string-to-number (nth 1 parts)))
-         (time (format "%02d:%02d" hour min))
-         (today (format-time-string "%Y-%m-%d %a"))
-         (end-min (+ min 5))
-         (end-hour (+ hour (/ end-min 60)))
-         (end-time (format "%02d:%02d" end-hour (% end-min 60))))
-    (format "* TODO %s\nSCHEDULED: <%s %s %s>\n:PROPERTIES:\n:STYLE:    habit\n:calendar-id: yuanxiang424@gmail.com\n:END:\n:org-gcal:\n<%s %s-%s>\n:END:\n"
-            name today time repeat-val today time end-time)))
-;; ---- Capture templates ----
-(setq org-capture-templates
-      '(("a" "Append Note" plain
-         (file+function "~/org/append-note.org" my/append-note-goto-bottom)
-         "- %?"
-         :empty-lines 1 :jump-to-captured t)
-        ("i" "Inbox" entry (file "~/org/inbox.org")
-         "* %?\n:PROPERTIES:\n:CREATED: %U\n:END:\n" :empty-lines 1)
-        ("n" "Note" entry (file "~/org/inbox.org")
-         "* %^{标题}  %^g\n:PROPERTIES:\n:CREATED: %U\n:END:\n\n%?"
-         :empty-lines 1 :jump-to-captured t)
-        ("t" "Task" entry (file "~/org/inbox.org")
-         "* TODO %?\n:PROPERTIES:\n:CREATED: %U\n:END:\n" :empty-lines 1)
-        ("j" "Journal" entry
-         (file my/journal-capture-target)
-         "* %<%H:%M>\n%?"
-         :empty-lines 1 :jump-to-captured t)
-        ("r" "r · 稍后读 [inbox]" entry (file "~/org/inbox.org")
-         "* TODO [[%^{URL}][%^{Title}]]\n:PROPERTIES:\n:CREATED: %U\n:END:\n%?" :empty-lines 1)
-        ("m" "Media")
-        ("mm" "电影 · 想看" entry
-         (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "电影" "想看")
-         "**** TODO %^{片名}\n:PROPERTIES:\n:添加时间: %U\n:END:\n%?"
-         :empty-lines 1 :jump-to-captured t)
-        ("mM" "电影 · 看完" entry
-         (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "电影" "看完")
-         "**** DONE %^{片名}\n:PROPERTIES:\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
-         :empty-lines 1 :jump-to-captured t)
-        ("mt" "电视剧 · 想看" entry
-         (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "电视剧" "想看")
-         "**** TODO %^{片名}\n:PROPERTIES:\n:添加时间: %U\n:END:\n%?"
-         :empty-lines 1 :jump-to-captured t)
-        ("mT" "电视剧 · 看完" entry
-         (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "电视剧" "看完")
-         "**** DONE %^{片名}\n:PROPERTIES:\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
-         :empty-lines 1 :jump-to-captured t)
-        ("ma" "动漫 · 想看" entry
-         (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "动漫" "想看")
-         "**** TODO %^{片名}\n:PROPERTIES:\n:添加时间: %U\n:END:\n%?"
-         :empty-lines 1 :jump-to-captured t)
-        ("mA" "动漫 · 看完" entry
-         (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "动漫" "看完")
-         "**** DONE %^{片名}\n:PROPERTIES:\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
-         :empty-lines 1 :jump-to-captured t)
-        ("b" "Books")
-        ("bb" "书 · 待阅读" entry
-         (file+olp "~/org/notes/20260101T000010--reading-list__read_index.org" "待阅读")
-         "*** TODO %^{书名}\n:PROPERTIES:\n:作者: %^{作者}\n:类型: %^{类型|小说|非虚构|理财|网文|漫画|其他}\n:来源: %^{来源|微信读书|豆瓣|Z-Library|实体书|其他}\n:添加时间: %U\n:END:\n%?"
-         :empty-lines 1 :jump-to-captured t)
-        ("bB" "书 · 阅读中" entry
-         (file+olp "~/org/notes/20260101T000010--reading-list__read_index.org" "阅读中")
-         "*** READING %^{书名}\n:PROPERTIES:\n:作者: %^{作者}\n:类型: %^{类型|小说|非虚构|理财|网文|漫画|其他}\n:来源: %^{来源|微信读书|豆瓣|Z-Library|实体书|其他}\n:添加时间: %U\n:END:\n%?"
-         :empty-lines 1 :jump-to-captured t)
-        ("w" "w · 精读笔记 [ref/]" plain (function my/capture-web-article-target)
-         "%?"
-         :empty-lines 1 :jump-to-captured t)
-        ("h" "Habit" entry (file "~/org/notes/20260101T000010--habits-hub__habit_index.org")
-         (function my/org-capture-habit)
-         :empty-lines 1)
-        ("pl" "Protocol: Read later" entry (file "~/org/inbox.org")
-         "* TODO %:annotation\n:PROPERTIES:\n:CREATED: %U\n:END:\n%i\n"
-         :immediate-finish t :jump-to-captured t)
-        ("pn" "Protocol: Note → references/" plain
-         (function my/protocol-note-target)
-         "#+begin_quote\n%i\n#+end_quote\n%?"
-         :jump-to-captured t)))
-;; ---- Refile targets ----
-(defun my/org-top-level-org-files (dir)
-  "Return top-level non-hidden .org files in DIR."
-  (let ((dir (expand-file-name dir))
-        result)
-    (dolist (path (directory-files dir t "^[^.].*\\.org$") (nreverse result))
-      (when (file-regular-p path)
-        (push path result)))))
-
-(defun my/org-notes-files ()    (my/org-top-level-org-files "~/org/notes/"))
-
-(setq org-refile-targets
-      '(("~/org/inbox.org" :maxlevel . 1)
-        ("~/org/append-note.org" :maxlevel . 1)
-        (my/org-notes-files :maxlevel . 2)))
-(setq org-refile-use-outline-path 'file
-      org-outline-path-complete-in-steps nil
-      org-refile-allow-creating-parent-nodes 'confirm
-      org-refile-use-cache nil)
-;; ---- Tags ----
-(setq org-tag-alist '((:startgroup)
-                      ("work" . ?w) ("personal" . ?p) ("learning" . ?l)
-                      (:endgroup)
-                      ("projectS" . ?s) ("ai" . ?a) ("hiring" . ?h)
-                      ("@office" . ?o) ("@home" . ?H) ("@phone" . ?P)))
-;; ---- Agenda views ----
-(setq org-stuck-projects '("" nil nil ""))
-
-(defun my/skip-habit ()
-  "Skip entries with :STYLE: habit."
-  (let ((subtree-end (save-excursion (org-end-of-subtree t))))
-    (when (string= (org-entry-get nil "STYLE") "habit")
-      subtree-end)))
-
-(setq org-agenda-custom-commands
-      '(("d" "Daily"
-         ((agenda "" ((org-agenda-span 'day)
-                      (org-agenda-start-day nil)
-                      (org-deadline-warning-days 3)
-                      (org-agenda-skip-scheduled-if-done t)
-                      (org-agenda-skip-deadline-if-done t)))
-          (todo "NEXT"
-                ((org-agenda-overriding-header "⚡ Next Actions")
-                 (org-agenda-skip-function 'my/skip-habit)
-                 (org-agenda-sorting-strategy '(priority-down category-keep))))
-          (todo "WAITING"
-                ((org-agenda-overriding-header "⏳ Waiting (FYI)")
-                 (org-agenda-sorting-strategy '(category-keep))))))
-
-        ("w" "Weekly"
-         ((agenda "" ((org-agenda-span 'week)
-                      (org-deadline-warning-days 7)
-                      (org-habit-show-habits nil)))
-          (tags-todo "+work"
-                     ((org-agenda-overriding-header "🏢 Work")
-                      (org-agenda-skip-function 'my/skip-habit)
-                      (org-agenda-sorting-strategy '(todo-state-down priority-down))))
-          (tags-todo "+personal"
-                     ((org-agenda-overriding-header "🏠 Personal")
-                      (org-agenda-skip-function 'my/skip-habit)
-                      (org-agenda-sorting-strategy '(todo-state-down priority-down))))
-          (tags-todo "+learning"
-                     ((org-agenda-overriding-header "📚 Learning")
-                      (org-agenda-skip-function 'my/skip-habit)
-                      (org-agenda-sorting-strategy '(todo-state-down priority-down))))
-          (tags-todo "-work-personal-learning"
-                     ((org-agenda-overriding-header "📦 Untagged")
-                      (org-agenda-skip-function 'my/skip-habit)
-                      (org-agenda-sorting-strategy '(todo-state-down category-keep))))))
-
-        ("g" "GTD Review"
-         ((agenda "" ((org-agenda-span 'day)
-                      (org-agenda-start-day nil)))
-          (todo "NEXT"
-                ((org-agenda-overriding-header "⚡ Next Actions")
-                 (org-agenda-skip-function 'my/skip-habit)
-                 (org-agenda-sorting-strategy '(priority-down category-keep))))
-          (todo "TODO"
-                ((org-agenda-overriding-header "📋 All Tasks (Backlog)")
-                 (org-agenda-skip-function 'my/skip-habit)
-                 (org-agenda-sorting-strategy '(tag-up priority-down category-keep))))
-          (todo "WAITING"
-                ((org-agenda-overriding-header "⏳ Waiting")
-                 (org-agenda-sorting-strategy '(category-keep))))
-          (todo "HOLD"
-                ((org-agenda-overriding-header "🧊 On Hold")
-                 (org-agenda-sorting-strategy '(category-keep))))))))
-;; ---- Babel image dir ----
-(defun my/org-babel-image-dir ()
-  (when buffer-file-name
-    (let ((dir (expand-file-name ".images/" (file-name-directory buffer-file-name))))
-      (make-directory dir t)
-      dir)))
-
-(advice-add 'org-babel-temp-file :around
-            (lambda (orig-fn prefix &optional suffix)
-              (let ((dir (my/org-babel-image-dir)))
-                (if (and dir suffix (string-match-p "\\.\\(png\\|svg\\|pdf\\|jpg\\)$" suffix))
-                    (let ((temporary-file-directory dir))
-                      (funcall orig-fn prefix suffix))
-                  (funcall orig-fn prefix suffix)))))
-
-;; ---- Force org-babel shell blocks to use Git bash on Windows ----
-;; Default shell-file-name is cmdproxy.exe → cmd.exe, which can't handle "\"
-;; line continuations, $VAR expansion, or the "TOKEN=val" preamble that :var emits.
-;; 8.3 short path avoids the space in "Program Files" — ob-shell's
-;; org-babel-eval uses (format "%s %s" shell-file-name ...) without quoting.
-(defvar my/org-babel-bash nil)
-(setq my/org-babel-bash "C:/PROGRA~1/Git/usr/bin/bash.exe")
-(after! ob-shell
-  (define-advice org-babel-execute:shell
-      (:around (orig body params) use-bash-on-windows)
-    (if (and (eq system-type 'windows-nt)
-             (file-exists-p my/org-babel-bash))
-        (let ((shell-file-name my/org-babel-bash)
-              (shell-command-switch "-c")
-              (explicit-shell-file-name my/org-babel-bash))
-          (funcall orig body params))
-      (funcall orig body params)))
-  (define-advice org-babel-execute:bash
-      (:around (orig body params) use-bash-on-windows)
-    (if (and (eq system-type 'windows-nt)
-             (file-exists-p my/org-babel-bash))
-        (let ((shell-file-name my/org-babel-bash)
-              (shell-command-switch "-c")
-              (explicit-shell-file-name my/org-babel-bash))
-          (funcall orig body params))
-      (funcall orig body params))))
-;; ---- Media library auto-rebucket on TODO state change ----
-(defun my/media-org-file-p ()
-  "Return non-nil when visiting the media library file."
-  (and (buffer-file-name)
-       (file-equal-p (expand-file-name "~/org/notes/20260101T000010--media-collection__index.org")
-                     (expand-file-name (buffer-file-name)))))
-
-(defun my/media-org-target-section-for-state (state)
-  "Map TODO STATE to a media library section name."
-  (pcase state
-    ((or "TODO" "NEXT") "想看")
-    ("PROG" "在看")
-    ("DONE" "看完")
-    ("FAIL" "已放弃")
-    (_ nil)))
-
-(defun my/media-org-current-entry-context ()
-  "Return plist for the current media entry, or nil when not applicable."
-  (save-excursion
-    (org-back-to-heading t)
-    (when (= (org-outline-level) 4)
-      (let (category section)
-        (save-excursion
-          (while (org-up-heading-safe)
-            (pcase (org-outline-level)
-              (3 (setq section (org-get-heading t t t t)))
-              (2 (setq category (org-get-heading t t t t))))))
-        (when (and (member category '("电影" "电视剧" "动漫"))
-                   (member section '("想看" "在看" "看完" "已放弃")))
-          (list :category category :section section))))))
-
-(defun my/media-org-find-section-position (category section)
-  "Return buffer position of CATEGORY -> SECTION in media.org."
-  (save-excursion
-    (save-restriction
-      (goto-char (point-min))
-      (when (re-search-forward "^\\* 影视动漫$" nil t)
-        (org-narrow-to-subtree)
-        (goto-char (point-min))
-        (when (re-search-forward (format "^\\*\\* %s$" (regexp-quote category)) nil t)
-          (org-narrow-to-subtree)
-          (goto-char (point-min))
-          (when (re-search-forward (format "^\\*\\*\\* %s$" (regexp-quote section)) nil t)
-            (line-beginning-position)))))))
-
-(defun my/media-org-rebucket-current-entry ()
-  "Move the current media entry to the section implied by its TODO state."
-  (interactive)
-  (when-let* ((context (and (my/media-org-file-p)
-                            (my/media-org-current-entry-context)))
-              (target-section (my/media-org-target-section-for-state org-state))
-              (category (plist-get context :category))
-              (current-section (plist-get context :section)))
-    (unless (equal current-section target-section)
-      (let ((level (org-outline-level)))
-        (org-cut-subtree)
-        (when-let ((target-pos (my/media-org-find-section-position category target-section)))
-          (goto-char target-pos)
-          (org-end-of-subtree t t)
-          (unless (bolp)
-            (insert "\n"))
-          (org-paste-subtree level))))))
-
-(add-hook 'org-after-todo-state-change-hook #'my/media-org-rebucket-current-entry)
-(defun my/books-org-file-p ()
-  "Return non-nil when visiting the books collection file."
-  (and (buffer-file-name)
-       (file-equal-p (expand-file-name "~/org/notes/20260101T000010--reading-list__read_index.org")
-                     (expand-file-name (buffer-file-name)))))
-
-(defun my/books-org-target-section-for-state (state)
-  "Map TODO STATE to a books collection section name."
-  (pcase state
-    ((or "TODO" "NEXT" "WAITING") "待阅读")
-    ("READING" "阅读中")
-    ("DONE" "已读完")
-    ((or "DROPPED" "HOLD" "CANCELLED") "已放弃")
-    (_ nil)))
-
-(defun my/books-org-current-entry-context ()
-  "Return plist for the current books entry, or nil when not applicable."
-  (save-excursion
-    (org-back-to-heading t)
-    (when (= (org-outline-level) 2)
-      (let (section)
-        (save-excursion
-          (when (org-up-heading-safe)
-            (setq section (org-get-heading t t t t))))
-        (when (member section '("待阅读" "阅读中" "已读完" "已放弃"))
-          (list :section section))))))
-
-(defun my/books-org-find-section-position (section)
-  "Return buffer position of SECTION in books.org."
-  (save-excursion
-    (save-restriction
-      (goto-char (point-min))
-      (when (re-search-forward (format "^\\* %s$" (regexp-quote section)) nil t)
-        (line-beginning-position)))))
-
-(defun my/books-org-rebucket-current-entry ()
-  "Move the current books entry to the section implied by its TODO state."
-  (interactive)
-  (when-let* ((context (and (my/books-org-file-p)
-                            (my/books-org-current-entry-context)))
-              (target-section (my/books-org-target-section-for-state org-state))
-              (current-section (plist-get context :section)))
-    (unless (equal current-section target-section)
-      (let ((level (org-outline-level)))
-        (org-cut-subtree)
-        (when-let ((target-pos (my/books-org-find-section-position target-section)))
-          (goto-char target-pos)
-          (org-end-of-subtree t t)
-          (unless (bolp)
-            (insert "\n"))
-          (org-paste-subtree level))))))
-
-(add-hook 'org-after-todo-state-change-hook #'my/books-org-rebucket-current-entry)
-;; ---- Archive done tasks ----
-(defun my/org-entry-done-or-cancelled-p ()
-  "Return non-nil when the current Org heading is DONE or CANCELLED."
-  (member (org-get-todo-state) '("DONE" "CANCELLED")))
-
-(defun my/org-entry-has-done-or-cancelled-parent-p ()
-  "Return non-nil when an ancestor heading is DONE or CANCELLED."
-  (save-excursion
-    (let (found)
-      (while (and (not found) (org-up-heading-safe))
-        (when (my/org-entry-done-or-cancelled-p)
-          (setq found t)))
-      found)))
-
-(defun my/org-archive-target-file ()
-  "Return the expanded archive file path for the current Org buffer."
-  (let* ((fname (file-name-nondirectory (buffer-file-name)))
-         (location (replace-regexp-in-string "%s" fname org-archive-location t t)))
-    (expand-file-name (car (split-string location "::")))))
-
-(defun my/org-archive-done-tasks ()
-  "Archive DONE/CANCELLED tasks in the current file."
-  (interactive)
-  (unless (buffer-file-name)
-    (user-error "Not visiting a file; open an Org file first"))
-  (let (items)
-    (org-with-wide-buffer
-      (org-map-entries
-       (lambda ()
-         ;; Only archive the outermost done subtree; nested done children move
-         ;; with their archived parent and do not need a second pass.
-         (unless (my/org-entry-has-done-or-cancelled-parent-p)
-           (let ((beg (point))
-                 (end (save-excursion (org-end-of-subtree t t))))
-             (push (list :beg beg
-                         :end end
-                         :text (buffer-substring-no-properties beg end))
-                   items))))
-       "/DONE|CANCELLED" 'file))
-    (setq items
-          (sort items
-                (lambda (a b)
-                  (> (plist-get a :beg) (plist-get b :beg)))))
-    (let ((count (length items))
-          (archive-file (my/org-archive-target-file)))
-      (when items
-        (make-directory (file-name-directory archive-file) t)
-        ;; Remove inline image overlays before structural edits on Windows.
-        (when (fboundp 'org-remove-inline-images)
-          (org-remove-inline-images))
-        (with-temp-buffer
-          (when (file-exists-p archive-file)
-            (insert-file-contents archive-file))
-          (goto-char (point-max))
-          (unless (bolp)
-            (insert "\n"))
-          (dolist (item (reverse items))
-            (insert "\n" (plist-get item :text))
-            (unless (bolp)
-              (insert "\n")))
-          (write-region (point-min) (point-max) archive-file nil 'silent))
-        (save-excursion
-          (dolist (item items)
-            (delete-region (plist-get item :beg) (plist-get item :end))))
-        (save-buffer))
-      (message "Archived %d done/cancelled task(s) in %s"
-               count (file-name-nondirectory (buffer-file-name))))))
-;; Hide redundant tags in agenda
-  (setq org-agenda-hide-tags-regexp "personal\\|habit")
-
-  ;; ;; ---- CJK emphasis fix (中文加粗/高亮) ----
-  ;; (setcar org-emphasis-regexp-components
-  ;;         " \t('\"{[:alpha:][:nonascii:]")
-  ;; (setcar (nthcdr 1 org-emphasis-regexp-components)
-  ;;         "[:alpha:][:nonascii:]- \t.,:!?;'\")}\\")
-  ;; (org-set-emph-re 'org-emphasis-regexp-components
-  ;;                  org-emphasis-regexp-components))
-
-;; 从ljg配置里抄的
 (after! org
-  ;; @Eli 帮忙写的解决标记符号前后空格问题的代码, 感谢.
+  (use-package! spacious-padding
+    :custom (line-spacing 3)
+    :init (spacious-padding-mode 1))
+
+  (use-package! pangu-spacing
+    :config
+    (global-pangu-spacing-mode 1)
+    (setq pangu-spacing-real-insert-separtor t))
+
+  (use-package! olivetti
+    :hook (org-mode . olivetti-mode)
+    :config (setq olivetti-body-width 92))
+
+  (use-package! ultra-scroll
+    :init
+    (setq scroll-conservatively 101
+          scroll-margin 0)
+    :config
+    (ultra-scroll-mode 1))
+
+  (use-package! org-appear
+    :hook (org-mode . org-appear-mode)
+    :config
+    (setq org-appear-autoemphasis t
+          org-appear-autosubmarkers t
+          org-appear-autolinks nil)))
+(after! org
+  (require 'org-attach)
+  (setq org-attach-id-dir (expand-file-name "data/" org-directory)
+        org-attach-method 'cp
+        org-attach-use-inheritance t
+        org-attach-store-link-p 'attached
+        org-attach-auto-tag nil)
+
+  ;; Fix attachment 链接中文乱码
+  (defun my/org-attach-store-link-decoded (&rest _)
+    "Fix stored links from `org-attach-attach' to include decoded description."
+    (when org-stored-links
+      (let ((latest (car org-stored-links)))
+        (when (and (stringp (car latest))
+                   (string-prefix-p "attachment:" (car latest))
+                   (or (null (cadr latest)) (string= (cadr latest) "")))
+          (setcar (cdr latest)
+                  (decode-coding-string
+                   (url-unhex-string
+                    (file-name-nondirectory
+                     (substring (car latest) (length "attachment:"))))
+                   'utf-8))))))
+  (advice-add 'org-attach-attach :after #'my/org-attach-store-link-decoded))
+(after! org
+  ;; @Eli 帮忙写的解决标记符号前后空格问题的代码
   (setq org-emphasis-regexp-components '("-[:space:]('\"{[:nonascii:]"
                                          "-[:space:].,:!?;'\")}\\[[:nonascii:]"
                                          "[:space:]"
@@ -830,7 +268,6 @@
                                          1))
   (setq org-match-substring-regexp
         (concat
-         ;; 限制上标和下标的匹配范围，org 中对其的介绍见：(org) Subscripts and superscripts
          "\\([0-9a-zA-Zα-γΑ-Ω]\\)\\([_^]\\)\\("
          "\\(?:" (org-create-multibrace-regexp "{" "}" org-match-sexp-depth) "\\)"
          "\\|"
@@ -838,10 +275,8 @@
          "\\|"
          "\\(?:\\*\\|[+-]?[[:alnum:].,\\]*[[:alnum:]]\\)\\)"))
   (org-set-emph-re 'org-emphasis-regexp-components org-emphasis-regexp-components)
-  (org-element-update-syntax))
+  (org-element-update-syntax)
 
-
-(after! org
   ;; 标记字符前后空格优化问题
   (defun eli/org-do-emphasis-faces (limit)
     "Run through the buffer and emphasize strings."
@@ -854,33 +289,22 @@
             (when (save-excursion
                     (goto-char (match-beginning 0))
                     (and
-                     ;; Do not match if preceded by org-emphasis
                      (not (save-excursion
                             (forward-char 1)
                             (get-pos-property (point) 'org-emphasis)))
-                     ;; Do not match in latex fragments.
-                     ;; (not (org-inside-LaTeX-fragment-p))
-                     ;; Do not match in Drawer.
                      (not (org-match-line
                            "^[    ]*:\\(\\(?:\\w\\|[-_]\\)+\\):[      ]*"))
-                     ;; Do not match table hlines.
                      (not (and (equal marker "+")
                                (org-match-line
                                 "[ \t]*\\(|[-+]+|?\\|\\+[-+]+\\+\\)[ \t]*$")))
-                     ;; Do not match headline stars.  Do not consider
-                     ;; stars of a headline as closing marker for bold
-                     ;; markup either.
                      (not (and (equal marker "*")
                                (save-excursion
                                  (forward-char)
                                  (skip-chars-backward "*")
                                  (looking-at-p org-outline-regexp-bol))))
-                     ;; Match full emphasis markup regexp.
                      (looking-at (if verbatim? org-verbatim-re org-emph-re))
-                     ;; Do not span over paragraph boundaries.
                      (not (string-match-p org-element-paragraph-separate
                                           (match-string 2)))
-                     ;; Do not span over cells in table rows.
                      (not (and (save-match-data (org-match-line "[ \t]*|"))
                                (string-match-p "|" (match-string 4))))))
               (pcase-let ((`(,_ ,face ,_) (assoc marker org-emphasis-alist))
@@ -909,13 +333,7 @@
   (advice-add #'org-do-emphasis-faces :override #'eli/org-do-emphasis-faces)
 
   (defun eli/org-element--parse-generic-emphasis (mark type)
-    "Parse emphasis object at point, if any.
-
-MARK is the delimiter string used.  TYPE is a symbol among
-`bold', `code', `italic', `strike-through', `underline', and
-`verbatim'.
-
-Assume point is at first MARK."
+    "Parse emphasis object at point, if any."
     (save-excursion
       (let ((origin (point)))
         (unless (bolp) (forward-char -1))
@@ -954,6 +372,498 @@ Assume point is at first MARK."
                                    :contents-end contents-end)))))))))))))
 
   (advice-add #'org-element--parse-generic-emphasis :override #'eli/org-element--parse-generic-emphasis))
+(after! org
+  (setq org-agenda-inhibit-startup t
+        org-agenda-tags-column 'auto
+        org-agenda-files '("~/org/inbox.org"
+                           "~/org/notes/20260101T000010--habits-hub__habit_index.org"
+                           "~/org/append-note.org"
+                           "~/org/.calendar")
+        org-default-notes-file "~/org/inbox.org")
+
+  ;; Archive
+  (setq org-archive-location
+        (concat (expand-file-name ".archive/" org-directory)
+                "%s_archive.org::"))
+
+  ;; Time grid
+  (setq org-agenda-use-time-grid t
+        org-agenda-show-current-time-in-grid t
+        org-agenda-time-grid
+        '((daily today)
+          (600 800 1000 1200 1400 1600 1800 2000 2200)
+          " ┄┄┄┄┄ " "┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄")
+        org-agenda-current-time-string
+        "◀── now ─────────────────────")
+
+  ;; Hide redundant tags in agenda
+  (setq org-agenda-hide-tags-regexp "personal\\|habit\\|index")
+
+  ;; ---- Agenda views ----
+  (setq org-stuck-projects '("" nil nil ""))
+
+  (defun my/skip-habit ()
+    "Skip entries with :STYLE: habit."
+    (let ((subtree-end (save-excursion (org-end-of-subtree t))))
+      (when (string= (org-entry-get nil "STYLE") "habit")
+        subtree-end)))
+
+  (setq org-agenda-custom-commands
+        '(("d" "Daily"
+           ((agenda "" ((org-agenda-span 'day)
+                        (org-agenda-start-day nil)
+                        (org-deadline-warning-days 3)
+                        (org-agenda-skip-scheduled-if-done t)
+                        (org-agenda-skip-deadline-if-done t)))
+            (todo "NEXT"
+                  ((org-agenda-overriding-header "⚡ Next Actions")
+                   (org-agenda-skip-function 'my/skip-habit)
+                   (org-agenda-sorting-strategy '(priority-down category-keep))))
+            (todo "WAITING"
+                  ((org-agenda-overriding-header "⏳ Waiting (FYI)")
+                   (org-agenda-sorting-strategy '(category-keep))))))
+
+          ("w" "Weekly"
+           ((agenda "" ((org-agenda-span 'week)
+                        (org-deadline-warning-days 7)
+                        (org-habit-show-habits nil)))
+            (tags-todo "+work"
+                       ((org-agenda-overriding-header "🏢 Work")
+                        (org-agenda-skip-function 'my/skip-habit)
+                        (org-agenda-sorting-strategy '(todo-state-down priority-down))))
+            (tags-todo "+personal"
+                       ((org-agenda-overriding-header "🏠 Personal")
+                        (org-agenda-skip-function 'my/skip-habit)
+                        (org-agenda-sorting-strategy '(todo-state-down priority-down))))
+            (tags-todo "+learning"
+                       ((org-agenda-overriding-header "📚 Learning")
+                        (org-agenda-skip-function 'my/skip-habit)
+                        (org-agenda-sorting-strategy '(todo-state-down priority-down))))
+            (tags-todo "-work-personal-learning"
+                       ((org-agenda-overriding-header "📦 Untagged")
+                        (org-agenda-skip-function 'my/skip-habit)
+                        (org-agenda-sorting-strategy '(todo-state-down category-keep))))))
+
+          ("g" "GTD Review"
+           ((agenda "" ((org-agenda-span 'day)
+                        (org-agenda-start-day nil)))
+            (todo "NEXT"
+                  ((org-agenda-overriding-header "⚡ Next Actions")
+                   (org-agenda-skip-function 'my/skip-habit)
+                   (org-agenda-sorting-strategy '(priority-down category-keep))))
+            (todo "TODO"
+                  ((org-agenda-overriding-header "📋 All Tasks (Backlog)")
+                   (org-agenda-skip-function 'my/skip-habit)
+                   (org-agenda-sorting-strategy '(tag-up priority-down category-keep))))
+            (todo "WAITING"
+                  ((org-agenda-overriding-header "⏳ Waiting")
+                   (org-agenda-sorting-strategy '(category-keep))))
+            (todo "HOLD"
+                  ((org-agenda-overriding-header "🧊 On Hold")
+                   (org-agenda-sorting-strategy '(category-keep)))))))))
+(after! org
+  ;; ---- Append Note helper ----
+  (defun my/append-note-goto-bottom ()
+    "Move point to end of append-note.org with date separator."
+    (let ((today-sep (format-time-string "-- %Y-%m-%d --")))
+      (goto-char (point-max))
+      (unless (save-excursion
+                (goto-char (point-min))
+                (search-forward today-sep nil t))
+        (unless (bolp) (insert "\n"))
+        (insert "\n" today-sep "\n")))
+    (goto-char (point-max)))
+
+  (defun my/append-note-open-at-end-h ()
+    "Always place point at the end when visiting append-note.org."
+    (when (and buffer-file-name
+               (file-equal-p buffer-file-name
+                             (expand-file-name "~/org/append-note.org")))
+      (goto-char (point-max))))
+
+  (add-hook 'find-file-hook #'my/append-note-open-at-end-h t)
+
+  ;; ---- Habit capture helper ----
+  (defun my/org-capture-habit ()
+    "Generate a capture template for a habit."
+    (let* ((name (read-string "Habit 名称: "))
+           (raw  (read-string "提醒时间 (HH:MM): "))
+           (repeat (completing-read "重复周期: "
+                                    '(".+1d  — 每天（从完成日起）"
+                                      ".+2d  — 每2天"
+                                      ".+1w  — 每周"
+                                      ".+2w  — 每2周"
+                                      ".+1m  — 每月"
+                                      "++1d  — 每天（固定日期）"
+                                      "++1w  — 每周（固定星期）"
+                                      ".+1d/2d — 每天，最多隔2天"
+                                      ".+1d/3d — 每天，最多隔3天")
+                                    nil t))
+           (repeat-val (car (split-string repeat " ")))
+           (parts (split-string raw ":"))
+           (hour (string-to-number (nth 0 parts)))
+           (min  (string-to-number (nth 1 parts)))
+           (time (format "%02d:%02d" hour min))
+           (today (format-time-string "%Y-%m-%d %a"))
+           (end-min (+ min 5))
+           (end-hour (+ hour (/ end-min 60)))
+           (end-time (format "%02d:%02d" end-hour (% end-min 60))))
+      (format "* TODO %s\nSCHEDULED: <%s %s %s>\n:PROPERTIES:\n:STYLE:    habit\n:calendar-id: yuanxiang424@gmail.com\n:END:\n:org-gcal:\n<%s %s-%s>\n:END:\n"
+              name today time repeat-val today time end-time))))
+(defun my/capture-web-article-target ()
+  "Target function for org-capture: reference note from clipboard URL."
+  (let* ((url (string-trim (current-kill 0 t)))
+         (title (or (ignore-errors
+                      (with-temp-buffer
+                        (url-insert-file-contents url)
+                        (goto-char (point-min))
+                        (when (re-search-forward "<title>\\([^<]*\\)</title>" nil t)
+                          (string-trim (match-string 1)))))
+                    (read-string "Title: ")))
+         (id (format-time-string "%Y%m%dT%H%M%S"))
+         (slug (replace-regexp-in-string "[^a-zA-Z0-9一-鿿]+" "-"
+                                         (downcase (string-trim title)) t t))
+         (slug (replace-regexp-in-string "^-\\|-$" "" slug))
+         (file (expand-file-name (format "notes/%s--%s__read.org" id slug) org-directory)))
+    (set-buffer (org-capture-target-buffer file))
+    (when (= (buffer-size) 0)
+      (insert (format "#+title: %s\n#+date: [%s]\n#+filetags: :read:\n#+identifier: %s\n\n* Source\n%s\n\n* Summary\n\n* My Notes\n"
+                      title (format-time-string "%Y-%m-%d %a") id url)))
+    (goto-char (point-max))
+    (or (re-search-backward "^\\* My Notes" nil t) (goto-char (point-max)))
+    (forward-line 1)))
+
+(defun my/protocol-note-target ()
+  "Target for org-capture 'pn': reference note from org-protocol."
+  (let* ((url   (or (plist-get org-store-link-plist :link)
+                    (plist-get org-store-link-plist :url) ""))
+         (title (or (plist-get org-store-link-plist :description)
+                    (read-string "Title: ")))
+         (slug  (replace-regexp-in-string
+                 "^-\\|-$" ""
+                 (replace-regexp-in-string
+                  "[^a-zA-Z0-9一-鿿]+" "-"
+                  (downcase (string-trim title)) t t)))
+         (id    (format-time-string "%Y%m%dT%H%M%S"))
+         (file  (expand-file-name (format "notes/%s--%s__read.org" id slug) org-directory)))
+    (set-buffer (org-capture-target-buffer file))
+    (when (= (buffer-size) 0)
+      (insert (format "#+title: %s\n#+date: [%s]\n#+filetags: :read:\n#+identifier: %s\n\n* Source\n%s\n\n* Summary\n\n* My Notes\n"
+                      title (format-time-string "%Y-%m-%d %a") id url)))
+    (goto-char (point-max))
+    (or (re-search-backward "^\\* My Notes" nil t) (goto-char (point-max)))
+    (forward-line 1)))
+(after! org
+  (setq org-capture-templates
+        '(("a" "Append Note" plain
+           (file+function "~/org/append-note.org" my/append-note-goto-bottom)
+           "- %?"
+           :empty-lines 1 :jump-to-captured t)
+          ("i" "Inbox" entry (file "~/org/inbox.org")
+           "* %?\n:PROPERTIES:\n:CREATED: %U\n:END:\n" :empty-lines 1)
+          ("n" "Note" entry (file "~/org/inbox.org")
+           "* %^{标题}  %^g\n:PROPERTIES:\n:CREATED: %U\n:END:\n\n%?"
+           :empty-lines 1 :jump-to-captured t)
+          ("t" "Task" entry (file "~/org/inbox.org")
+           "* TODO %?\n:PROPERTIES:\n:CREATED: %U\n:END:\n" :empty-lines 1)
+          ("j" "Journal" entry
+           (file my/journal-capture-target)
+           "* %<%H:%M>\n%?"
+           :empty-lines 1 :jump-to-captured t)
+          ("r" "r · 稍后读 [inbox]" entry (file "~/org/inbox.org")
+           "* TODO [[%^{URL}][%^{Title}]]\n:PROPERTIES:\n:CREATED: %U\n:END:\n%?" :empty-lines 1)
+          ("m" "Media")
+          ("mm" "电影 · 想看" entry
+           (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "电影" "想看")
+           "**** TODO %^{片名}\n:PROPERTIES:\n:添加时间: %U\n:END:\n%?"
+           :empty-lines 1 :jump-to-captured t)
+          ("mM" "电影 · 看完" entry
+           (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "电影" "看完")
+           "**** DONE %^{片名}\n:PROPERTIES:\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
+           :empty-lines 1 :jump-to-captured t)
+          ("mt" "电视剧 · 想看" entry
+           (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "电视剧" "想看")
+           "**** TODO %^{片名}\n:PROPERTIES:\n:添加时间: %U\n:END:\n%?"
+           :empty-lines 1 :jump-to-captured t)
+          ("mT" "电视剧 · 看完" entry
+           (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "电视剧" "看完")
+           "**** DONE %^{片名}\n:PROPERTIES:\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
+           :empty-lines 1 :jump-to-captured t)
+          ("ma" "动漫 · 想看" entry
+           (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "动漫" "想看")
+           "**** TODO %^{片名}\n:PROPERTIES:\n:添加时间: %U\n:END:\n%?"
+           :empty-lines 1 :jump-to-captured t)
+          ("mA" "动漫 · 看完" entry
+           (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "动漫" "看完")
+           "**** DONE %^{片名}\n:PROPERTIES:\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
+           :empty-lines 1 :jump-to-captured t)
+          ("b" "Books")
+          ("bb" "书 · 待阅读" entry
+           (file+olp "~/org/notes/20260101T000010--reading-list__read_index.org" "待阅读")
+           "*** TODO %^{书名}\n:PROPERTIES:\n:作者: %^{作者}\n:类型: %^{类型|小说|非虚构|理财|网文|漫画|其他}\n:来源: %^{来源|微信读书|豆瓣|Z-Library|实体书|其他}\n:添加时间: %U\n:END:\n%?"
+           :empty-lines 1 :jump-to-captured t)
+          ("bB" "书 · 阅读中" entry
+           (file+olp "~/org/notes/20260101T000010--reading-list__read_index.org" "阅读中")
+           "*** READING %^{书名}\n:PROPERTIES:\n:作者: %^{作者}\n:类型: %^{类型|小说|非虚构|理财|网文|漫画|其他}\n:来源: %^{来源|微信读书|豆瓣|Z-Library|实体书|其他}\n:添加时间: %U\n:END:\n%?"
+           :empty-lines 1 :jump-to-captured t)
+          ("w" "w · 精读笔记 [ref/]" plain (function my/capture-web-article-target)
+           "%?"
+           :empty-lines 1 :jump-to-captured t)
+          ("h" "Habit" entry (file "~/org/notes/20260101T000010--habits-hub__habit_index.org")
+           (function my/org-capture-habit)
+           :empty-lines 1)
+          ("pl" "Protocol: Read later" entry (file "~/org/inbox.org")
+           "* TODO %:annotation\n:PROPERTIES:\n:CREATED: %U\n:END:\n%i\n"
+           :immediate-finish t :jump-to-captured t)
+          ("pn" "Protocol: Note → references/" plain
+           (function my/protocol-note-target)
+           "#+begin_quote\n%i\n#+end_quote\n%?"
+           :jump-to-captured t))))
+(after! org
+  (defun my/org-top-level-org-files (dir)
+    "Return top-level non-hidden .org files in DIR."
+    (let ((dir (expand-file-name dir))
+          result)
+      (dolist (path (directory-files dir t "^[^.].*\\.org$") (nreverse result))
+        (when (file-regular-p path)
+          (push path result)))))
+
+  (defun my/org-notes-files () (my/org-top-level-org-files "~/org/notes/"))
+
+  (setq org-refile-targets
+        '(("~/org/inbox.org" :maxlevel . 1)
+          ("~/org/append-note.org" :maxlevel . 1)
+          (my/org-notes-files :maxlevel . 2)))
+  (setq org-refile-use-outline-path 'file
+        org-outline-path-complete-in-steps nil
+        org-refile-allow-creating-parent-nodes 'confirm
+        org-refile-use-cache nil)
+
+  ;; ---- Tags ----
+  (setq org-tag-alist '((:startgroup)
+                        ("work" . ?w) ("personal" . ?p) ("learning" . ?l)
+                        (:endgroup)
+                        ("projectS" . ?s) ("ai" . ?a) ("hiring" . ?h)
+                        ("@office" . ?o) ("@home" . ?H) ("@phone" . ?P))))
+(after! org
+  (defun my/org-babel-image-dir ()
+    (when buffer-file-name
+      (let ((dir (expand-file-name ".images/" (file-name-directory buffer-file-name))))
+        (make-directory dir t)
+        dir)))
+
+  (advice-add 'org-babel-temp-file :around
+              (lambda (orig-fn prefix &optional suffix)
+                (let ((dir (my/org-babel-image-dir)))
+                  (if (and dir suffix (string-match-p "\\.\\(png\\|svg\\|pdf\\|jpg\\)$" suffix))
+                      (let ((temporary-file-directory dir))
+                        (funcall orig-fn prefix suffix))
+                    (funcall orig-fn prefix suffix))))))
+
+;; ---- Force org-babel shell blocks to use Git bash on Windows ----
+(defvar my/org-babel-bash nil)
+(setq my/org-babel-bash "C:/PROGRA~1/Git/usr/bin/bash.exe")
+(after! ob-shell
+  (define-advice org-babel-execute:shell
+      (:around (orig body params) use-bash-on-windows)
+    (if (and (eq system-type 'windows-nt)
+             (file-exists-p my/org-babel-bash))
+        (let ((shell-file-name my/org-babel-bash)
+              (shell-command-switch "-c")
+              (explicit-shell-file-name my/org-babel-bash))
+          (funcall orig body params))
+      (funcall orig body params)))
+  (define-advice org-babel-execute:bash
+      (:around (orig body params) use-bash-on-windows)
+    (if (and (eq system-type 'windows-nt)
+             (file-exists-p my/org-babel-bash))
+        (let ((shell-file-name my/org-babel-bash)
+              (shell-command-switch "-c")
+              (explicit-shell-file-name my/org-babel-bash))
+          (funcall orig body params))
+      (funcall orig body params))))
+(after! org
+  (defun my/media-org-file-p ()
+    "Return non-nil when visiting the media library file."
+    (and (buffer-file-name)
+         (file-equal-p (expand-file-name "~/org/notes/20260101T000010--media-collection__index.org")
+                       (expand-file-name (buffer-file-name)))))
+
+  (defun my/media-org-target-section-for-state (state)
+    "Map TODO STATE to a media library section name."
+    (pcase state
+      ((or "TODO" "NEXT") "想看")
+      ("PROG" "在看")
+      ("DONE" "看完")
+      ("FAIL" "已放弃")
+      (_ nil)))
+
+  (defun my/media-org-current-entry-context ()
+    "Return plist for the current media entry, or nil when not applicable."
+    (save-excursion
+      (org-back-to-heading t)
+      (when (= (org-outline-level) 4)
+        (let (category section)
+          (save-excursion
+            (while (org-up-heading-safe)
+              (pcase (org-outline-level)
+                (3 (setq section (org-get-heading t t t t)))
+                (2 (setq category (org-get-heading t t t t))))))
+          (when (and (member category '("电影" "电视剧" "动漫"))
+                     (member section '("想看" "在看" "看完" "已放弃")))
+            (list :category category :section section))))))
+
+  (defun my/media-org-find-section-position (category section)
+    "Return buffer position of CATEGORY -> SECTION in media.org."
+    (save-excursion
+      (save-restriction
+        (goto-char (point-min))
+        (when (re-search-forward "^\\* 影视动漫$" nil t)
+          (org-narrow-to-subtree)
+          (goto-char (point-min))
+          (when (re-search-forward (format "^\\*\\* %s$" (regexp-quote category)) nil t)
+            (org-narrow-to-subtree)
+            (goto-char (point-min))
+            (when (re-search-forward (format "^\\*\\*\\* %s$" (regexp-quote section)) nil t)
+              (line-beginning-position)))))))
+
+  (defun my/media-org-rebucket-current-entry ()
+    "Move the current media entry to the section implied by its TODO state."
+    (interactive)
+    (when-let* ((context (and (my/media-org-file-p)
+                              (my/media-org-current-entry-context)))
+                (target-section (my/media-org-target-section-for-state org-state))
+                (category (plist-get context :category))
+                (current-section (plist-get context :section)))
+      (unless (equal current-section target-section)
+        (let ((level (org-outline-level)))
+          (org-cut-subtree)
+          (when-let ((target-pos (my/media-org-find-section-position category target-section)))
+            (goto-char target-pos)
+            (org-end-of-subtree t t)
+            (unless (bolp)
+              (insert "\n"))
+            (org-paste-subtree level))))))
+
+  (add-hook 'org-after-todo-state-change-hook #'my/media-org-rebucket-current-entry))
+(after! org
+  (defun my/books-org-file-p ()
+    "Return non-nil when visiting the books collection file."
+    (and (buffer-file-name)
+         (file-equal-p (expand-file-name "~/org/notes/20260101T000010--reading-list__read_index.org")
+                       (expand-file-name (buffer-file-name)))))
+
+  (defun my/books-org-target-section-for-state (state)
+    "Map TODO STATE to a books collection section name."
+    (pcase state
+      ((or "TODO" "NEXT" "WAITING") "待阅读")
+      ("READING" "阅读中")
+      ("DONE" "已读完")
+      ((or "DROPPED" "HOLD" "CANCELLED") "已放弃")
+      (_ nil)))
+
+  (defun my/books-org-current-entry-context ()
+    "Return plist for the current books entry, or nil when not applicable."
+    (save-excursion
+      (org-back-to-heading t)
+      (when (= (org-outline-level) 2)
+        (let (section)
+          (save-excursion
+            (when (org-up-heading-safe)
+              (setq section (org-get-heading t t t t))))
+          (when (member section '("待阅读" "阅读中" "已读完" "已放弃"))
+            (list :section section))))))
+
+  (defun my/books-org-find-section-position (section)
+    "Return buffer position of SECTION in books.org."
+    (save-excursion
+      (save-restriction
+        (goto-char (point-min))
+        (when (re-search-forward (format "^\\* %s$" (regexp-quote section)) nil t)
+          (line-beginning-position)))))
+
+  (defun my/books-org-rebucket-current-entry ()
+    "Move the current books entry to the section implied by its TODO state."
+    (interactive)
+    (when-let* ((context (and (my/books-org-file-p)
+                              (my/books-org-current-entry-context)))
+                (target-section (my/books-org-target-section-for-state org-state))
+                (current-section (plist-get context :section)))
+      (unless (equal current-section target-section)
+        (let ((level (org-outline-level)))
+          (org-cut-subtree)
+          (when-let ((target-pos (my/books-org-find-section-position target-section)))
+            (goto-char target-pos)
+            (org-end-of-subtree t t)
+            (unless (bolp)
+              (insert "\n"))
+            (org-paste-subtree level))))))
+
+  (add-hook 'org-after-todo-state-change-hook #'my/books-org-rebucket-current-entry))
+(after! org
+  (defun my/org-entry-done-or-cancelled-p ()
+    "Return non-nil when the current Org heading is DONE or CANCELLED."
+    (member (org-get-todo-state) '("DONE" "CANCELLED")))
+
+  (defun my/org-entry-has-done-or-cancelled-parent-p ()
+    "Return non-nil when an ancestor heading is DONE or CANCELLED."
+    (save-excursion
+      (let (found)
+        (while (and (not found) (org-up-heading-safe))
+          (when (my/org-entry-done-or-cancelled-p)
+            (setq found t)))
+        found)))
+
+  (defun my/org-archive-target-file ()
+    "Return the expanded archive file path for the current Org buffer."
+    (let* ((fname (file-name-nondirectory (buffer-file-name)))
+           (location (replace-regexp-in-string "%s" fname org-archive-location t t)))
+      (expand-file-name (car (split-string location "::")))))
+
+  (defun my/org-archive-done-tasks ()
+    "Archive DONE/CANCELLED tasks in the current file."
+    (interactive)
+    (unless (buffer-file-name)
+      (user-error "Not visiting a file; open an Org file first"))
+    (let (items)
+      (org-with-wide-buffer
+        (org-map-entries
+         (lambda ()
+           (unless (my/org-entry-has-done-or-cancelled-parent-p)
+             (let ((beg (point))
+                   (end (save-excursion (org-end-of-subtree t t))))
+               (push (list :beg beg
+                           :end end
+                           :text (buffer-substring-no-properties beg end))
+                     items))))
+         "/DONE|CANCELLED" 'file))
+      (setq items
+            (sort items
+                  (lambda (a b)
+                    (> (plist-get a :beg) (plist-get b :beg)))))
+      (let ((count (length items))
+            (archive-file (my/org-archive-target-file)))
+        (when items
+          (make-directory (file-name-directory archive-file) t)
+          (when (fboundp 'org-remove-inline-images)
+            (org-remove-inline-images))
+          (with-temp-buffer
+            (when (file-exists-p archive-file)
+              (insert-file-contents archive-file))
+            (goto-char (point-max))
+            (unless (bolp)
+              (insert "\n"))
+            (dolist (item (reverse items))
+              (insert "\n" (plist-get item :text))
+              (unless (bolp)
+                (insert "\n")))
+            (write-region (point-min) (point-max) archive-file nil 'silent))
+          (save-excursion
+            (dolist (item items)
+              (delete-region (plist-get item :beg) (plist-get item :end))))
+          (save-buffer))
+        (message "Archived %d done/cancelled task(s) in %s"
+                 count (file-name-nondirectory (buffer-file-name)))))))
 (defun my/org-download-screenshot-command ()
   "Platform-appropriate screenshot command for org-download."
   (cond
@@ -965,10 +875,7 @@ Assume point is at first MARK."
     "sh -c 'if command -v xclip >/dev/null 2>&1; then xclip -selection clipboard -t image/png -o > \"$1\" 2>/dev/null || true; fi; if [ ! -s \"$1\" ]; then if command -v wl-paste >/dev/null 2>&1; then wl-paste --no-newline --type image/png > \"$1\" 2>/dev/null || true; fi; fi; if [ ! -s \"$1\" ]; then if command -v maim >/dev/null 2>&1; then maim -s \"$1\"; elif command -v grim >/dev/null 2>&1 && command -v slurp >/dev/null 2>&1; then grim -g \"$(slurp)\" \"$1\"; fi; fi' _ %s")))
 
 (defun my/org-download-denote-file-format (filename)
-  "Rewrite FILENAME to denote style: <id>--<slug><ext>.
-Delegates to `denote-format-file-name' so sluggify rules, separators,
-and the @@-identifier delimiter behavior all track denote itself.
-Used as `org-download-file-format-function'."
+  "Rewrite FILENAME to denote style: <id>--<slug><ext>."
   (let* ((ext  (or (file-name-extension filename t) ""))
          (base (or (file-name-sans-extension filename) ""))
          (id   (format-time-string denote-date-identifier-format)))
@@ -1018,27 +925,6 @@ Used as `org-download-file-format-function'."
              (message "OK: plain text pasted (macOS fallback)"))))
         (t (message "WARN: pbpaste not found")))))
     (_ (message "WARN: rich text clipboard not implemented for this platform"))))
-;; ;; Pixel-aligned agenda tags (fix CJK misalignment)
-;; (defun my/org-agenda-align-tags-pixel ()
-;;   "Right-align agenda tags using pixel-based display alignment."
-;;   ;; Windows Emacs 30.2 is currently crashing in agenda display paths on this
-;;   ;; machine, so keep the safer default spacing there.
-;;   (unless (eq system-type 'windows-nt)
-;;     (let ((inhibit-read-only t)
-;;           (target-pixel (- (window-text-width nil t)
-;;                            (* 2 (string-pixel-width " ")))))
-;;       (save-excursion
-;;         (goto-char (point-min))
-;;         (while (re-search-forward "\\([ \t]+\\)\\(:[[:alnum:]_@#%:]+:\\)[ \t]*$" nil t)
-;;           (let* ((tags-str (match-string 2))
-;;                  (tags-pixel (string-pixel-width tags-str))
-;;                  (align-to (- target-pixel tags-pixel)))
-;;             (when (> align-to 0)
-;;               (put-text-property (match-beginning 1) (match-end 1)
-;;                                  'display `(space :align-to (,align-to))))))))))
-
-;; (add-hook 'org-agenda-finalize-hook #'my/org-agenda-align-tags-pixel)
-;; org-download — 走 org-attach 体系
 (after! org
   (use-package! org-download
     :commands (org-download-clipboard org-download-screenshot org-download-yank org-download-delete)
@@ -1068,13 +954,9 @@ Used as `org-download-file-format-function'."
           (dnd-handle-multiple-urls
            (selected-window) (list uri) action))))
 
-    ;; Fix: Full percent-decoding for non-ASCII filenames.
-    ;; Also fixes Windows local paths: url-generic-parse-url treats "C:" as a
-    ;; URL scheme, so url-path-and-query can return nil for C:/... paths.
-    ;; Use file-name-nondirectory directly for absolute local paths.
+    ;; Fix: Full percent-decoding for non-ASCII filenames + Windows local paths.
     (defun org-download--fullname (link &optional ext)
       "Return the file name where LINK will be saved to.
-EXT can hold the file extension, in case LINK doesn't provide it.
 [patched] Robust Windows path handling + full percent-decoding."
       (let ((filename
              (decode-coding-string
@@ -1096,20 +978,14 @@ EXT can hold the file extension, in case LINK doesn't provide it.
           (funcall org-download-file-format-function filename)
           dir))))
 
-    ;; Fix: org-download-clipboard on Windows ignores user's screenshot-method
-    ;; and hard-requires ImageMagick. Since our PowerShell method already reads
-    ;; from clipboard, just bypass the override and call org-download-screenshot.
+    ;; Fix: org-download-clipboard on Windows ignores user's screenshot-method.
     (when (featurep :system 'windows)
       (defadvice! my/org-download-clipboard-use-powershell (&optional basename)
         :override #'org-download-clipboard
         (org-id-get-create)
         (org-download-screenshot basename)))))
-;; 任意文件拖入 org buffer → 复制到 ~/org/data/ 并用 denote 命名 +
-;; 在光标处插入 file: 链接。对 epub / pdf / zip 等非图片也生效。
 (defun my/org-dnd-copy-to-data (uri _action)
-  "Copy locally-dropped file URI into ~/org/data/ with a denote-style name,
-insert a `file:' link at point, and return 'copy.
-Only active in `org-mode'; returns nil elsewhere so the next handler runs."
+  "Copy locally-dropped file URI into ~/org/data/ with a denote-style name."
   (when (derived-mode-p 'org-mode)
     (let ((src (ignore-errors (dnd-get-local-file-name uri t))))
       (when (and src (file-regular-p src))
@@ -1123,25 +999,18 @@ Only active in `org-mode'; returns nil elsewhere so the next handler runs."
                           (file-relative-name dest default-directory)))
           'copy)))))
 
-;; Org 9.7+ 在 `org-setup-yank-dnd-handlers' 里用 `setq-local' 把
-;; "^file:///" 等 3 条前置到 buffer-local `dnd-protocol-alist'，走 org-attach
-;; 的桶路径。全局 `add-to-list' 压不住 buffer-local。改成在 `org-mode-hook'
-;; 里显式往 buffer-local 前面插我们的 handler。
 (defun my/org-prepend-flat-dnd-handler ()
   "Make our flat-data DnD handler win over Org's builtin file: handlers."
   (setq-local dnd-protocol-alist
               (cons '("^file:" . my/org-dnd-copy-to-data)
                     dnd-protocol-alist)))
 (add-hook 'org-mode-hook #'my/org-prepend-flat-dnd-handler)
-;; Markdown: 同样的扁平 + denote 命名流程。插入 ![alt](path) 或 [name](path)。
 (defconst my/markdown-image-extensions
   '("png" "jpg" "jpeg" "gif" "svg" "webp" "bmp" "avif")
   "Extensions treated as images for markdown DnD insertion.")
 
 (defun my/markdown-dnd-copy-to-data (uri _action)
-  "Copy locally-dropped file URI into ~/org/data/ with denote-style name,
-insert a markdown image / link at point, return 'copy.
-Only active in `markdown-mode'; returns nil elsewhere."
+  "Copy locally-dropped file URI into ~/org/data/ with denote-style name."
   (when (derived-mode-p 'markdown-mode)
     (let ((src (ignore-errors (dnd-get-local-file-name uri t))))
       (when (and src (file-regular-p src))
@@ -1165,7 +1034,6 @@ Only active in `markdown-mode'; returns nil elsewhere."
               (cons '("^file:" . my/markdown-dnd-copy-to-data)
                     dnd-protocol-alist)))
 (add-hook 'markdown-mode-hook #'my/markdown-prepend-flat-dnd-handler)
-;; plstore encryption workaround (defer until needed)
 (after! plstore
   (advice-add 'plstore-save :around
               (lambda (orig-fun plstore)
@@ -1320,69 +1188,36 @@ Only active in `markdown-mode'; returns nil elsewhere."
                       (org-gcal-sync)
                       (my/org-gcal-auto-post)))))
 (use-package! denote
-  ;; NOT lazy-loaded: we need denote-dired-directories and the dired-mode-hook
-  ;; in place as soon as any dired buffer opens, otherwise keyword highlighting
-  ;; silently no-ops until you first invoke a denote command.
   :demand t
   :init
   (make-directory (expand-file-name "denote/" org-directory) t)
   :config
   (setq denote-directory (expand-file-name "notes/" org-directory)
         denote-file-type 'org
-        ;; denote-known-keywords '("emacs" "read" "document" "book")
-        denote-known-keywords  '(;; 工作/生活分界（1）
-        "work"
-
-        ;; 领域（10）
-        "gamedev"      ; 游戏开发与设计
-        "emacs"        ; Emacs 全家桶（含 doom/orgmode/denote）
-        "ai"           ; AI 相关
-        "pkm"          ; 知识管理方法论
-        "investment"   ; 投资
-        "health"       ; 健康（含怀孕、医疗）
-        "habit"        ; 习惯
-        "read"         ; 读书笔记
-        "hire"         ; 招聘/面试（你有 3 篇且持续会写，留）
-
-        ;; 跨域特殊标记（5）
-        "idea"         ; 想法种子
-        "memo"         ; 速查备忘（设备/命令/材料）
-        "tool"         ; 非 emacs 的工具配置
-        "project"      ; 进行中的项目
-        "index"        ; 入口页/仪表盘/清单
-
-        ;; 形态标记（2，用于非 denote 的特殊文件）
-        "journal"      ; 日记（journal/ 下专用）
-        "document")    ; 附件/扫描件/材料（data/ 下专用）
-  
-        denote-infer-keywords nil ;防止手滑加新keywords 
+        denote-known-keywords  '(;; 工作/生活分界
+                                 "work"
+                                 ;; 领域
+                                 "gamedev" "emacs" "ai" "pkm" "investment"
+                                 "health" "habit" "read" "hire"
+                                 ;; 跨域特殊标记
+                                 "idea" "memo" "tool" "project" "index"
+                                 ;; 形态标记
+                                 "journal" "document")
+        denote-infer-keywords nil
         denote-sort-keywords t
-        
-        ;; New notes land directly in denote-directory, no subdir prompt
         denote-prompts '(title keywords)
         denote-date-prompt-use-org-read-date t
-        ;; Only scan references/, denote/, notes/, journal/ — skip everything else under ~/org/
         denote-excluded-directories-regexp
         (rx (or (seq bos ".")
                 (seq bos (or "data" "investment" "templates" "tmp") eos)))
         denote-rename-confirmations nil
         denote-dired-directories (list denote-directory)
         denote-dired-directories-include-subdirectories t)
-;; Windows-safe replacement for `denote-dired-mode-in-directories' — the
-  ;; stock version uses case-sensitive `string-prefix-p' against file-truename,
-  ;; which fails on Windows when drive-letter or path case disagrees
-  ;; (e.g. "c:/Users/..." vs "C:/Users/...").
-  (defun my/denote-dired-mode-maybe ()
-    "Enable `denote-dired-mode' when the current dired buffer is under a
-denote-dired directory, matching case-insensitively.
 
-Hooked onto `after-change-major-mode-hook' (append) rather than
-`dired-mode-hook' because the latter fires BEFORE
-`font-lock-global-mode' and `diredfl-global-mode' are applied to
-the buffer — anything we add to `font-lock-keywords' at that point
-gets reset by `font-lock-set-defaults' later, and diredfl's override
-faces cover ours. `after-change-major-mode-hook' runs those global
-modes first, so when our hook lands everything is settled."
+  ;; Windows-safe replacement for `denote-dired-mode-in-directories'.
+  (defun my/denote-dired-mode-maybe ()
+    "Enable `denote-dired-mode' when current dired buffer is under a
+denote-dired directory, matching case-insensitively."
     (when (derived-mode-p 'dired-mode)
       (let ((dir (file-name-as-directory (expand-file-name default-directory))))
         (when (seq-some
@@ -1393,43 +1228,21 @@ modes first, so when our hook lands everything is settled."
                             (eq t (compare-strings
                                    root 0 nil
                                    dir  0 (length root)
-                                   t))))))  ; t = ignore case
+                                   t))))))
                denote-dired-directories)
-          ;; Order matters: disable diredfl BEFORE enabling denote-dired-mode.
-          ;; diredfl-mode's disable body calls `font-lock-refresh-defaults',
-          ;; which toggles font-lock off/on and wipes `font-lock-keywords' back
-          ;; to the mode default. If we enable denote-dired-mode first, its
-          ;; `font-lock-add-keywords' call gets erased by the subsequent
-          ;; diredfl disable.
           (when (bound-and-true-p diredfl-mode)
             (diredfl-mode -1))
           (denote-dired-mode 1)
           (font-lock-flush)))))
 
-  ;; append=t → run after font-lock-global-mode and diredfl-global-mode.
   (add-hook 'after-change-major-mode-hook #'my/denote-dired-mode-maybe t)
 
-  ;; Strip newlines from the complete filename — catches \n wherever it enters
-  ;; the pipeline (title prompt, slug, or upstream callers).
+  ;; Strip newlines from the complete filename.
   (advice-add 'denote-format-file-name :filter-return
               (lambda (filename) (replace-regexp-in-string "[\n\r]" "" filename))))
-;; Disable dirvish globally — its pre-redisplay overlay attrs cover denote's
-;; font-lock-based filename highlighting, and user prefers plain dired anyway.
 (after! dirvish
   (dirvish-override-dired-mode -1))
 
-;; Dired: show filenames only (hide permissions/size/time/owner columns).
-;; `(` toggles details back on when you need them.
-;;
-;; Defer via `run-at-time 0' so we enable hide-details AFTER the whole
-;; mode-setup cascade finishes — in denote-managed dirs like
-;; ~/org/notes/, `my/denote-dired-mode-maybe' disables diredfl, enables
-;; denote-dired-mode and calls `font-lock-flush', and the subsequent
-;; jit-lock fontification is what lays down the `invisible' text
-;; properties that hide-details relies on. Enabling the mode inline
-;; (whether in dired-mode-hook or after-change-major-mode-hook) sets
-;; the invisibility spec too early in that cascade, so the flushed
-;; refontification never tags the detail columns as invisible.
 (defun my/dired-hide-details-on ()
   (when (derived-mode-p 'dired-mode)
     (run-at-time 0 nil
@@ -1448,35 +1261,27 @@ modes first, so when our hook lands everything is settled."
              denote-markdown-convert-links-to-denote-type
              denote-markdown-convert-links-to-obsidian-type
              denote-markdown-convert-obsidian-links-to-denote-type))
-;; ---- consult-notes: 多源统一检索 ----
 (use-package! consult-notes
   :after (consult denote)
   :commands (consult-notes consult-notes-search-in-all-notes)
   :config
-  ;; Directory sources — narrow by key
   (setq consult-notes-file-dir-sources
         `(("Notes"   ?n ,(expand-file-name "notes/"   org-directory))
           ("Journal" ?j ,(expand-file-name "journal/" org-directory))))
 
-  ;; Surface headings from single-file inboxes
   (setq consult-notes-org-headings-files
         (list (expand-file-name "inbox.org"       org-directory)
               (expand-file-name "append-note.org" org-directory)))
   (consult-notes-org-headings-mode)
 
-  ;; Denote integration — adds ID/title/#keywords/dir columns
   (when (locate-library "denote")
     (consult-notes-denote-mode))
 
-  ;; Only text files from denote dir (Denote 3.x API)
   (setq consult-notes-denote-files-function
         (lambda () (denote-directory-files nil t t))))
 
 (after! consult-notes
-  ;; 禁用 consult 的默认排序，保留 source 提供的顺序
   (consult-customize consult-notes :sort nil)
-
-  ;; 让 denote 文件列表按修改时间降序排列
   (setq consult-notes-denote-files-function
         (lambda ()
           (sort (denote-directory-files)
@@ -1484,51 +1289,160 @@ modes first, so when our hook lands everything is settled."
                   (time-less-p
                    (file-attribute-modification-time (file-attributes b))
                    (file-attribute-modification-time (file-attributes a))))))))
-;; Web article target for capture "w"
-(defun my/capture-web-article-target ()
-  "Target function for org-capture: reference note from clipboard URL."
-  (let* ((url (string-trim (current-kill 0 t)))
-         (title (or (ignore-errors
-                      (with-temp-buffer
-                        (url-insert-file-contents url)
-                        (goto-char (point-min))
-                        (when (re-search-forward "<title>\\([^<]*\\)</title>" nil t)
-                          (string-trim (match-string 1)))))
-                    (read-string "Title: ")))
-         (id (format-time-string "%Y%m%dT%H%M%S"))
-         (slug (replace-regexp-in-string "[^a-zA-Z0-9一-鿿]+" "-"
-                                         (downcase (string-trim title)) t t))
-         (slug (replace-regexp-in-string "^-\\|-$" "" slug))
-         (file (expand-file-name (format "notes/%s--%s__read.org" id slug) org-directory)))
-    (set-buffer (org-capture-target-buffer file))
-    (when (= (buffer-size) 0)
-      (insert (format "#+title: %s\n#+date: [%s]\n#+filetags: :read:\n#+identifier: %s\n\n* Source\n%s\n\n* Summary\n\n* My Notes\n"
-                      title (format-time-string "%Y-%m-%d %a") id url)))
-    (goto-char (point-max))
-    (or (re-search-backward "^\\* My Notes" nil t) (goto-char (point-max)))
-    (forward-line 1)))
+(use-package! denote-journal
+  :after denote
+  :hook (calendar-mode . denote-journal-calendar-mode)
+  :init
+  (with-eval-after-load 'calendar
+    (define-key calendar-mode-map (kbd "f") #'denote-journal-calendar-find-file)
+    (define-key calendar-mode-map (kbd "n") #'denote-journal-calendar-new-or-existing)
+    (with-eval-after-load 'evil
+      (evil-define-key '(normal motion emacs) calendar-mode-map
+        (kbd "F") #'denote-journal-calendar-find-file
+        (kbd "N") #'denote-journal-calendar-new-or-existing)))
+  :config
+  (setq denote-journal-directory (expand-file-name "journal/" org-directory)
+        denote-journal-keyword "journal"
+        denote-journal-title-format 'day-date-month-year))
 
-;; org-protocol target for "pn"
-(defun my/protocol-note-target ()
-  "Target for org-capture 'pn': reference note from org-protocol."
-  (let* ((url   (or (plist-get org-store-link-plist :link)
-                    (plist-get org-store-link-plist :url) ""))
-         (title (or (plist-get org-store-link-plist :description)
-                    (read-string "Title: ")))
-         (slug  (replace-regexp-in-string
-                 "^-\\|-$" ""
-                 (replace-regexp-in-string
-                  "[^a-zA-Z0-9一-鿿]+" "-"
-                  (downcase (string-trim title)) t t)))
-         (id    (format-time-string "%Y%m%dT%H%M%S"))
-         (file  (expand-file-name (format "notes/%s--%s__read.org" id slug) org-directory)))
-    (set-buffer (org-capture-target-buffer file))
-    (when (= (buffer-size) 0)
-      (insert (format "#+title: %s\n#+date: [%s]\n#+filetags: :read:\n#+identifier: %s\n\n* Source\n%s\n\n* Summary\n\n* My Notes\n"
-                      title (format-time-string "%Y-%m-%d %a") id url)))
-    (goto-char (point-max))
-    (or (re-search-backward "^\\* My Notes" nil t) (goto-char (point-max)))
-    (forward-line 1)))
+(defun my/journal-capture-target ()
+  "Return path to today's denote-journal entry for `org-capture'.
+Before 03:00 falls back to the previous day."
+  (let* ((now  (decode-time))
+         (hour (nth 2 now))
+         (time (if (< hour 3)
+                   (time-subtract (current-time) (seconds-to-time 86400))
+                 (current-time))))
+    (denote-journal-path-to-new-or-existing-entry
+     (format-time-string "%Y-%m-%d" time))))
+(defvar my/weather-location "上海"
+  "wttr.in 查询地点。")
+
+(defun my/get-weather ()
+  "从 wttr.in 获取天气，返回单行字符串。"
+  (let ((coding-system-for-read 'utf-8))
+    (string-trim
+     (shell-command-to-string
+      (format "curl -s --max-time 5 \"https://wttr.in/%s?format=3\""
+              (url-hexify-string my/weather-location))))))
+
+(defun my/insert-weather ()
+  "在光标处插入当前天气。"
+  (interactive)
+  (insert (my/get-weather)))
+
+(defun my/denote-journal-auto-weather ()
+  "新建 journal 文件时自动在末尾追加天气。"
+  (when (and (buffer-file-name)
+             (string-match-p "__journal" (buffer-file-name)))
+    (save-excursion
+      (goto-char (point-max))
+      (unless (bolp) (insert "\n"))
+      (insert "\n** 天气\n")
+      (insert (my/get-weather))
+      (insert "\n"))))
+
+(add-hook 'denote-after-new-note-hook #'my/denote-journal-auto-weather)
+(use-package! cal-china-x
+  :after calendar
+  :config
+  (setq calendar-mark-holidays-flag t
+        cal-china-x-important-holidays cal-china-x-chinese-holidays
+        calendar-holidays
+        (append cal-china-x-important-holidays
+                cal-china-x-general-holidays))
+  (setq org-agenda-include-diary nil))
+(after! org
+  (defun my/org-open-pdf-with-pdf-tools (file _link)
+    (require 'pdf-tools nil t)
+    (require 'pdf-view nil t)
+    (find-file file)
+    (unless (derived-mode-p 'pdf-view-mode)
+      (pdf-view-mode)))
+
+  (defun my/org-open-epub-with-nov (file _link)
+    (require 'nov nil t)
+    (find-file file)
+    (unless (derived-mode-p 'nov-mode)
+      (nov-mode)))
+
+  (let ((pdf-entry (assoc "\\.pdf\\'" org-file-apps)))
+    (if pdf-entry
+        (setcdr pdf-entry #'my/org-open-pdf-with-pdf-tools)
+      (add-to-list 'org-file-apps '("\\.pdf\\'" . my/org-open-pdf-with-pdf-tools))))
+  (let ((epub-entry (assoc "\\.epub\\'" org-file-apps)))
+    (if epub-entry
+        (setcdr epub-entry #'my/org-open-epub-with-nov)
+      (add-to-list 'org-file-apps '("\\.epub\\'" . my/org-open-epub-with-nov)))))
+(after! pdf-view
+  (setq-default pdf-view-display-size 'fit-page)
+  (setq pdf-view-midnight-colors '("#ffffff" . "#1e1e2e"))
+  (map! :map pdf-view-mode-map
+        "C-c C-a h" #'pdf-annot-add-highlight-markup-annotation
+        "C-c C-a t" #'pdf-annot-add-text-annotation
+        "C-c C-a d" #'pdf-annot-add-strikeout-markup-annotation))
+(use-package! nov
+  :mode ("\\.epub\\'" . nov-mode)
+  :config
+  (when (featurep :system 'windows)
+    (setq nov-unzip-program "C:/Program Files/Git/usr/bin/unzip.exe"))
+  (setq nov-variable-pitch nil)
+
+  (defun my/nov-setup ()
+    (let ((font (or (my/first-available-font '("Noto Sans SC"
+                                               "Noto Serif SC"
+                                               "Microsoft YaHei UI"
+                                               "Microsoft YaHei"))
+                    "Microsoft YaHei")))
+      (face-remap-add-relative 'default :family font :height 140)
+      (face-remap-add-relative 'variable-pitch :family font :height 140)
+      (set-fontset-font t nil (font-spec :family font) nil 'prepend)
+      (message "nov: using font \"%s\"" font))
+    (visual-line-mode 1)
+    (setq nov-text-width 80))
+  (add-hook 'nov-mode-hook #'my/nov-setup)
+
+  ;; Fix: nov-save-place 中文路径 utf-8
+  (defun my/nov-save-place-a (orig-fn &rest args)
+    (let ((coding-system-for-write 'utf-8))
+      (apply orig-fn args)))
+  (advice-add 'nov-save-place :around #'my/nov-save-place-a))
+(after! org-noter
+  :commands org-noter
+  :config
+  (setq org-noter-notes-search-path '("~/org/notes/")
+        org-noter-default-notes-file-names '("notes.org")
+        org-noter-auto-save-last-location t
+        org-noter-notes-window-location 'horizontal-split
+        org-noter-highlight-selected-text t)
+
+  (defun my/org-noter-create-session-in-references (&optional arg document-file-name)
+    "Create org-noter session, always placing notes in ~/org/notes/."
+    (let* ((document-file-name (or (run-hook-with-args-until-success
+                                    'org-noter-get-buffer-file-name-hook major-mode)
+                                   document-file-name))
+           (document-path (or document-file-name buffer-file-truename
+                              (error "This buffer does not seem to be visiting any file")))
+           (document-name (file-name-nondirectory document-path))
+           (document-base (file-name-base document-name))
+           (notes-dir (expand-file-name "~/org/notes/"))
+           (notes-file (expand-file-name (concat document-base ".org") notes-dir)))
+      (make-directory notes-dir t)
+      (unless (file-exists-p notes-file)
+        (with-temp-file notes-file
+          (insert (format "#+title: %s\n#+filetags: :ref:\n#+created: %s\n\n* %s\n:PROPERTIES:\n:NOTER_DOCUMENT: %s\n:END:\n"
+                          document-base
+                          (format-time-string "[%Y-%m-%d %a]")
+                          document-base
+                          (expand-file-name document-path)))))
+      (with-current-buffer (find-file-noselect notes-file)
+        (goto-char (point-min))
+        (re-search-forward (org-re-property org-noter-property-doc-file) nil t)
+        (org-back-to-heading t)
+        (org-noter))))
+
+  (setq org-noter-create-session-from-document-hook
+        '(my/org-noter-create-session-in-references)))
 (use-package! elfeed
   :commands elfeed
   :config
@@ -1558,19 +1472,16 @@ modes first, so when our hook lands everything is settled."
      (t nil)))
 
   (defun my/elfeed-feed-display-title (feed)
-    "Return a human-readable title for FEED."
     (or (elfeed-meta feed :title)
         (elfeed-feed-title feed)
         (elfeed-feed-url feed)
         "Unknown feed"))
 
   (defun my/elfeed-url-origin (url)
-    "Return the scheme and host portion of URL, ending with a slash."
     (when (and url (string-match "\\`\\(https?://[^/]+\\)" url))
       (concat (match-string 1 url) "/")))
 
   (defun my/elfeed-guess-homepage (feed-url)
-    "Best-effort homepage guess for FEED-URL."
     (when feed-url
       (let ((homepage (car (split-string feed-url "[?#]" t))))
         (dolist (pattern '("/index\\.xml/?$"
@@ -1590,14 +1501,12 @@ modes first, so when our hook lands everything is settled."
         (replace-regexp-in-string "/+$" "/" homepage t t))))
 
   (defun my/elfeed-entry-homepage (entry)
-    "Return a homepage URL for ENTRY."
     (when-let* ((feed (elfeed-entry-feed entry))
                 (feed-url (elfeed-feed-url feed)))
       (let* ((entry-url (elfeed-entry-link entry))
              (feed-origin (my/elfeed-url-origin feed-url))
              (entry-origin (my/elfeed-url-origin entry-url)))
         (cond
-         ;; Prefer the article host when the feed comes from a proxy or bridge.
          ((and entry-origin feed-origin (not (string= entry-origin feed-origin)))
           entry-origin)
          (t
@@ -1628,7 +1537,6 @@ modes first, so when our hook lands everything is settled."
       (user-error "Not in an Elfeed buffer"))))
 
   (defun my/elfeed-feed-candidates ()
-    "Return an alist of display string to feed URL for Elfeed feeds."
     (let ((table (make-hash-table :test 'equal)))
       (with-elfeed-db-visit (entry feed)
         (let* ((url (elfeed-feed-url feed))
@@ -1658,7 +1566,6 @@ modes first, so when our hook lands everything is settled."
        (lambda (a b) (string-lessp (car a) (car b))))))
 
   (defun my/elfeed-read-feed-url ()
-    "Prompt for a feed URL from the current Elfeed database."
     (let* ((all-feeds "[All feeds]")
            (candidates (my/elfeed-feed-candidates))
            (choices (cons all-feeds (mapcar #'car candidates)))
@@ -1674,7 +1581,6 @@ modes first, so when our hook lands everything is settled."
         (cdr (assoc choice candidates)))))
 
   (defun my/elfeed-replace-feed-filter (filter feed-url)
-    "Replace feed-specific clauses in FILTER with FEED-URL."
     (let ((parts (cl-remove-if (lambda (part) (string-prefix-p "=" part))
                                (split-string (string-trim (or filter "")) "[ \t\n]+" t))))
       (string-join
@@ -1722,171 +1628,55 @@ modes first, so when our hook lands everything is settled."
         :desc "Browse feed homepage" "B" #'my/elfeed-browse-homepage
         :desc "Toggle unread"       "R" #'my/elfeed-toggle-unread
         :desc "Play with mpv"       "v" #'my/elfeed-play-with-mpv))
+
 (use-package! elfeed-org
   :after elfeed
   :config
   (elfeed-org)
   (setq rmh-elfeed-org-files (list (expand-file-name "~/org/notes/20260101T000010--elfeed__emacs_index.org"))))
-(use-package! denote-journal
-  :after denote
-  :hook (calendar-mode . denote-journal-calendar-mode)
-  :init
-  (with-eval-after-load 'calendar
-    (define-key calendar-mode-map (kbd "f") #'denote-journal-calendar-find-file)
-    (define-key calendar-mode-map (kbd "n") #'denote-journal-calendar-new-or-existing)
-    (with-eval-after-load 'evil
-      (evil-define-key '(normal motion emacs) calendar-mode-map
-        (kbd "F") #'denote-journal-calendar-find-file
-        (kbd "N") #'denote-journal-calendar-new-or-existing)))
-  :config
-  (setq denote-journal-directory (expand-file-name "journal/" org-directory)
-        denote-journal-keyword "journal"
-        denote-journal-title-format 'day-date-month-year))
+(when (boundp 'my/athenai-api-key)
+  (require 'acp)
+  (require 'agent-shell)
 
-(defun my/journal-capture-target ()
-  "Return path to today's denote-journal entry for `org-capture'.
-Before 03:00 falls back to the previous day, matching the prior
-org-journal behaviour. Creates the file with denote-journal's standard
-front-matter if it does not yet exist."
-  (let* ((now  (decode-time))
-         (hour (nth 2 now))
-         (time (if (< hour 3)
-                   (time-subtract (current-time) (seconds-to-time 86400))
-                 (current-time))))
-    (denote-journal-path-to-new-or-existing-entry
-     (format-time-string "%Y-%m-%d" time))))
-(defvar my/weather-location "上海"
-  "wttr.in 查询地点，中英文均可。")
+  (setq agent-shell-preferred-agent-config
+        (agent-shell-anthropic-make-claude-code-config))
 
-(defun my/get-weather ()
-  "从 wttr.in 获取天气，返回紧凑单行字符串，格式：上海: ⛅️  +22°C"
-  (let ((coding-system-for-read 'utf-8))
-    (string-trim
-     (shell-command-to-string
-      (format "curl -s --max-time 5 \"https://wttr.in/%s?format=3\""
-              (url-hexify-string my/weather-location))))))
+  (setq agent-shell-anthropic-authentication
+        (agent-shell-anthropic-make-authentication
+         :api-key (lambda () my/athenai-api-key)))
 
-(defun my/insert-weather ()
-  "在光标处插入当前天气（M-x my/insert-weather）。"
-  (interactive)
-  (insert (my/get-weather)))
+  (setq agent-shell-anthropic-claude-environment
+        (agent-shell-make-environment-variables
+         "ANTHROPIC_BASE_URL" "https://athenai.mihoyo.com/v1"
+         "ANTHROPIC_MODEL" "claude-sonnet-4-6"
+         "ANTHROPIC_SMALL_FAST_MODEL" "claude-sonnet-4-6"))
 
-(defun my/denote-journal-auto-weather ()
-  "新建 journal 文件时自动在末尾追加天气。"
-  (when (and (buffer-file-name)
-             (string-match-p "__journal" (buffer-file-name)))
-    (save-excursion
-      (goto-char (point-max))
-      (unless (bolp) (insert "\n"))
-      (insert "\n** 天气\n")
-      (insert (my/get-weather))
-      (insert "\n"))))
+  ;; Buffer-local Evil-friendly bindings
+  (map! :map agent-shell-mode-map
+        :i "RET"   #'newline
+        :i "S-RET" #'shell-maker-submit
+        :n "RET"   #'shell-maker-submit
+        :n "q"     #'quit-window
+        :nv "gr"   #'agent-shell-send-dwim)
 
-(add-hook 'denote-after-new-note-hook #'my/denote-journal-auto-weather)
-(use-package! cal-china-x
-  :after calendar
-  :config
-  (setq calendar-mark-holidays-flag t
-        cal-china-x-important-holidays cal-china-x-chinese-holidays
-        calendar-holidays
-        (append cal-china-x-important-holidays
-                cal-china-x-general-holidays))
-  (setq org-agenda-include-diary nil))
-;; PDF file apps for org links
-(after! org
-  (defun my/org-open-pdf-with-pdf-tools (file _link)
-    (require 'pdf-tools nil t)
-    (require 'pdf-view nil t)
-    (find-file file)
-    (unless (derived-mode-p 'pdf-view-mode)
-      (pdf-view-mode)))
-
-  (defun my/org-open-epub-with-nov (file _link)
-    (require 'nov nil t)
-    (find-file file)
-    (unless (derived-mode-p 'nov-mode)
-      (nov-mode)))
-
-  (let ((pdf-entry (assoc "\\.pdf\\'" org-file-apps)))
-    (if pdf-entry
-        (setcdr pdf-entry #'my/org-open-pdf-with-pdf-tools)
-      (add-to-list 'org-file-apps '("\\.pdf\\'" . my/org-open-pdf-with-pdf-tools))))
-  (let ((epub-entry (assoc "\\.epub\\'" org-file-apps)))
-    (if epub-entry
-        (setcdr epub-entry #'my/org-open-epub-with-nov)
-      (add-to-list 'org-file-apps '("\\.epub\\'" . my/org-open-epub-with-nov)))))
-;; pdf-view tweaks
-(after! pdf-view
-  (setq-default pdf-view-display-size 'fit-page)
-  (setq pdf-view-midnight-colors '("#ffffff" . "#1e1e2e"))
-  (map! :map pdf-view-mode-map
-        "C-c C-a h" #'pdf-annot-add-highlight-markup-annotation
-        "C-c C-a t" #'pdf-annot-add-text-annotation
-        "C-c C-a d" #'pdf-annot-add-strikeout-markup-annotation))
-;; nov.el: EPUB reader
-(use-package! nov
-  :mode ("\\.epub\\'" . nov-mode)
-  :config
-  (when (featurep :system 'windows)
-    (setq nov-unzip-program "C:/Program Files/Git/usr/bin/unzip.exe"))
-  (setq nov-variable-pitch nil)
-
-  (defun my/nov-setup ()
-    (let ((font (or (my/first-available-font '("Noto Sans SC"
-                                               "Noto Serif SC"
-                                               "Microsoft YaHei UI"
-                                               "Microsoft YaHei"))
-                    "Microsoft YaHei")))
-      (face-remap-add-relative 'default :family font :height 140)
-      (face-remap-add-relative 'variable-pitch :family font :height 140)
-      (set-fontset-font t nil (font-spec :family font) nil 'prepend)
-      (message "nov: using font \"%s\"" font))
-    (visual-line-mode 1)
-    (setq nov-text-width 80))
-  (add-hook 'nov-mode-hook #'my/nov-setup)
-
-  ;; Fix: nov-save-place 中文路径 utf-8
-  (defun my/nov-save-place-a (orig-fn &rest args)
-    (let ((coding-system-for-write 'utf-8))
-      (apply orig-fn args)))
-  (advice-add 'nov-save-place :around #'my/nov-save-place-a))
-;; org-noter
-(after! org-noter
-  :commands org-noter
-  :config
-  (setq org-noter-notes-search-path '("~/org/notes/")
-        org-noter-default-notes-file-names '("notes.org")
-        org-noter-auto-save-last-location t
-        org-noter-notes-window-location 'horizontal-split
-        org-noter-highlight-selected-text t)
-
-  (defun my/org-noter-create-session-in-references (&optional arg document-file-name)
-    "Create org-noter session, always placing notes in ~/org/notes/."
-    (let* ((document-file-name (or (run-hook-with-args-until-success
-                                    'org-noter-get-buffer-file-name-hook major-mode)
-                                   document-file-name))
-           (document-path (or document-file-name buffer-file-truename
-                              (error "This buffer does not seem to be visiting any file")))
-           (document-name (file-name-nondirectory document-path))
-           (document-base (file-name-base document-name))
-           (notes-dir (expand-file-name "~/org/notes/"))
-           (notes-file (expand-file-name (concat document-base ".org") notes-dir)))
-      (make-directory notes-dir t)
-      (unless (file-exists-p notes-file)
-        (with-temp-file notes-file
-          (insert (format "#+title: %s\n#+filetags: :ref:\n#+created: %s\n\n* %s\n:PROPERTIES:\n:NOTER_DOCUMENT: %s\n:END:\n"
-                          document-base
-                          (format-time-string "[%Y-%m-%d %a]")
-                          document-base
-                          (expand-file-name document-path)))))
-      (with-current-buffer (find-file-noselect notes-file)
-        (goto-char (point-min))
-        (re-search-forward (org-re-property org-noter-property-doc-file) nil t)
-        (org-back-to-heading t)
-        (org-noter))))
-
-  (setq org-noter-create-session-from-document-hook
-        '(my/org-noter-create-session-in-references)))
+  ;; Diff buffer auto enters emacs-state
+  (add-hook 'diff-mode-hook
+            (lambda ()
+              (when (string-match-p "\\*agent-shell-diff\\*" (buffer-name))
+                (evil-emacs-state))))
+  ;; Viewport auto emacs-state
+  (with-eval-after-load 'evil
+    (evil-set-initial-state 'agent-shell-viewport-view-mode 'emacs)))
+(after! markdown-mode
+  (setq markdown-command "pandoc"
+        markdown-open-command
+        (when (featurep :system 'windows) "explorer.exe")
+        markdown-fontify-code-blocks-natively t
+        markdown-header-scaling t
+        markdown-enable-wiki-links t
+        markdown-italic-underscore t
+        markdown-asymmetric-header nil
+        markdown-live-preview-delete-export 'delete-on-destroy))
 (use-package! powershell
   :mode ("\\.ps1\\'" . powershell-mode)
   :config
@@ -1912,18 +1702,7 @@ front-matter if it does not yet exist."
         "C-c C-c" #'my/powershell-run-file
         "C-c C-r" #'my/powershell-run-region
         "C-c C-z" #'powershell))
-(after! markdown-mode
-  (setq markdown-command "pandoc"
-        markdown-open-command
-        (when (featurep :system 'windows) "explorer.exe")
-        markdown-fontify-code-blocks-natively t
-        markdown-header-scaling t
-        markdown-enable-wiki-links t
-        markdown-italic-underscore t
-        markdown-asymmetric-header nil
-        markdown-live-preview-delete-export 'delete-on-destroy))
 (map! :leader
-      ;; :desc "org-capture" "X" nil
       ;; Gcal
       (:prefix ("G" . "gcal")
        :desc "Sync"   "s" #'org-gcal-sync
@@ -1931,68 +1710,59 @@ front-matter if it does not yet exist."
        :desc "Delete" "d" #'org-gcal-delete-at-point
        :desc "Push"   "p" #'my/org-gcal-auto-post)
 
-      ;; Elfeed
+      ;; Open
       (:prefix ("o" . "open")
-       ;; :desc "Org capture" "c" #'org-capture
-       :desc "Elfeed" "e" #'elfeed)
+       :desc "Elfeed"      "e" #'elfeed
+       :desc "Claude Code" "s" #'agent-shell-anthropic-start-claude-code
+       :desc "Codex"       "c" #'agent-shell-openai-start-codex)
 
-      ;; Denote
+      ;; Notes / Denote
       (:prefix ("n" . "notes")
        :desc "Consult notes (pick)"   "s" #'consult-notes
        :desc "Consult notes (search)" "S" #'consult-notes-search-in-all-notes
        (:prefix ("d" . "denote")
-        :desc "New note"              "n" #'denote
-        :desc "New note (choose type)" "N" #'denote-type
-        :desc "New note in subdir"    "D" #'denote-subdirectory
-        :desc "Open or create"        "f" #'denote-open-or-create
-        :desc "Insert link"           "i" #'denote-link-or-create
-        :desc "Insert link (region → title)" "I" #'denote-link
-        :desc "Add links (search)"    "L" #'denote-add-links
-        :desc "Backlinks"             "b" #'denote-backlinks
-        :desc "Rename file"           "r" #'denote-rename-file
-        :desc "Rename from front-matter" "R" #'denote-rename-file-using-front-matter
-        :desc "Add keywords"          "k" #'denote-keywords-add
-        :desc "Remove keywords"       "K" #'denote-keywords-remove
-        :desc "Dired in denote dir"   "d" #'denote-dired
-        :desc "Today's journal"       "j" #'denote-journal-new-or-existing-entry))
+        :desc "New note"                       "n" #'denote
+        :desc "New note (choose type)"         "N" #'denote-type
+        :desc "New note in subdir"             "D" #'denote-subdirectory
+        :desc "Open or create"                 "f" #'denote-open-or-create
+        :desc "Insert link"                    "i" #'denote-link-or-create
+        :desc "Insert link (region → title)"   "I" #'denote-link
+        :desc "Add links (search)"             "L" #'denote-add-links
+        :desc "Backlinks"                      "b" #'denote-backlinks
+        :desc "Rename file"                    "r" #'denote-rename-file
+        :desc "Rename from front-matter"       "R" #'denote-rename-file-using-front-matter
+        :desc "Add keywords"                   "k" #'denote-keywords-add
+        :desc "Remove keywords"                "K" #'denote-keywords-remove
+        :desc "Dired in denote dir"            "d" #'denote-dired
+        :desc "Today's journal"                "j" #'denote-journal-new-or-existing-entry))
 
-      ;; Org-noter
       :desc "org-noter" "N" #'org-noter)
-;; Org-mode local keybindings
 (map! :after org
       :map org-mode-map
       :localleader
-      ;; Image / org-download
       (:prefix ("i" . "image")
        :desc "Toggle inline"  "t" #'org-toggle-inline-images
        :desc "Paste clipboard" "p" #'org-download-clipboard
        :desc "Screenshot"     "s" #'org-download-screenshot
        :desc "Yank"           "y" #'org-download-yank
        :desc "Delete"         "d" #'org-download-delete)
-      ;; Denote link in org buffers
       (:prefix ("d" . "denote")
-       :desc "Insert link"       "i" #'denote-link-or-create
-       :desc "Backlinks"         "b" #'denote-backlinks
-       :desc "Add keywords"      "k" #'denote-keywords-add
-       :desc "Rename (front-matter)" "r" #'denote-rename-file-using-front-matter
-       ;; denote-org: heading-level links + subtree extraction
+       :desc "Insert link"            "i" #'denote-link-or-create
+       :desc "Backlinks"              "b" #'denote-backlinks
+       :desc "Add keywords"           "k" #'denote-keywords-add
+       :desc "Rename (front-matter)"  "r" #'denote-rename-file-using-front-matter
        :desc "Link to heading"        "h" #'denote-org-link-to-heading
        :desc "Backlinks for heading"  "H" #'denote-org-backlinks-for-heading
        :desc "Extract subtree to note" "x" #'denote-org-extract-org-subtree
-       ;; denote-org: dynamic blocks (update with C-c C-x C-u)
        (:prefix ("o" . "dblock")
-        :desc "Links (by regexp)"        "l" #'denote-org-dblock-insert-links
-        :desc "Backlinks"                "b" #'denote-org-dblock-insert-backlinks
-        :desc "Missing links"            "m" #'denote-org-dblock-insert-missing-links
-        :desc "Files"                    "f" #'denote-org-dblock-insert-files
-        :desc "Files as headings"        "F" #'denote-org-dblock-insert-files-as-headings))
-      ;; Todo
-      :desc "TODO state" "t" #'org-todo
-      ;; Rich paste
-      :desc "Paste rich text" "V" #'my/org-paste-rich
-      ;; Archive
+        :desc "Links (by regexp)"     "l" #'denote-org-dblock-insert-links
+        :desc "Backlinks"             "b" #'denote-org-dblock-insert-backlinks
+        :desc "Missing links"         "m" #'denote-org-dblock-insert-missing-links
+        :desc "Files"                 "f" #'denote-org-dblock-insert-files
+        :desc "Files as headings"     "F" #'denote-org-dblock-insert-files-as-headings))
+      :desc "TODO state"        "t" #'org-todo
+      :desc "Paste rich text"   "V" #'my/org-paste-rich
       :desc "Archive done tasks" "A" #'my/org-archive-done-tasks)
-;; Markdown-mode local keybindings — denote-markdown link conversion
 (map! :after markdown-mode
       :map markdown-mode-map
       :localleader
@@ -2000,7 +1770,6 @@ front-matter if it does not yet exist."
        :desc "Insert link"              "i" #'denote-link-or-create
        :desc "Backlinks"                "b" #'denote-backlinks
        :desc "Rename (front-matter)"    "r" #'denote-rename-file-using-front-matter
-       ;; Link conversion (denote-markdown)
        :desc "denote: → file path"      "f" #'denote-markdown-convert-links-to-file-paths
        :desc "file path → denote:"      "F" #'denote-markdown-convert-links-to-denote-type
        :desc "denote: → Obsidian"       "o" #'denote-markdown-convert-links-to-obsidian-type
@@ -2014,25 +1783,15 @@ front-matter if it does not yet exist."
   (use-package! sis
     :demand t
     :config
-    ;; Skip sis's auto-detect (runs too early, before the w32 frame exists,
-    ;; so `(window-system)` is nil and `sis--ism` never gets set). Wire the
-    ;; Windows IME API directly — with both functions set, `sis--init-ism`
-    ;; flips `sis--ism` to t and the get/set path works from any frame.
+    ;; Skip sis's auto-detect; wire Windows IME API directly.
     (setq sis-english-source nil
           sis-other-source   t
           sis-do-get         #'w32-get-ime-open-status
           sis-do-set         #'w32-set-ime-open-status)
 
-    ;; Disable the 0.2 s idle poll timer. Enabling cursor-color / respect mode
-    ;; auto-turns it on, and on Windows its high-frequency w32-get-ime-open-status
-    ;; calls race with imm32.dll during buffer/window creation (SPC x → scratch)
-    ;; and hard-crash Emacs. `after-focus-change-function` below covers the only
-    ;; case we actually need resyncing for (focus returns from another app).
+    ;; Disable 0.2s idle poll (races imm32.dll on buffer creation).
     (setq sis-auto-refresh-seconds nil)
 
-    ;; Windows: use w32-get-ime-open-status as the single source of truth.
-    ;; Rime's inline_ascii/commit_code don't touch the Windows IME API,
-    ;; so sis--current can drift out of sync — poll the API directly.
     (defun sis-switch ()
       "Switch between English and other, driven by the Windows IME API."
       (interactive)
@@ -2052,16 +1811,14 @@ front-matter if it does not yet exist."
 
     (setq sis-respect-go-english-triggers (list #'org-agenda))
 
-    ;; Resync IME state after Emacs frame regains focus, in case another
-    ;; app toggled the system IME while Emacs was in the background.
+    ;; Resync after frame regains focus
     (add-function :after after-focus-change-function
                   (lambda () (sis--get)))
 
     :hook
     (org-capture-mode . sis-set-other))
 
-  ;; Bind C-\ everywhere evil might grab keys first. `map!` without a state
-  ;; modifier only binds global-map, which evil state maps can shadow.
+  ;; Bind C-\ everywhere evil might grab keys first.
   (define-key global-map (kbd "C-\\") #'sis-switch)
   (with-eval-after-load 'evil
     (define-key evil-normal-state-map (kbd "C-\\") #'sis-switch)
@@ -2069,75 +1826,3 @@ front-matter if it does not yet exist."
     (define-key evil-motion-state-map (kbd "C-\\") #'sis-switch)
     (define-key evil-visual-state-map (kbd "C-\\") #'sis-switch)
     (define-key evil-emacs-state-map  (kbd "C-\\") #'sis-switch)))
-
-;; Load secrets (org-gcal credentials etc.)
-(load! "secrets" doom-user-dir t)
-(use-package! ace-window
-  :config
-  (setq aw-keys '(?a ?s ?d ?f ?g ?h ?j ?k ?l)
-        aw-scope 'frame
-        aw-background t)
-
-  ;; 覆盖默认的 other-window (C-x o)
-  (global-set-key [remap other-window] #'ace-window)
-
-  ;; 在 window 左上角显示编号（比 mode-line 更直观）
-  (setq aw-display-mode-overlay t
-        aw-leading-char-style 'char)
-
-  ;; 配合 evil：在 motion/normal 态下也能用
-  (after! evil
-    (define-key evil-motion-state-map (kbd "C-w w") #'ace-window)
-    (define-key evil-normal-state-map (kbd "C-w w") #'ace-window)))
-;; (setq doom-scratch-default-major-mode 'org-mode)
-
-;; (defun my/open-lisp-scratch ()
-;;   "Open a lisp-interaction-mode scratch buffer for Elisp testing."
-;;   (interactive)
-;;   (let ((buf (get-buffer-create "*lisp-scratch*")))
-;;     (with-current-buffer buf
-;;       (unless (eq major-mode 'lisp-interaction-mode)
-;;         (lisp-interaction-mode)))
-;;     (switch-to-buffer buf)))
-(require 'acp)
-(require 'agent-shell)
-
-(setq agent-shell-preferred-agent-config
-      (agent-shell-anthropic-make-claude-code-config))
-
-(setq agent-shell-anthropic-authentication
-      (agent-shell-anthropic-make-authentication
-       :api-key (lambda () my/athenai-api-key)))
-
-(setq agent-shell-anthropic-claude-environment
-      (agent-shell-make-environment-variables
-       "ANTHROPIC_BASE_URL" "https://athenai.mihoyo.com/v1"
-       "ANTHROPIC_MODEL" "claude-sonnet-4-6"
-       "ANTHROPIC_SMALL_FAST_MODEL" "claude-sonnet-4-6"))
-
-;; Keyboard: SPC o s → start Claude Code agent shell
-;; Keyboard: SPC o c → start Codex agent shell
-(map! :leader
-      (:prefix ("o" . "open")
-       :desc "Claude Code" "s" #'agent-shell-anthropic-start-claude-code
-       :desc "Codex"       "c" #'agent-shell-openai-start-codex))
-
-;; ── Buffer 内 Evil 友好键位 ──────────────────────────────────
-;; insert mode：RET = 换行（防误发），S-RET = 发送
-;; normal mode：RET = 发送（vim 习惯），q = 关 buffer
-(map! :map agent-shell-mode-map
-      :i "RET"   #'newline
-      :i "S-RET" #'shell-maker-submit
-      :n "RET"   #'shell-maker-submit
-      :n "q"     #'quit-window
-      :nv "gr"   #'agent-shell-send-dwim)
-
-;; ── Diff buffer 自动进 emacs-state ──────────────────────────
-;; 看 agent 改动时按 y/n/p/q 不用先切 insert
-(add-hook 'diff-mode-hook
-          (lambda ()
-            (when (string-match-p "\\*agent-shell-diff\\*" (buffer-name))
-              (evil-emacs-state))))
-;; ── Viewport view-mode 自动进 emacs-state ───────────────────
-;; view 模式大量单字母键 (n/p/f/b/r/y/1-9/m/a/c/q) 会被 evil normal state 拦截
-(evil-set-initial-state 'agent-shell-viewport-view-mode 'emacs))

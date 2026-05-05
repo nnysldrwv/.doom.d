@@ -1,107 +1,168 @@
+#+title: Doom Emacs Config
+#+author: Sean Yuan
+#+property: header-args:emacs-lisp :tangle yes :cache yes :results silent :padline no
+
+* Basic
+** Defaults
+*** Init
+
+#+begin_src emacs-lisp :tangle init.el
+;;; init.el -*- lexical-binding: t; -*-
+
+;; Doom Emacs module selection.
+;; SPC h d m  to browse available modules and their flags.
+;; doom/reload after editing, or run 'doom sync' from CLI.
+
+(doom! :input
+
+       :completion
+       ;; (company +childframe)
+       corfu
+       (vertico +icons)
+
+       :ui
+       doom
+       ;; doom-dashboard
+       hl-todo
+       modeline
+       nav-flash
+       ophints
+       (popup +all +defaults)
+       treemacs
+       ;; (vc-gutter +pretty)
+       ;; vi-tilde-fringe
+       window-select
+       ;; workspaces
+       ;; (emoji +ascii +github +unicode)
+       unicode
+       zen
+
+       :editor
+       (evil +everywhere)
+       file-templates
+       fold
+       (format +onsave)
+       snippets
+       word-wrap
+       multiple-cursors        
+
+       :emacs
+       ;; dired
+       ;; electric
+       undo
+       ;; vc
+       (ibuffer +icons)
+
+       :checkers
+       syntax
+
+       :tools
+       (eval +overlay)
+       lookup
+       magit
+       pdf
+
+       :os
+       (:if (featurep :system 'windows) windows)
+
+       :lang
+       emacs-lisp
+       ;; javascript
+       markdown
+       (org
+        +dragndrop
+        +present
+        +noter
+        +pandoc)
+       (python +lsp)
+       sh
+       ;; web
+       yaml
+       ;; cc
+
+       :app
+       (calendar +org-gcal)
+       (rss +org)
+
+       :config
+       literate
+       (default +bindings +smartparens))
+
+#+end_src
+*** Packages
+#+begin_src emacs-lisp :tangle packages.el
+;; -*- no-byte-compile: t; -*-
+;;; $DOOMDIR/packages.el
+(package! cal-china-x)
+;; (package! org-superstar)
+
+(package! nov)
+(package! powershell)
+(package! sis)
+
+;; denote
+(package! denote)
+(package! denote-org)
+(package! denote-journal)
+(package! denote-markdown)
+(package! consult-notes
+  :recipe (:host github :repo "mclear-tools/consult-notes"))
+
+;; agent shell
+(package! shell-maker)
+(package! acp)
+(package! agent-shell)
+
+;; 性能增强
+(package! gcmh)
+
+(package! ef-themes)
+
+;; A simple Emacs minor mode for a nice writing environment.
+(package! olivetti)
+
+;; 鼠标放到加粗字符上, 可编辑修饰符, 离开即显示加粗后的效果
+(package! org-appear
+  :recipe (:host github :repo "awth13/org-appear"))
+
+;; 中英文字符之间自动插入空格, 增加可阅读性
+(package! pangu-spacing)
+
+;; 每个标识符显示一个颜色, 花里胡哨的开始
+(package! rainbow-identifiers)
+
+;; increases the padding or spacing of frames and windows on demand
+(package! spacious-padding)
+
+;; ultra-scroll: scroll emacs like lightning
+(package! ultra-scroll
+  :recipe (:host github :repo "jdtsmith/ultra-scroll"))
+
+;; dired-narrow: narrow dired to matching files
+(package! dired-narrow)
+
+;; 完美解决中英文字符在表格中对齐的问题
+;; (package! valign)
+#+end_src
+*** Speed
+Make this file run slightly faster (see [[https://nullprogram.com/blog/2016/12/22/][this blog post]]).
+#+begin_src emacs-lisp
 ;;; config.el -*- lexical-binding: t; -*-
-;; (prefer-coding-system 'utf-8-unix)
-;; (set-default-coding-systems 'utf-8-unix)
-;; (setq locale-coding-system 'utf-8-unix)
-;; (when (eq system-type 'windows-nt)
-;;   (setq file-name-coding-system 'utf-8-unix
-;;         default-file-name-coding-system 'utf-8-unix))
+#+end_src
 
-;; (add-to-list 'process-coding-system-alist '("rg" utf-8 . utf-8))
-;; (add-to-list 'process-coding-system-alist '("git" utf-8 . utf-8))
-;; (add-to-list 'process-coding-system-alist '("fd" utf-8 . utf-8))
+Make emacs faster.
+#+begin_src emacs-lisp
+(use-package! gcmh
+  :init
+  (setq gcmh-idle-delay 5
+        gcmh-high-cons-threshold (* 256 1024 1024))  ; 256MB during idle
+  :config
+  (gcmh-mode 1))
 
-;; ;; NOTE: SPC s f (locate) unavailable on Windows, use SPC SPC instead
-
-;; ;; Disable evil mouse drag to avoid CJK font rendering crash
-;; (after! evil
-;;   (define-key evil-normal-state-map [down-mouse-1] nil)
-;;   (define-key evil-motion-state-map [down-mouse-1] nil))
-
-;; ;; Work around a native Windows crash when splitting Elfeed windows.
-;; (after! evil
-;;   (defun my/elfeed-buffer-p ()
-;;     "Return non-nil when the current buffer is an Elfeed buffer."
-;;     (derived-mode-p 'elfeed-search-mode 'elfeed-show-mode))
-
-;;   (evil-define-command my/evil-window-split-a (&optional count file)
-;;     "Like Doom's split advice, but avoid extra redraw in Elfeed on Windows."
-;;     :repeat nil
-;;     (interactive "P<f>")
-;;     (if (and (featurep :system 'windows)
-;;              (my/elfeed-buffer-p))
-;;         (let ((origwin (selected-window))
-;;               window-selection-change-functions)
-;;           (select-window (split-window origwin count 'below))
-;;           (unless evil-split-window-below
-;;             (select-window origwin))
-;;           (when file
-;;             (evil-edit file)))
-;;       (+evil-window-split-a count file)))
-
-;;   (evil-define-command my/evil-window-vsplit-a (&optional count file)
-;;     "Like Doom's vsplit advice, but avoid extra redraw in Elfeed on Windows."
-;;     :repeat nil
-;;     (interactive "P<f>")
-;;     (if (and (featurep :system 'windows)
-;;              (my/elfeed-buffer-p))
-;;         (let ((origwin (selected-window))
-;;               window-selection-change-functions)
-;;           (select-window (split-window origwin count 'right))
-;;           (unless evil-vsplit-window-right
-;;             (select-window origwin))
-;;           (when file
-;;             (evil-edit file)))
-;;       (+evil-window-vsplit-a count file)))
-
-;;   (advice-remove #'evil-window-split #'+evil-window-split-a)
-;;   (advice-remove #'evil-window-vsplit #'+evil-window-vsplit-a)
-;;   (advice-add #'evil-window-split :override #'my/evil-window-split-a)
-;;   (advice-add #'evil-window-vsplit :override #'my/evil-window-vsplit-a))
-
-;; ;; evil-org-mode bug: `evil-org-select-an-element' uses `(region-beginning)'
-;; ;; unconditionally, which returns `(min point mark)' even when no region is
-;; ;; active. In operator-pending mode (e.g. daR), that pulls the start back to
-;; ;; a stale mark, so `daR' deletes from that mark to the end of the subtree
-;; ;; instead of just the subtree.
-;; (after! evil-org
-;;   (defun evil-org-select-an-element (element)
-;;     "Select an org ELEMENT (fixed for operator-pending state)."
-;;     (let ((elem-begin (org-element-property :begin element)))
-;;       (list (if (evil-visual-state-p)
-;;                 (min (region-beginning) elem-begin)
-;;               elem-begin)
-;;             (org-element-property :end element)))))
-
-;; ;; Work around a native Windows crash when key-help commands read real keys
-;; ;; while the system IME is open.
-;; (when (featurep :system 'windows)
-;;   (defun my/windows-disable-ime-for-key-help-a (fn &rest args)
-;;     "Temporarily close the Windows IME while FN reads a key sequence."
-;;     (let ((restore-ime
-;;            (and (fboundp 'w32-get-ime-open-status)
-;;                 (fboundp 'w32-set-ime-open-status)
-;;                 (ignore-errors (w32-get-ime-open-status)))))
-;;       (unwind-protect
-;;           (progn
-;;             (when restore-ime
-;;               (ignore-errors (w32-set-ime-open-status nil)))
-;;             (apply fn args))
-;;         (when restore-ime
-;;           (ignore-errors (w32-set-ime-open-status t))))))
-
-;;   (with-eval-after-load 'help-fns
-;;     (dolist (fn '(describe-key describe-key-briefly))
-;;       (advice-remove fn #'my/windows-disable-ime-for-key-help-a)
-;;       (advice-add fn :around #'my/windows-disable-ime-for-key-help-a)))
-
-;;   (with-eval-after-load 'helpful
-;;     (advice-remove 'helpful-key #'my/windows-disable-ime-for-key-help-a)
-;;     (advice-add 'helpful-key :around #'my/windows-disable-ime-for-key-help-a)))
-
-;; 把之前AI写的一些东西备注掉了，下面是自己加的
-;; (prefer-coding-system 'utf-8)
-;; (set-default-coding-systems 'utf-8)
-;; (set-file-name-coding-system 'utf-8)
+(setq gc-cons-threshold 200000000) ; previous 33554432
+#+end_src
+*** Basic
+#+begin_src emacs-lisp
 ;; credentials
 (setq user-full-name "Sean Yuan"
       user-mail-address "yuanxiang424@gmail.com")
@@ -110,8 +171,86 @@
 (setq auto-save-default t
       make-backup-files t)
 
-;; kill emacs without confiming
-(setq confirm-kill-emacs nil)
+(setq confirm-kill-emacs nil ; 关闭 emacs 时无需额外确认
+      system-time-locale "C" ; 设置系统时间显示方式
+      pop-up-windows nil     ; no pop-up window
+      scroll-margin 2        ; It's nice to maintain a little margin
+      widget-image-enable nil)
+#+end_src
+
+# Some useful keybindings for the minbuffer.
+# #+begin_src emacs-lisp
+# (map! :map minibuffer-local-map
+#       "C-k" #'delete-minibuffer-contents
+#       "C-p" #'yank)
+# #+end_src
+
+#+begin_src emacs-lisp
+;; Set package archives
+(use-package! package
+  :config
+  (setq package-archives '(("gnu" . "http://elpa.emacs-china.org/gnu/")
+                           ("melpa" . "http://elpa.emacs-china.org/melpa/")))
+  (package-initialize))
+
+;; Package Management
+(use-package! use-package
+  :custom
+  (use-package-always-ensure nil)
+  (package-native-compile t)
+  (warning-minimum-level :emergency))
+
+;; J 合并行时，中文之间不插入多余空格
+(defun my/evil-join-cjk-advice (&rest _)
+  "Remove unwanted space between CJK characters after evil-join."
+  (save-excursion
+    (beginning-of-line)
+    (while (re-search-forward "\\(\\cc\\) \\(\\cc\\)" (line-end-position) t)
+      (replace-match "\\1\\2"))))
+
+(advice-add 'evil-join :after #'my/evil-join-cjk-advice)
+
+;; Shut up
+(setq byte-compile-warnings '(not obsolete))
+(setq warning-suppress-log-types '((comp) (bytecomp)))
+(setq native-comp-async-report-warnings-errors 'silent)
+(setq inhibit-startup-echo-area-message (user-login-name))
+(setq visible-bell t)
+(setq ring-bell-function 'ignore)
+(setq set-message-beep 'silent)
+
+;; encoding system
+(prefer-coding-system 'utf-8)
+(set-default-coding-systems 'utf-8)
+(setq default-buffer-file-coding-system 'utf-8)
+
+;; 删除文件先进垃圾筒
+(setq delete-by-moving-to-trash t)
+
+(setq word-wrap-by-category t)
+
+;; 在 Org mode 中禁用自适应换行缩进，实现左对齐
+(add-hook 'org-mode-hook (lambda () (adaptive-wrap-prefix-mode -1)))
+
+
+;; 打开文件时, 光标自动定位到上次停留的位置
+(save-place-mode 1)
+
+(global-auto-revert-mode)
+
+(setq initial-major-mode 'org-mode) ;; org!
+(setq initial-scratch-message nil)
+
+;; Smooth mouse scrolling
+(setq mouse-wheel-scroll-amount '(2 ((shift) . 1))  ; scroll two lines at a time
+      mouse-wheel-progressive-speed nil             ; don't accelerate scrolling
+      mouse-wheel-follow-mouse t                    ; scroll window under mouse
+      scroll-step 1)
+#+end_src
+* Fonts
+Using Maple Mono NF CN for monospace (CJK + Nerd Font all-in-one) and LXGW WenKai Screen for variable pitch.
+
+#+begin_src emacs-lisp
 ;; (defun my/first-available-font (candidates)
 ;;   "Return the first font family from CANDIDATES that is available."
 ;;   (catch 'found
@@ -120,9 +259,9 @@
 ;;         (throw 'found font)))
 ;;     nil))
 
-(setq doom-font (font-spec :family "Maple Mono NF CN" :size 17)
-      doom-variable-pitch-font (font-spec :family "LXGW WenKai Screen" :size 19)
-      doom-big-font (font-spec :family "Maple Mono NF CN" :size 24))
+(setq doom-font (font-spec :family "Maple Mono NF CN" :size 24)
+      doom-variable-pitch-font (font-spec :family "LXGW WenKai Screen" :size 26)
+      doom-big-font (font-spec :family "Maple Mono NF CN" :size 30))
 
 ;; CJK font override — must run AFTER unicode-fonts-setup (depth -90)
 ;; Change `my/cjk-mono-font' to pick a different CJK font
@@ -146,9 +285,116 @@
 
 ;; Depth 0 = runs after unicode-fonts (depth -90), so prepend wins
 (add-hook 'after-setting-font-hook #'my/setup-cjk-fonts 0)
+#+end_src
+
+* Appearance
+#+begin_src emacs-lisp
 ;; (setq doom-theme 'modus-operandi)
 ;; (setq doom-theme 'modus-operandi-tinted)
-(setq doom-theme 'modus-operandi-tritanopia)
+;; (setq doom-theme 'modus-operandi-tritanopia)
+(setq doom-theme 'ef-day)
+
+(use-package! doom-modeline
+  :custom
+  (doom-modeline-buffer-encoding nil)
+  (doom-modeline-enable-word-count nil)
+  (doom-modeline-height 10))
+
+;; 全局打开visual line
+(global-visual-line-mode)
+
+(setq display-line-numbers-type nil)
+
+(show-paren-mode t)
+(setq use-short-answers t)
+
+(blink-cursor-mode 0)
+(fringe-mode '(0 . 0)) ;; No fringe
+
+;; 指定启动时的窗口位置和大小
+(setq initial-frame-alist '((top . 10)
+                            (left . 1200)
+                            (width . 500)
+                            (height .240)))
+
+;; 新开窗口时默认是左右结构
+(setq split-height-threshold nil)
+(setq split-width-threshold 0)
+
+(menu-bar-mode -1)
+(tool-bar-mode -1)
+(scroll-bar-mode -1)
+
+(setq-default x-stretch-cursor t
+              x-underline-at-descent-line t)
+#+end_src
+
+* UI Enhancement
+从 ljg 的配置抄的一些交互增强相关的配置
+#+begin_src emacs-lisp
+
+(use-package! corfu
+  :init (global-corfu-mode)
+  :config
+  (setq corfu-auto-complete t))
+
+(use-package! dired
+  :commands (dired dired-jump)
+  :after evil-collection
+  :config
+  (evil-collection-define-key 'normal 'dired-mode-map
+    "h" 'dired-up-directory
+    "l" 'dired-find-file))
+
+(use-package! dired-narrow
+  :after dired
+  :config
+  (evil-define-key 'normal dired-mode-map (kbd "/") #'dired-narrow))
+
+;; MINIBUFFER COMPLETION
+(use-package! vertico
+  :init (vertico-mode)
+  :custom
+  (vertico-sort-function 'vertico-sort-history-alpha))
+
+;; Search for partial matches in any order
+(use-package! orderless
+  :custom
+  (completion-styles '(orderless basic))
+  (completion-category-defaults nil)
+  (completion-category-overrides
+   '((file (styles partial-completion)))))
+
+;; Improve keyboard shortcut discoverability
+(use-package! which-key
+  :config (which-key-mode)
+  :custom
+  (which-key-max-description-length 40)
+  (which-key-lighter nil)
+  (which-key-sort-order 'which-key-description-order))
+
+;; Consult convenience functions
+(use-package! consult
+  :bind
+  (("C-c M-x" . consult-mode-command)
+   ("C-c h" . consult-history)
+   ("C-c k" . consult-kmacro)
+   ("C-c m" . consult-man)
+   ("C-c i" . consult-info)
+   ([remap Info-search] . consult-info)))
+
+;; Improved help buffers
+(use-package! helpful
+  :bind
+  (("C-h f" . helpful-function)
+   ("C-h x" . helpful-command)
+   ("C-h k" . helpful-key)
+   ("C-h v" . helpful-variable)))
+#+end_src
+* Windows-specific Performance Tuning
+VC, process creation, file I/O, rendering, and large file handling.
+
+#+begin_src emacs-lisp
 (when (featurep :system 'windows)
   ;; VC / Git
   (setq auto-revert-check-vc-info nil
@@ -194,7 +440,11 @@
   (let ((gnu-find "C:/Program Files/Git/usr/bin/find.exe"))
     (when (file-executable-p gnu-find)
       (setq find-program gnu-find))))
-(setq system-time-locale "C")
+#+end_src
+
+* Org-mode — Core Workflow
+** Basic Setup
+#+begin_src emacs-lisp
 (setq org-directory "~/org")
 
 (after! org
@@ -205,532 +455,775 @@
         org-habit-preceding-days 21
         org-habit-following-days 7
         org-habit-show-habits-only-for-today nil)
-;; Todo keywords
-(setq org-todo-keywords
-      '((sequence "TODO(t)" "NEXT(n)" "PROG(p!)" "WAIT(w@/!)" "|" "DONE(d!)" "FAIL(f@)")))
-(setq org-todo-keyword-faces
-      '(("TODO" :foreground "#2952a3" :weight bold)
-        ("NEXT" :foreground "#e67e22" :weight bold)
-        ("PROG" :foreground "#c0392b" :weight bold)
-        ("WAIT" :foreground "#8b6914" :weight bold)
-        ("DONE" :foreground "#2e7d32" :weight bold)
-        ("FAIL" :foreground "#9e9e9e" :weight bold)))
+#+end_src
 
-(setq org-log-done 'time
-      org-log-into-drawer t)
-;; Display (only set what Doom doesn't already handle)
-(setq org-confirm-babel-evaluate nil
-      org-return-follows-link t
-      org-startup-folded 'content
-      org-hide-emphasis-markers t
-      org-ellipsis " ▾")
+** TODO Keywords & Faces
+#+begin_src emacs-lisp
+  ;; Todo keywords
+  (setq org-todo-keywords
+        '((sequence "TODO(t)" "NEXT(n)" "PROG(p!)" "WAIT(w@/!)" "|" "DONE(d!)" "FAIL(f@)")))
+  (setq org-todo-keyword-faces
+        '(("TODO" :foreground "#2952a3" :weight bold)
+          ("NEXT" :foreground "#e67e22" :weight bold)
+          ("PROG" :foreground "#c0392b" :weight bold)
+          ("WAIT" :foreground "#8b6914" :weight bold)
+          ("DONE" :foreground "#2e7d32" :weight bold)
+          ("FAIL" :foreground "#9e9e9e" :weight bold)))
 
-;; Inline images
-(setq image-use-external-converter t
-      org-image-actual-width '(600))
-;; org-modern headings 和 org-indent-mode 都会改 heading 可见属性，
-;; Windows CJK 字体下冲突导致同级标题对不齐。关掉 heading 美化，让
-;; org-superstar 专门管 bullet，org-indent 单独管缩进。
-(setq org-modern-star nil
-      org-modern-hide-stars nil
-      org-modern-keyword nil
-      org-modern-priority nil
-      org-modern-todo nil
-      org-modern-tag nil)
-;; org-superstar: 只替换 bullet 字符，不动字体度量，对齐不会歪
-(setq org-superstar-headline-bullets-list '(?◉ ?○ ?⚬ ?◈ ?◇)
-      org-superstar-cycle-headline-bullets nil
-      org-superstar-remove-leading-stars nil
-      org-superstar-todo-bullet-alist
-      '(("TODO" . ?☐) ("NEXT" . ?▶) ("PROG" . ?◉) ("WAIT" . ?⏳)
-        ("DONE" . ?☑) ("FAIL" . ?✗))
-      org-superstar-item-bullet-alist
-      '((?* . ?•) (?+ . ?➤) (?- . ?–)))
-(add-hook 'org-mode-hook #'org-superstar-mode)
-;; ---- org-attach: 统一附件管理 ----
-(require 'org-attach)
-(setq org-attach-id-dir (expand-file-name "data/" org-directory)
-      org-attach-method 'cp
-      org-attach-use-inheritance t
-      org-attach-store-link-p 'attached
-      org-attach-auto-tag nil)
+  (setq org-log-done 'time
+        org-log-into-drawer t)
+#+end_src
 
-;; Fix attachment 链接中文乱码
-(defun my/org-attach-store-link-decoded (&rest _)
-  "Fix stored links from `org-attach-attach' to include decoded description."
-  (when org-stored-links
-    (let ((latest (car org-stored-links)))
-      (when (and (stringp (car latest))
-                 (string-prefix-p "attachment:" (car latest))
-                 (or (null (cadr latest)) (string= (cadr latest) "")))
-        (setcar (cdr latest)
-                (decode-coding-string
-                 (url-unhex-string
-                  (file-name-nondirectory
-                   (substring (car latest) (length "attachment:"))))
-                 'utf-8))))))
-(advice-add 'org-attach-attach :after #'my/org-attach-store-link-decoded)
-;; Agenda
-(setq org-agenda-inhibit-startup t
-      org-agenda-tags-column -200)
-      (setq org-agenda-files '("~/org/inbox.org"
-                               "~/org/append-note.org"
-                               "~/org/notes/"
-                               "~/org/.calendar"))
-(setq org-default-notes-file "~/org/inbox.org")
+** Display Settings
+#+begin_src emacs-lisp
+  ;; Display (only set what Doom doesn't already handle)
+  (setq org-confirm-babel-evaluate nil
+        org-return-follows-link t
+        org-startup-folded 'content
+        org-hide-emphasis-markers t
+        org-ellipsis " ▾")
 
-;; Archive
-(setq org-archive-location
-      (concat (expand-file-name ".archive/" org-directory)
-              "%s_archive.org::"))
+  ;; Inline images
+  (setq image-use-external-converter t
+        org-image-actual-width '(600))
 
-;; Time grid in agenda
-(setq org-agenda-use-time-grid t
-      org-agenda-show-current-time-in-grid t
-      org-agenda-time-grid
-      '((daily today)
-        (600 800 1000 1200 1400 1600 1800 2000 2200)
-        " ┄┄┄┄┄ " "┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄")
-      org-agenda-current-time-string
-      "◀── now ─────────────────────")
-;; ---- Append Note helper ----
-(defun my/append-note-goto-bottom ()
-  "Move point to end of append-note.org with date separator."
-  (let ((today-sep (format-time-string "-- %Y-%m-%d --")))
-    (goto-char (point-max))
-    (unless (save-excursion
-              (goto-char (point-min))
-              (search-forward today-sep nil t))
-      (unless (bolp) (insert "\n"))
-      (insert "\n" today-sep "\n")))
-  (goto-char (point-max)))
+;; 关闭indent
+(after! org
+  (custom-set-variables '(org-startup-indented nil)))
 
-(defun my/append-note-open-at-end-h ()
-  "Always place point at the end when visiting append-note.org."
-  (when (and buffer-file-name
-             (file-equal-p buffer-file-name
-                           (expand-file-name "~/org/append-note.org")))
-    (goto-char (point-max))))
+(use-package! spacious-padding
+  :custom (line-spacing 3)
+  :init (spacious-padding-mode 1))
 
-(add-hook 'find-file-hook #'my/append-note-open-at-end-h t)
-;; ---- Habit capture helper ----
-(defun my/org-capture-habit ()
-  "Generate a capture template for a habit."
-  (let* ((name (read-string "Habit 名称: "))
-         (raw  (read-string "提醒时间 (HH:MM): "))
-         (repeat (completing-read "重复周期: "
-                                  '(".+1d  — 每天（从完成日起）"
-                                    ".+2d  — 每2天"
-                                    ".+1w  — 每周"
-                                    ".+2w  — 每2周"
-                                    ".+1m  — 每月"
-                                    "++1d  — 每天（固定日期）"
-                                    "++1w  — 每周（固定星期）"
-                                    ".+1d/2d — 每天，最多隔2天"
-                                    ".+1d/3d — 每天，最多隔3天")
-                                  nil t))
-         (repeat-val (car (split-string repeat " ")))
-         (parts (split-string raw ":"))
-         (hour (string-to-number (nth 0 parts)))
-         (min  (string-to-number (nth 1 parts)))
-         (time (format "%02d:%02d" hour min))
-         (today (format-time-string "%Y-%m-%d %a"))
-         (end-min (+ min 5))
-         (end-hour (+ hour (/ end-min 60)))
-         (end-time (format "%02d:%02d" end-hour (% end-min 60))))
-    (format "* TODO %s\nSCHEDULED: <%s %s %s>\n:PROPERTIES:\n:STYLE:    habit\n:calendar-id: yuanxiang424@gmail.com\n:END:\n:org-gcal:\n<%s %s-%s>\n:END:\n"
-            name today time repeat-val today time end-time)))
-;; ---- Capture templates ----
-(setq org-capture-templates
-      '(("a" "Append Note" plain
-         (file+function "~/org/append-note.org" my/append-note-goto-bottom)
-         "- %?"
-         :empty-lines 1 :jump-to-captured t)
-        ("i" "Inbox" entry (file "~/org/inbox.org")
-         "* %?\n:PROPERTIES:\n:CREATED: %U\n:END:\n" :empty-lines 1)
-        ("n" "Note" entry (file "~/org/inbox.org")
-         "* %^{标题}  %^g\n:PROPERTIES:\n:CREATED: %U\n:END:\n\n%?"
-         :empty-lines 1 :jump-to-captured t)
-        ("t" "Task" entry (file "~/org/inbox.org")
-         "* TODO %?\n:PROPERTIES:\n:CREATED: %U\n:END:\n" :empty-lines 1)
-        ("j" "Journal" entry
-         (file my/journal-capture-target)
-         "* %<%H:%M>\n%?"
-         :empty-lines 1 :jump-to-captured t)
-        ("r" "r · 稍后读 [inbox]" entry (file "~/org/inbox.org")
-         "* TODO [[%^{URL}][%^{Title}]]\n:PROPERTIES:\n:CREATED: %U\n:END:\n%?" :empty-lines 1)
-        ("m" "Media")
-        ("mm" "电影 · 想看" entry
-         (file+olp "~/org/collections/media.org" "影视动漫" "电影" "想看")
-         "**** TODO %^{片名}\n:PROPERTIES:\n:添加时间: %U\n:END:\n%?"
-         :empty-lines 1 :jump-to-captured t)
-        ("mM" "电影 · 看完" entry
-         (file+olp "~/org/collections/media.org" "影视动漫" "电影" "看完")
-         "**** DONE %^{片名}\n:PROPERTIES:\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
-         :empty-lines 1 :jump-to-captured t)
-        ("mt" "电视剧 · 想看" entry
-         (file+olp "~/org/collections/media.org" "影视动漫" "电视剧" "想看")
-         "**** TODO %^{片名}\n:PROPERTIES:\n:添加时间: %U\n:END:\n%?"
-         :empty-lines 1 :jump-to-captured t)
-        ("mT" "电视剧 · 看完" entry
-         (file+olp "~/org/collections/media.org" "影视动漫" "电视剧" "看完")
-         "**** DONE %^{片名}\n:PROPERTIES:\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
-         :empty-lines 1 :jump-to-captured t)
-        ("ma" "动漫 · 想看" entry
-         (file+olp "~/org/collections/media.org" "影视动漫" "动漫" "想看")
-         "**** TODO %^{片名}\n:PROPERTIES:\n:添加时间: %U\n:END:\n%?"
-         :empty-lines 1 :jump-to-captured t)
-        ("mA" "动漫 · 看完" entry
-         (file+olp "~/org/collections/media.org" "影视动漫" "动漫" "看完")
-         "**** DONE %^{片名}\n:PROPERTIES:\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
-         :empty-lines 1 :jump-to-captured t)
-        ("b" "Books")
-        ("bb" "书 · 待阅读" entry
-         (file+olp "~/org/collections/books.org" "待阅读")
-         "*** TODO %^{书名}\n:PROPERTIES:\n:作者: %^{作者}\n:类型: %^{类型|小说|非虚构|理财|网文|漫画|其他}\n:来源: %^{来源|微信读书|豆瓣|Z-Library|实体书|其他}\n:添加时间: %U\n:END:\n%?"
-         :empty-lines 1 :jump-to-captured t)
-        ("bB" "书 · 阅读中" entry
-         (file+olp "~/org/collections/books.org" "阅读中")
-         "*** READING %^{书名}\n:PROPERTIES:\n:作者: %^{作者}\n:类型: %^{类型|小说|非虚构|理财|网文|漫画|其他}\n:来源: %^{来源|微信读书|豆瓣|Z-Library|实体书|其他}\n:添加时间: %U\n:END:\n%?"
-         :empty-lines 1 :jump-to-captured t)
-        ("w" "w · 精读笔记 [ref/]" plain (function my/capture-web-article-target)
-         "%?"
-         :empty-lines 1 :jump-to-captured t)
-        ("h" "Habit" entry (file "~/org/areas/habits.org")
-         (function my/org-capture-habit)
-         :empty-lines 1)
-        ("pl" "Protocol: Read later" entry (file "~/org/inbox.org")
-         "* TODO %:annotation\n:PROPERTIES:\n:CREATED: %U\n:END:\n%i\n"
-         :immediate-finish t :jump-to-captured t)
-        ("pn" "Protocol: Note → references/" plain
-         (function my/protocol-note-target)
-         "#+begin_quote\n%i\n#+end_quote\n%?"
-         :jump-to-captured t)))
-;; ---- Refile targets ----
-(defun my/org-top-level-org-files (dir)
-  "Return top-level non-hidden .org files in DIR."
-  (let ((dir (expand-file-name dir))
-        result)
-    (dolist (path (directory-files dir t "^[^.].*\\.org$") (nreverse result))
-      (when (file-regular-p path)
-        (push path result)))))
+(use-package! pangu-spacing
+  :config
+  (global-pangu-spacing-mode 1)
+  ;; 在中英文符号之间, 真正地插入空格
+  (setq pangu-spacing-real-insert-separtor t))
 
-(defun my/org-notes-files ()    (my/org-top-level-org-files "~/org/notes/"))
+(use-package! olivetti
+  :hook (org-mode . olivetti-mode)
+  :config (setq olivetti-body-width 92))
 
-(setq org-refile-targets
-      '(("~/org/inbox.org" :maxlevel . 1)
-        (my/org-project-files :maxlevel . 2)
-        (my/org-area-files :maxlevel . 2)
-        ("~/org/collections/books.org" :maxlevel . 2)
-        (my/org-reference-files :maxlevel . 1)
-        (my/org-notes-files :maxlevel . 1)))
-(setq org-refile-use-outline-path 'file
-      org-outline-path-complete-in-steps nil
-      org-refile-allow-creating-parent-nodes 'confirm
-      org-refile-use-cache nil)
-;; ---- Tags ----
-(setq org-tag-alist '((:startgroup)
-                      ("work" . ?w) ("personal" . ?p) ("learning" . ?l)
-                      (:endgroup)
-                      ("projectS" . ?s) ("ai" . ?a) ("hiring" . ?h)
-                      ("@office" . ?o) ("@home" . ?H) ("@phone" . ?P)))
-;; ---- Agenda views ----
-(setq org-stuck-projects '("" nil nil ""))
+(use-package! ultra-scroll
+  :init
+  (setq scroll-conservatively 101 ; important!
+        scroll-margin 0)
+  :config
+  (ultra-scroll-mode 1))
+#+end_src
 
-(defun my/skip-habit ()
-  "Skip entries with :STYLE: habit."
-  (let ((subtree-end (save-excursion (org-end-of-subtree t))))
-    (when (string= (org-entry-get nil "STYLE") "habit")
-      subtree-end)))
+** Org-Appear
 
-(setq org-agenda-custom-commands
-      '(("d" "Daily"
-         ((agenda "" ((org-agenda-span 'day)
-                      (org-agenda-start-day nil)
-                      (org-deadline-warning-days 3)
-                      (org-agenda-skip-scheduled-if-done t)
-                      (org-agenda-skip-deadline-if-done t)))
-          (todo "NEXT"
-                ((org-agenda-overriding-header "⚡ Next Actions")
-                 (org-agenda-skip-function 'my/skip-habit)
-                 (org-agenda-sorting-strategy '(priority-down category-keep))))
-          (todo "WAITING"
-                ((org-agenda-overriding-header "⏳ Waiting (FYI)")
-                 (org-agenda-sorting-strategy '(category-keep))))))
+#+begin_src emacs-lisp
+;; Show hidden emphasis markers
+(use-package! org-appear
+  :hook (org-mode . org-appear-mode)
+  :config
+  (setq org-appear-autoemphasis t
+        org-appear-autosubmarkers t
+        org-appear-autolinks nil))
+#+end_src
+** Org-Modern / Org-Pretty
+org-modern 的 heading 美化（star/keyword/priority/todo/tag）会和 org-indent-mode 的
+line-prefix 冲突，Windows CJK 字体下同级标题对不齐。禁用这些 heading 相关功能，
+改由 org-superstar 处理 bullet，org-modern 只负责 block/table 美化。
+#+begin_src emacs-lisp
+;; ;; org-modern headings 和 org-indent-mode 都会改 heading 可见属性，
+;; ;; Windows CJK 字体下冲突导致同级标题对不齐。关掉 heading 美化，让
+;; ;; org-superstar 专门管 bullet，org-indent 单独管缩进。
+;; (setq org-modern-star nil
+;;       org-modern-hide-stars nil
+;;       org-modern-keyword nil
+;;       org-modern-priority nil
+;;       org-modern-todo nil
+;;       org-modern-tag nil)
+;; ;; org-superstar: 只替换 bullet 字符，不动字体度量，对齐不会歪
+;; (setq org-superstar-headline-bullets-list '(?◉ ?○ ?⚬ ?◈ ?◇)
+;;       org-superstar-cycle-headline-bullets nil
+;;       org-superstar-remove-leading-stars nil
+;;       org-superstar-todo-bullet-alist
+;;       '(("TODO" . ?☐) ("NEXT" . ?▶) ("PROG" . ?◉) ("WAIT" . ?⏳)
+;;         ("DONE" . ?☑) ("FAIL" . ?✗))
+;;       org-superstar-item-bullet-alist
+;;       '((?* . ?•) (?+ . ?➤) (?- . ?–)))
+;; (add-hook 'org-mode-hook #'org-superstar-mode)
+#+end_src
 
-        ("w" "Weekly"
-         ((agenda "" ((org-agenda-span 'week)
-                      (org-deadline-warning-days 7)
-                      (org-habit-show-habits nil)))
-          (tags-todo "+work"
-                     ((org-agenda-overriding-header "🏢 Work")
-                      (org-agenda-skip-function 'my/skip-habit)
-                      (org-agenda-sorting-strategy '(todo-state-down priority-down))))
-          (tags-todo "+personal"
-                     ((org-agenda-overriding-header "🏠 Personal")
-                      (org-agenda-skip-function 'my/skip-habit)
-                      (org-agenda-sorting-strategy '(todo-state-down priority-down))))
-          (tags-todo "+learning"
-                     ((org-agenda-overriding-header "📚 Learning")
-                      (org-agenda-skip-function 'my/skip-habit)
-                      (org-agenda-sorting-strategy '(todo-state-down priority-down))))
-          (tags-todo "-work-personal-learning"
-                     ((org-agenda-overriding-header "📦 Untagged")
-                      (org-agenda-skip-function 'my/skip-habit)
-                      (org-agenda-sorting-strategy '(todo-state-down category-keep))))))
+** Org-attach
+#+begin_src emacs-lisp
+  ;; ---- org-attach: 统一附件管理 ----
+  (require 'org-attach)
+  (setq org-attach-id-dir (expand-file-name "data/" org-directory)
+        org-attach-method 'cp
+        org-attach-use-inheritance t
+        org-attach-store-link-p 'attached
+        org-attach-auto-tag nil)
 
-        ("g" "GTD Review"
-         ((agenda "" ((org-agenda-span 'day)
-                      (org-agenda-start-day nil)))
-          (todo "NEXT"
-                ((org-agenda-overriding-header "⚡ Next Actions")
-                 (org-agenda-skip-function 'my/skip-habit)
-                 (org-agenda-sorting-strategy '(priority-down category-keep))))
-          (todo "TODO"
-                ((org-agenda-overriding-header "📋 All Tasks (Backlog)")
-                 (org-agenda-skip-function 'my/skip-habit)
-                 (org-agenda-sorting-strategy '(tag-up priority-down category-keep))))
-          (todo "WAITING"
-                ((org-agenda-overriding-header "⏳ Waiting")
-                 (org-agenda-sorting-strategy '(category-keep))))
-          (todo "HOLD"
-                ((org-agenda-overriding-header "🧊 On Hold")
-                 (org-agenda-sorting-strategy '(category-keep))))))))
-;; ---- Babel image dir ----
-(defun my/org-babel-image-dir ()
-  (when buffer-file-name
-    (let ((dir (expand-file-name ".images/" (file-name-directory buffer-file-name))))
-      (make-directory dir t)
-      dir)))
+  ;; Fix attachment 链接中文乱码
+  (defun my/org-attach-store-link-decoded (&rest _)
+    "Fix stored links from `org-attach-attach' to include decoded description."
+    (when org-stored-links
+      (let ((latest (car org-stored-links)))
+        (when (and (stringp (car latest))
+                   (string-prefix-p "attachment:" (car latest))
+                   (or (null (cadr latest)) (string= (cadr latest) "")))
+          (setcar (cdr latest)
+                  (decode-coding-string
+                   (url-unhex-string
+                    (file-name-nondirectory
+                     (substring (car latest) (length "attachment:"))))
+                   'utf-8))))))
+  (advice-add 'org-attach-attach :after #'my/org-attach-store-link-decoded)
+#+end_src
 
-(advice-add 'org-babel-temp-file :around
-            (lambda (orig-fn prefix &optional suffix)
-              (let ((dir (my/org-babel-image-dir)))
-                (if (and dir suffix (string-match-p "\\.\\(png\\|svg\\|pdf\\|jpg\\)$" suffix))
-                    (let ((temporary-file-directory dir))
-                      (funcall orig-fn prefix suffix))
-                  (funcall orig-fn prefix suffix)))))
+** Agenda
+#+begin_src emacs-lisp
+  ;; Agenda
+  (setq org-agenda-inhibit-startup t
+        org-agenda-tags-column -200)
+        (setq org-agenda-files '("~/org/inbox.org"
+                                 "~/org/notes/20260101T000010--habits-hub__habit_index.org"
+                                 "~/org/append-note.org"
+                                 "~/org/.calendar"))
+  (setq org-default-notes-file "~/org/inbox.org")
 
-;; ---- Force org-babel shell blocks to use Git bash on Windows ----
-;; Default shell-file-name is cmdproxy.exe → cmd.exe, which can't handle "\"
-;; line continuations, $VAR expansion, or the "TOKEN=val" preamble that :var emits.
-;; 8.3 short path avoids the space in "Program Files" — ob-shell's
-;; org-babel-eval uses (format "%s %s" shell-file-name ...) without quoting.
-(defvar my/org-babel-bash nil)
-(setq my/org-babel-bash "C:/PROGRA~1/Git/usr/bin/bash.exe")
-(after! ob-shell
-  (define-advice org-babel-execute:shell
-      (:around (orig body params) use-bash-on-windows)
-    (if (and (eq system-type 'windows-nt)
-             (file-exists-p my/org-babel-bash))
-        (let ((shell-file-name my/org-babel-bash)
-              (shell-command-switch "-c")
-              (explicit-shell-file-name my/org-babel-bash))
-          (funcall orig body params))
-      (funcall orig body params)))
-  (define-advice org-babel-execute:bash
-      (:around (orig body params) use-bash-on-windows)
-    (if (and (eq system-type 'windows-nt)
-             (file-exists-p my/org-babel-bash))
-        (let ((shell-file-name my/org-babel-bash)
-              (shell-command-switch "-c")
-              (explicit-shell-file-name my/org-babel-bash))
-          (funcall orig body params))
-      (funcall orig body params))))
-;; ---- Media library auto-rebucket on TODO state change ----
-(defun my/media-org-file-p ()
-  "Return non-nil when visiting the media library file."
-  (and (buffer-file-name)
-       (file-equal-p (expand-file-name "~/org/collections/media.org")
-                     (expand-file-name (buffer-file-name)))))
+  ;; Archive
+  (setq org-archive-location
+        (concat (expand-file-name ".archive/" org-directory)
+                "%s_archive.org::"))
 
-(defun my/media-org-target-section-for-state (state)
-  "Map TODO STATE to a media library section name."
-  (pcase state
-    ((or "TODO" "NEXT") "想看")
-    ("DOING" "在看")
-    ("DONE" "看完")
-    ((or "DROPPED" "CANCELLED") "已放弃")
-    (_ nil)))
+  ;; Time grid in agenda
+  (setq org-agenda-use-time-grid t
+        org-agenda-show-current-time-in-grid t
+        org-agenda-time-grid
+        '((daily today)
+          (600 800 1000 1200 1400 1600 1800 2000 2200)
+          " ┄┄┄┄┄ " "┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄")
+        org-agenda-current-time-string
+        "◀── now ─────────────────────")
+#+end_src
 
-(defun my/media-org-current-entry-context ()
-  "Return plist for the current media entry, or nil when not applicable."
-  (save-excursion
-    (org-back-to-heading t)
-    (when (= (org-outline-level) 4)
-      (let (category section)
-        (save-excursion
-          (while (org-up-heading-safe)
-            (pcase (org-outline-level)
-              (3 (setq section (org-get-heading t t t t)))
-              (2 (setq category (org-get-heading t t t t))))))
-        (when (and (member category '("电影" "电视剧" "动漫"))
-                   (member section '("想看" "在看" "看完" "已放弃")))
-          (list :category category :section section))))))
+** Append Note Helper
+#+begin_src emacs-lisp
+  ;; ---- Append Note helper ----
+  (defun my/append-note-goto-bottom ()
+    "Move point to end of append-note.org with date separator."
+    (let ((today-sep (format-time-string "-- %Y-%m-%d --")))
+      (goto-char (point-max))
+      (unless (save-excursion
+                (goto-char (point-min))
+                (search-forward today-sep nil t))
+        (unless (bolp) (insert "\n"))
+        (insert "\n" today-sep "\n")))
+    (goto-char (point-max)))
 
-(defun my/media-org-find-section-position (category section)
-  "Return buffer position of CATEGORY -> SECTION in media.org."
-  (save-excursion
-    (save-restriction
-      (goto-char (point-min))
-      (when (re-search-forward "^\\* 影视动漫$" nil t)
-        (org-narrow-to-subtree)
+  (defun my/append-note-open-at-end-h ()
+    "Always place point at the end when visiting append-note.org."
+    (when (and buffer-file-name
+               (file-equal-p buffer-file-name
+                             (expand-file-name "~/org/append-note.org")))
+      (goto-char (point-max))))
+
+  (add-hook 'find-file-hook #'my/append-note-open-at-end-h t)
+#+end_src
+
+** Habit Capture Helper
+#+begin_src emacs-lisp
+  ;; ---- Habit capture helper ----
+  (defun my/org-capture-habit ()
+    "Generate a capture template for a habit."
+    (let* ((name (read-string "Habit 名称: "))
+           (raw  (read-string "提醒时间 (HH:MM): "))
+           (repeat (completing-read "重复周期: "
+                                    '(".+1d  — 每天（从完成日起）"
+                                      ".+2d  — 每2天"
+                                      ".+1w  — 每周"
+                                      ".+2w  — 每2周"
+                                      ".+1m  — 每月"
+                                      "++1d  — 每天（固定日期）"
+                                      "++1w  — 每周（固定星期）"
+                                      ".+1d/2d — 每天，最多隔2天"
+                                      ".+1d/3d — 每天，最多隔3天")
+                                    nil t))
+           (repeat-val (car (split-string repeat " ")))
+           (parts (split-string raw ":"))
+           (hour (string-to-number (nth 0 parts)))
+           (min  (string-to-number (nth 1 parts)))
+           (time (format "%02d:%02d" hour min))
+           (today (format-time-string "%Y-%m-%d %a"))
+           (end-min (+ min 5))
+           (end-hour (+ hour (/ end-min 60)))
+           (end-time (format "%02d:%02d" end-hour (% end-min 60))))
+      (format "* TODO %s\nSCHEDULED: <%s %s %s>\n:PROPERTIES:\n:STYLE:    habit\n:calendar-id: yuanxiang424@gmail.com\n:END:\n:org-gcal:\n<%s %s-%s>\n:END:\n"
+              name today time repeat-val today time end-time)))
+#+end_src
+
+** Capture Templates
+#+begin_src emacs-lisp
+  ;; ---- Capture templates ----
+  (setq org-capture-templates
+        '(("a" "Append Note" plain
+           (file+function "~/org/append-note.org" my/append-note-goto-bottom)
+           "- %?"
+           :empty-lines 1 :jump-to-captured t)
+          ("i" "Inbox" entry (file "~/org/inbox.org")
+           "* %?\n:PROPERTIES:\n:CREATED: %U\n:END:\n" :empty-lines 1)
+          ("n" "Note" entry (file "~/org/inbox.org")
+           "* %^{标题}  %^g\n:PROPERTIES:\n:CREATED: %U\n:END:\n\n%?"
+           :empty-lines 1 :jump-to-captured t)
+          ("t" "Task" entry (file "~/org/inbox.org")
+           "* TODO %?\n:PROPERTIES:\n:CREATED: %U\n:END:\n" :empty-lines 1)
+          ("j" "Journal" entry
+           (file my/journal-capture-target)
+           "* %<%H:%M>\n%?"
+           :empty-lines 1 :jump-to-captured t)
+          ("r" "r · 稍后读 [inbox]" entry (file "~/org/inbox.org")
+           "* TODO [[%^{URL}][%^{Title}]]\n:PROPERTIES:\n:CREATED: %U\n:END:\n%?" :empty-lines 1)
+          ("m" "Media")
+          ("mm" "电影 · 想看" entry
+           (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "电影" "想看")
+           "**** TODO %^{片名}\n:PROPERTIES:\n:添加时间: %U\n:END:\n%?"
+           :empty-lines 1 :jump-to-captured t)
+          ("mM" "电影 · 看完" entry
+           (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "电影" "看完")
+           "**** DONE %^{片名}\n:PROPERTIES:\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
+           :empty-lines 1 :jump-to-captured t)
+          ("mt" "电视剧 · 想看" entry
+           (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "电视剧" "想看")
+           "**** TODO %^{片名}\n:PROPERTIES:\n:添加时间: %U\n:END:\n%?"
+           :empty-lines 1 :jump-to-captured t)
+          ("mT" "电视剧 · 看完" entry
+           (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "电视剧" "看完")
+           "**** DONE %^{片名}\n:PROPERTIES:\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
+           :empty-lines 1 :jump-to-captured t)
+          ("ma" "动漫 · 想看" entry
+           (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "动漫" "想看")
+           "**** TODO %^{片名}\n:PROPERTIES:\n:添加时间: %U\n:END:\n%?"
+           :empty-lines 1 :jump-to-captured t)
+          ("mA" "动漫 · 看完" entry
+           (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "动漫" "看完")
+           "**** DONE %^{片名}\n:PROPERTIES:\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
+           :empty-lines 1 :jump-to-captured t)
+          ("b" "Books")
+          ("bb" "书 · 待阅读" entry
+           (file+olp "~/org/notes/20260101T000010--reading-list__read_index.org" "待阅读")
+           "*** TODO %^{书名}\n:PROPERTIES:\n:作者: %^{作者}\n:类型: %^{类型|小说|非虚构|理财|网文|漫画|其他}\n:来源: %^{来源|微信读书|豆瓣|Z-Library|实体书|其他}\n:添加时间: %U\n:END:\n%?"
+           :empty-lines 1 :jump-to-captured t)
+          ("bB" "书 · 阅读中" entry
+           (file+olp "~/org/notes/20260101T000010--reading-list__read_index.org" "阅读中")
+           "*** READING %^{书名}\n:PROPERTIES:\n:作者: %^{作者}\n:类型: %^{类型|小说|非虚构|理财|网文|漫画|其他}\n:来源: %^{来源|微信读书|豆瓣|Z-Library|实体书|其他}\n:添加时间: %U\n:END:\n%?"
+           :empty-lines 1 :jump-to-captured t)
+          ("w" "w · 精读笔记 [ref/]" plain (function my/capture-web-article-target)
+           "%?"
+           :empty-lines 1 :jump-to-captured t)
+          ("h" "Habit" entry (file "~/org/notes/20260101T000010--habits-hub__habit_index.org")
+           (function my/org-capture-habit)
+           :empty-lines 1)
+          ("pl" "Protocol: Read later" entry (file "~/org/inbox.org")
+           "* TODO %:annotation\n:PROPERTIES:\n:CREATED: %U\n:END:\n%i\n"
+           :immediate-finish t :jump-to-captured t)
+          ("pn" "Protocol: Note → references/" plain
+           (function my/protocol-note-target)
+           "#+begin_quote\n%i\n#+end_quote\n%?"
+           :jump-to-captured t)))
+#+end_src
+
+** Refile Targets
+#+begin_src emacs-lisp
+  ;; ---- Refile targets ----
+  (defun my/org-top-level-org-files (dir)
+    "Return top-level non-hidden .org files in DIR."
+    (let ((dir (expand-file-name dir))
+          result)
+      (dolist (path (directory-files dir t "^[^.].*\\.org$") (nreverse result))
+        (when (file-regular-p path)
+          (push path result)))))
+
+  (defun my/org-notes-files ()    (my/org-top-level-org-files "~/org/notes/"))
+
+  (setq org-refile-targets
+        '(("~/org/inbox.org" :maxlevel . 1)
+          ("~/org/append-note.org" :maxlevel . 1)
+          (my/org-notes-files :maxlevel . 2)))
+  (setq org-refile-use-outline-path 'file
+        org-outline-path-complete-in-steps nil
+        org-refile-allow-creating-parent-nodes 'confirm
+        org-refile-use-cache nil)
+#+end_src
+
+** Tags
+#+begin_src emacs-lisp
+  ;; ---- Tags ----
+  (setq org-tag-alist '((:startgroup)
+                        ("work" . ?w) ("personal" . ?p) ("learning" . ?l)
+                        (:endgroup)
+                        ("projectS" . ?s) ("ai" . ?a) ("hiring" . ?h)
+                        ("@office" . ?o) ("@home" . ?H) ("@phone" . ?P)))
+#+end_src
+
+** Agenda Views
+#+begin_src emacs-lisp
+  ;; ---- Agenda views ----
+  (setq org-stuck-projects '("" nil nil ""))
+
+  (defun my/skip-habit ()
+    "Skip entries with :STYLE: habit."
+    (let ((subtree-end (save-excursion (org-end-of-subtree t))))
+      (when (string= (org-entry-get nil "STYLE") "habit")
+        subtree-end)))
+
+  (setq org-agenda-custom-commands
+        '(("d" "Daily"
+           ((agenda "" ((org-agenda-span 'day)
+                        (org-agenda-start-day nil)
+                        (org-deadline-warning-days 3)
+                        (org-agenda-skip-scheduled-if-done t)
+                        (org-agenda-skip-deadline-if-done t)))
+            (todo "NEXT"
+                  ((org-agenda-overriding-header "⚡ Next Actions")
+                   (org-agenda-skip-function 'my/skip-habit)
+                   (org-agenda-sorting-strategy '(priority-down category-keep))))
+            (todo "WAITING"
+                  ((org-agenda-overriding-header "⏳ Waiting (FYI)")
+                   (org-agenda-sorting-strategy '(category-keep))))))
+
+          ("w" "Weekly"
+           ((agenda "" ((org-agenda-span 'week)
+                        (org-deadline-warning-days 7)
+                        (org-habit-show-habits nil)))
+            (tags-todo "+work"
+                       ((org-agenda-overriding-header "🏢 Work")
+                        (org-agenda-skip-function 'my/skip-habit)
+                        (org-agenda-sorting-strategy '(todo-state-down priority-down))))
+            (tags-todo "+personal"
+                       ((org-agenda-overriding-header "🏠 Personal")
+                        (org-agenda-skip-function 'my/skip-habit)
+                        (org-agenda-sorting-strategy '(todo-state-down priority-down))))
+            (tags-todo "+learning"
+                       ((org-agenda-overriding-header "📚 Learning")
+                        (org-agenda-skip-function 'my/skip-habit)
+                        (org-agenda-sorting-strategy '(todo-state-down priority-down))))
+            (tags-todo "-work-personal-learning"
+                       ((org-agenda-overriding-header "📦 Untagged")
+                        (org-agenda-skip-function 'my/skip-habit)
+                        (org-agenda-sorting-strategy '(todo-state-down category-keep))))))
+
+          ("g" "GTD Review"
+           ((agenda "" ((org-agenda-span 'day)
+                        (org-agenda-start-day nil)))
+            (todo "NEXT"
+                  ((org-agenda-overriding-header "⚡ Next Actions")
+                   (org-agenda-skip-function 'my/skip-habit)
+                   (org-agenda-sorting-strategy '(priority-down category-keep))))
+            (todo "TODO"
+                  ((org-agenda-overriding-header "📋 All Tasks (Backlog)")
+                   (org-agenda-skip-function 'my/skip-habit)
+                   (org-agenda-sorting-strategy '(tag-up priority-down category-keep))))
+            (todo "WAITING"
+                  ((org-agenda-overriding-header "⏳ Waiting")
+                   (org-agenda-sorting-strategy '(category-keep))))
+            (todo "HOLD"
+                  ((org-agenda-overriding-header "🧊 On Hold")
+                   (org-agenda-sorting-strategy '(category-keep))))))))
+#+end_src
+
+** Babel: Image Dir & Shell on Windows
+#+begin_src emacs-lisp
+  ;; ---- Babel image dir ----
+  (defun my/org-babel-image-dir ()
+    (when buffer-file-name
+      (let ((dir (expand-file-name ".images/" (file-name-directory buffer-file-name))))
+        (make-directory dir t)
+        dir)))
+
+  (advice-add 'org-babel-temp-file :around
+              (lambda (orig-fn prefix &optional suffix)
+                (let ((dir (my/org-babel-image-dir)))
+                  (if (and dir suffix (string-match-p "\\.\\(png\\|svg\\|pdf\\|jpg\\)$" suffix))
+                      (let ((temporary-file-directory dir))
+                        (funcall orig-fn prefix suffix))
+                    (funcall orig-fn prefix suffix)))))
+
+  ;; ---- Force org-babel shell blocks to use Git bash on Windows ----
+  ;; Default shell-file-name is cmdproxy.exe → cmd.exe, which can't handle "\"
+  ;; line continuations, $VAR expansion, or the "TOKEN=val" preamble that :var emits.
+  ;; 8.3 short path avoids the space in "Program Files" — ob-shell's
+  ;; org-babel-eval uses (format "%s %s" shell-file-name ...) without quoting.
+  (defvar my/org-babel-bash nil)
+  (setq my/org-babel-bash "C:/PROGRA~1/Git/usr/bin/bash.exe")
+  (after! ob-shell
+    (define-advice org-babel-execute:shell
+        (:around (orig body params) use-bash-on-windows)
+      (if (and (eq system-type 'windows-nt)
+               (file-exists-p my/org-babel-bash))
+          (let ((shell-file-name my/org-babel-bash)
+                (shell-command-switch "-c")
+                (explicit-shell-file-name my/org-babel-bash))
+            (funcall orig body params))
+        (funcall orig body params)))
+    (define-advice org-babel-execute:bash
+        (:around (orig body params) use-bash-on-windows)
+      (if (and (eq system-type 'windows-nt)
+               (file-exists-p my/org-babel-bash))
+          (let ((shell-file-name my/org-babel-bash)
+                (shell-command-switch "-c")
+                (explicit-shell-file-name my/org-babel-bash))
+            (funcall orig body params))
+        (funcall orig body params))))
+#+end_src
+
+** Media Library Auto-rebucket
+Automatically move media entries to the correct section when TODO state changes.
+
+#+begin_src emacs-lisp
+  ;; ---- Media library auto-rebucket on TODO state change ----
+  (defun my/media-org-file-p ()
+    "Return non-nil when visiting the media library file."
+    (and (buffer-file-name)
+         (file-equal-p (expand-file-name "~/org/notes/20260101T000010--media-collection__index.org")
+                       (expand-file-name (buffer-file-name)))))
+
+  (defun my/media-org-target-section-for-state (state)
+    "Map TODO STATE to a media library section name."
+    (pcase state
+      ((or "TODO" "NEXT") "想看")
+      ("PROG" "在看")
+      ("DONE" "看完")
+      ("FAIL" "已放弃")
+      (_ nil)))
+
+  (defun my/media-org-current-entry-context ()
+    "Return plist for the current media entry, or nil when not applicable."
+    (save-excursion
+      (org-back-to-heading t)
+      (when (= (org-outline-level) 4)
+        (let (category section)
+          (save-excursion
+            (while (org-up-heading-safe)
+              (pcase (org-outline-level)
+                (3 (setq section (org-get-heading t t t t)))
+                (2 (setq category (org-get-heading t t t t))))))
+          (when (and (member category '("电影" "电视剧" "动漫"))
+                     (member section '("想看" "在看" "看完" "已放弃")))
+            (list :category category :section section))))))
+
+  (defun my/media-org-find-section-position (category section)
+    "Return buffer position of CATEGORY -> SECTION in media.org."
+    (save-excursion
+      (save-restriction
         (goto-char (point-min))
-        (when (re-search-forward (format "^\\*\\* %s$" (regexp-quote category)) nil t)
+        (when (re-search-forward "^\\* 影视动漫$" nil t)
           (org-narrow-to-subtree)
           (goto-char (point-min))
-          (when (re-search-forward (format "^\\*\\*\\* %s$" (regexp-quote section)) nil t)
-            (line-beginning-position)))))))
+          (when (re-search-forward (format "^\\*\\* %s$" (regexp-quote category)) nil t)
+            (org-narrow-to-subtree)
+            (goto-char (point-min))
+            (when (re-search-forward (format "^\\*\\*\\* %s$" (regexp-quote section)) nil t)
+              (line-beginning-position)))))))
 
-(defun my/media-org-rebucket-current-entry ()
-  "Move the current media entry to the section implied by its TODO state."
-  (interactive)
-  (when-let* ((context (and (my/media-org-file-p)
-                            (my/media-org-current-entry-context)))
-              (target-section (my/media-org-target-section-for-state org-state))
-              (category (plist-get context :category))
-              (current-section (plist-get context :section)))
-    (unless (equal current-section target-section)
-      (let ((level (org-outline-level)))
-        (org-cut-subtree)
-        (when-let ((target-pos (my/media-org-find-section-position category target-section)))
-          (goto-char target-pos)
-          (org-end-of-subtree t t)
-          (unless (bolp)
-            (insert "\n"))
-          (org-paste-subtree level))))))
-
-(add-hook 'org-after-todo-state-change-hook #'my/media-org-rebucket-current-entry)
-(defun my/books-org-file-p ()
-  "Return non-nil when visiting the books collection file."
-  (and (buffer-file-name)
-       (file-equal-p (expand-file-name "~/org/collections/books.org")
-                     (expand-file-name (buffer-file-name)))))
-
-(defun my/books-org-target-section-for-state (state)
-  "Map TODO STATE to a books collection section name."
-  (pcase state
-    ((or "TODO" "NEXT" "WAITING") "待阅读")
-    ("READING" "阅读中")
-    ("DONE" "已读完")
-    ((or "DROPPED" "HOLD" "CANCELLED") "已放弃")
-    (_ nil)))
-
-(defun my/books-org-current-entry-context ()
-  "Return plist for the current books entry, or nil when not applicable."
-  (save-excursion
-    (org-back-to-heading t)
-    (when (= (org-outline-level) 2)
-      (let (section)
-        (save-excursion
-          (when (org-up-heading-safe)
-            (setq section (org-get-heading t t t t))))
-        (when (member section '("待阅读" "阅读中" "已读完" "已放弃"))
-          (list :section section))))))
-
-(defun my/books-org-find-section-position (section)
-  "Return buffer position of SECTION in books.org."
-  (save-excursion
-    (save-restriction
-      (goto-char (point-min))
-      (when (re-search-forward (format "^\\* %s$" (regexp-quote section)) nil t)
-        (line-beginning-position)))))
-
-(defun my/books-org-rebucket-current-entry ()
-  "Move the current books entry to the section implied by its TODO state."
-  (interactive)
-  (when-let* ((context (and (my/books-org-file-p)
-                            (my/books-org-current-entry-context)))
-              (target-section (my/books-org-target-section-for-state org-state))
-              (current-section (plist-get context :section)))
-    (unless (equal current-section target-section)
-      (let ((level (org-outline-level)))
-        (org-cut-subtree)
-        (when-let ((target-pos (my/books-org-find-section-position target-section)))
-          (goto-char target-pos)
-          (org-end-of-subtree t t)
-          (unless (bolp)
-            (insert "\n"))
-          (org-paste-subtree level))))))
-
-(add-hook 'org-after-todo-state-change-hook #'my/books-org-rebucket-current-entry)
-;; ---- Archive done tasks ----
-(defun my/org-entry-done-or-cancelled-p ()
-  "Return non-nil when the current Org heading is DONE or CANCELLED."
-  (member (org-get-todo-state) '("DONE" "CANCELLED")))
-
-(defun my/org-entry-has-done-or-cancelled-parent-p ()
-  "Return non-nil when an ancestor heading is DONE or CANCELLED."
-  (save-excursion
-    (let (found)
-      (while (and (not found) (org-up-heading-safe))
-        (when (my/org-entry-done-or-cancelled-p)
-          (setq found t)))
-      found)))
-
-(defun my/org-archive-target-file ()
-  "Return the expanded archive file path for the current Org buffer."
-  (let* ((fname (file-name-nondirectory (buffer-file-name)))
-         (location (replace-regexp-in-string "%s" fname org-archive-location t t)))
-    (expand-file-name (car (split-string location "::")))))
-
-(defun my/org-archive-done-tasks ()
-  "Archive DONE/CANCELLED tasks in the current file."
-  (interactive)
-  (unless (buffer-file-name)
-    (user-error "Not visiting a file; open an Org file first"))
-  (let (items)
-    (org-with-wide-buffer
-      (org-map-entries
-       (lambda ()
-         ;; Only archive the outermost done subtree; nested done children move
-         ;; with their archived parent and do not need a second pass.
-         (unless (my/org-entry-has-done-or-cancelled-parent-p)
-           (let ((beg (point))
-                 (end (save-excursion (org-end-of-subtree t t))))
-             (push (list :beg beg
-                         :end end
-                         :text (buffer-substring-no-properties beg end))
-                   items))))
-       "/DONE|CANCELLED" 'file))
-    (setq items
-          (sort items
-                (lambda (a b)
-                  (> (plist-get a :beg) (plist-get b :beg)))))
-    (let ((count (length items))
-          (archive-file (my/org-archive-target-file)))
-      (when items
-        (make-directory (file-name-directory archive-file) t)
-        ;; Remove inline image overlays before structural edits on Windows.
-        (when (fboundp 'org-remove-inline-images)
-          (org-remove-inline-images))
-        (with-temp-buffer
-          (when (file-exists-p archive-file)
-            (insert-file-contents archive-file))
-          (goto-char (point-max))
-          (unless (bolp)
-            (insert "\n"))
-          (dolist (item (reverse items))
-            (insert "\n" (plist-get item :text))
+  (defun my/media-org-rebucket-current-entry ()
+    "Move the current media entry to the section implied by its TODO state."
+    (interactive)
+    (when-let* ((context (and (my/media-org-file-p)
+                              (my/media-org-current-entry-context)))
+                (target-section (my/media-org-target-section-for-state org-state))
+                (category (plist-get context :category))
+                (current-section (plist-get context :section)))
+      (unless (equal current-section target-section)
+        (let ((level (org-outline-level)))
+          (org-cut-subtree)
+          (when-let ((target-pos (my/media-org-find-section-position category target-section)))
+            (goto-char target-pos)
+            (org-end-of-subtree t t)
             (unless (bolp)
-              (insert "\n")))
-          (write-region (point-min) (point-max) archive-file nil 'silent))
-        (save-excursion
-          (dolist (item items)
-            (delete-region (plist-get item :beg) (plist-get item :end))))
-        (save-buffer))
-      (message "Archived %d done/cancelled task(s) in %s"
-               count (file-name-nondirectory (buffer-file-name))))))
-;; Hide redundant tags in agenda
-(setq org-agenda-hide-tags-regexp "personal\\|habit")
+              (insert "\n"))
+            (org-paste-subtree level))))))
 
-;; ---- CJK emphasis fix (中文加粗/高亮) ----
-(setcar org-emphasis-regexp-components
-        " \t('\"{[:alpha:][:nonascii:]")
-(setcar (nthcdr 1 org-emphasis-regexp-components)
-        "[:alpha:][:nonascii:]- \t.,:!?;'\")}\\")
-(org-set-emph-re 'org-emphasis-regexp-components
-                 org-emphasis-regexp-components))
+  (add-hook 'org-after-todo-state-change-hook #'my/media-org-rebucket-current-entry)
+#+end_src
+
+** Books Library Auto-rebucket
+#+begin_src emacs-lisp
+  (defun my/books-org-file-p ()
+    "Return non-nil when visiting the books collection file."
+    (and (buffer-file-name)
+         (file-equal-p (expand-file-name "~/org/notes/20260101T000010--reading-list__read_index.org")
+                       (expand-file-name (buffer-file-name)))))
+
+  (defun my/books-org-target-section-for-state (state)
+    "Map TODO STATE to a books collection section name."
+    (pcase state
+      ((or "TODO" "NEXT" "WAITING") "待阅读")
+      ("READING" "阅读中")
+      ("DONE" "已读完")
+      ((or "DROPPED" "HOLD" "CANCELLED") "已放弃")
+      (_ nil)))
+
+  (defun my/books-org-current-entry-context ()
+    "Return plist for the current books entry, or nil when not applicable."
+    (save-excursion
+      (org-back-to-heading t)
+      (when (= (org-outline-level) 2)
+        (let (section)
+          (save-excursion
+            (when (org-up-heading-safe)
+              (setq section (org-get-heading t t t t))))
+          (when (member section '("待阅读" "阅读中" "已读完" "已放弃"))
+            (list :section section))))))
+
+  (defun my/books-org-find-section-position (section)
+    "Return buffer position of SECTION in books.org."
+    (save-excursion
+      (save-restriction
+        (goto-char (point-min))
+        (when (re-search-forward (format "^\\* %s$" (regexp-quote section)) nil t)
+          (line-beginning-position)))))
+
+  (defun my/books-org-rebucket-current-entry ()
+    "Move the current books entry to the section implied by its TODO state."
+    (interactive)
+    (when-let* ((context (and (my/books-org-file-p)
+                              (my/books-org-current-entry-context)))
+                (target-section (my/books-org-target-section-for-state org-state))
+                (current-section (plist-get context :section)))
+      (unless (equal current-section target-section)
+        (let ((level (org-outline-level)))
+          (org-cut-subtree)
+          (when-let ((target-pos (my/books-org-find-section-position target-section)))
+            (goto-char target-pos)
+            (org-end-of-subtree t t)
+            (unless (bolp)
+              (insert "\n"))
+            (org-paste-subtree level))))))
+
+  (add-hook 'org-after-todo-state-change-hook #'my/books-org-rebucket-current-entry)
+#+end_src
+
+** Archive Done Tasks
+#+begin_src emacs-lisp
+  ;; ---- Archive done tasks ----
+  (defun my/org-entry-done-or-cancelled-p ()
+    "Return non-nil when the current Org heading is DONE or CANCELLED."
+    (member (org-get-todo-state) '("DONE" "CANCELLED")))
+
+  (defun my/org-entry-has-done-or-cancelled-parent-p ()
+    "Return non-nil when an ancestor heading is DONE or CANCELLED."
+    (save-excursion
+      (let (found)
+        (while (and (not found) (org-up-heading-safe))
+          (when (my/org-entry-done-or-cancelled-p)
+            (setq found t)))
+        found)))
+
+  (defun my/org-archive-target-file ()
+    "Return the expanded archive file path for the current Org buffer."
+    (let* ((fname (file-name-nondirectory (buffer-file-name)))
+           (location (replace-regexp-in-string "%s" fname org-archive-location t t)))
+      (expand-file-name (car (split-string location "::")))))
+
+  (defun my/org-archive-done-tasks ()
+    "Archive DONE/CANCELLED tasks in the current file."
+    (interactive)
+    (unless (buffer-file-name)
+      (user-error "Not visiting a file; open an Org file first"))
+    (let (items)
+      (org-with-wide-buffer
+        (org-map-entries
+         (lambda ()
+           ;; Only archive the outermost done subtree; nested done children move
+           ;; with their archived parent and do not need a second pass.
+           (unless (my/org-entry-has-done-or-cancelled-parent-p)
+             (let ((beg (point))
+                   (end (save-excursion (org-end-of-subtree t t))))
+               (push (list :beg beg
+                           :end end
+                           :text (buffer-substring-no-properties beg end))
+                     items))))
+         "/DONE|CANCELLED" 'file))
+      (setq items
+            (sort items
+                  (lambda (a b)
+                    (> (plist-get a :beg) (plist-get b :beg)))))
+      (let ((count (length items))
+            (archive-file (my/org-archive-target-file)))
+        (when items
+          (make-directory (file-name-directory archive-file) t)
+          ;; Remove inline image overlays before structural edits on Windows.
+          (when (fboundp 'org-remove-inline-images)
+            (org-remove-inline-images))
+          (with-temp-buffer
+            (when (file-exists-p archive-file)
+              (insert-file-contents archive-file))
+            (goto-char (point-max))
+            (unless (bolp)
+              (insert "\n"))
+            (dolist (item (reverse items))
+              (insert "\n" (plist-get item :text))
+              (unless (bolp)
+                (insert "\n")))
+            (write-region (point-min) (point-max) archive-file nil 'silent))
+          (save-excursion
+            (dolist (item items)
+              (delete-region (plist-get item :beg) (plist-get item :end))))
+          (save-buffer))
+        (message "Archived %d done/cancelled task(s) in %s"
+                 count (file-name-nondirectory (buffer-file-name))))))
+#+end_src
+
+** Misc Org Settings (Close after! block)
+#+begin_src emacs-lisp
+  ;; Hide redundant tags in agenda
+  (setq org-agenda-hide-tags-regexp "personal\\|habit")
+
+  ;; ;; ---- CJK emphasis fix (中文加粗/高亮) ----
+  ;; (setcar org-emphasis-regexp-components
+  ;;         " \t('\"{[:alpha:][:nonascii:]")
+  ;; (setcar (nthcdr 1 org-emphasis-regexp-components)
+  ;;         "[:alpha:][:nonascii:]- \t.,:!?;'\")}\\")
+  ;; (org-set-emph-re 'org-emphasis-regexp-components
+  ;;                  org-emphasis-regexp-components))
+
+;; 从ljg配置里抄的
+(after! org
+  ;; @Eli 帮忙写的解决标记符号前后空格问题的代码, 感谢.
+  (setq org-emphasis-regexp-components '("-[:space:]('\"{[:nonascii:]"
+                                         "-[:space:].,:!?;'\")}\\[[:nonascii:]"
+                                         "[:space:]"
+                                         "."
+                                         1))
+  (setq org-match-substring-regexp
+        (concat
+         ;; 限制上标和下标的匹配范围，org 中对其的介绍见：(org) Subscripts and superscripts
+         "\\([0-9a-zA-Zα-γΑ-Ω]\\)\\([_^]\\)\\("
+         "\\(?:" (org-create-multibrace-regexp "{" "}" org-match-sexp-depth) "\\)"
+         "\\|"
+         "\\(?:" (org-create-multibrace-regexp "(" ")" org-match-sexp-depth) "\\)"
+         "\\|"
+         "\\(?:\\*\\|[+-]?[[:alnum:].,\\]*[[:alnum:]]\\)\\)"))
+  (org-set-emph-re 'org-emphasis-regexp-components org-emphasis-regexp-components)
+  (org-element-update-syntax))
+
+
+(after! org
+  ;; 标记字符前后空格优化问题
+  (defun eli/org-do-emphasis-faces (limit)
+    "Run through the buffer and emphasize strings."
+    (let ((quick-re (format "\\([%s]\\|^\\)\\([~=*/_+]\\)"
+                            (car org-emphasis-regexp-components))))
+      (catch :exit
+        (while (re-search-forward quick-re limit t)
+          (let* ((marker (match-string 2))
+                 (verbatim? (member marker '("~" "="))))
+            (when (save-excursion
+                    (goto-char (match-beginning 0))
+                    (and
+                     ;; Do not match if preceded by org-emphasis
+                     (not (save-excursion
+                            (forward-char 1)
+                            (get-pos-property (point) 'org-emphasis)))
+                     ;; Do not match in latex fragments.
+                     ;; (not (org-inside-LaTeX-fragment-p))
+                     ;; Do not match in Drawer.
+                     (not (org-match-line
+                           "^[    ]*:\\(\\(?:\\w\\|[-_]\\)+\\):[      ]*"))
+                     ;; Do not match table hlines.
+                     (not (and (equal marker "+")
+                               (org-match-line
+                                "[ \t]*\\(|[-+]+|?\\|\\+[-+]+\\+\\)[ \t]*$")))
+                     ;; Do not match headline stars.  Do not consider
+                     ;; stars of a headline as closing marker for bold
+                     ;; markup either.
+                     (not (and (equal marker "*")
+                               (save-excursion
+                                 (forward-char)
+                                 (skip-chars-backward "*")
+                                 (looking-at-p org-outline-regexp-bol))))
+                     ;; Match full emphasis markup regexp.
+                     (looking-at (if verbatim? org-verbatim-re org-emph-re))
+                     ;; Do not span over paragraph boundaries.
+                     (not (string-match-p org-element-paragraph-separate
+                                          (match-string 2)))
+                     ;; Do not span over cells in table rows.
+                     (not (and (save-match-data (org-match-line "[ \t]*|"))
+                               (string-match-p "|" (match-string 4))))))
+              (pcase-let ((`(,_ ,face ,_) (assoc marker org-emphasis-alist))
+                          (m (if org-hide-emphasis-markers 4 2)))
+                (font-lock-prepend-text-property
+                 (match-beginning m) (match-end m) 'face face)
+                (when verbatim?
+                  (org-remove-flyspell-overlays-in
+                   (match-beginning 0) (match-end 0))
+                  (when (and (org-fold-core-folding-spec-p 'org-link)
+                             (org-fold-core-folding-spec-p 'org-link-description))
+                    (org-fold-region (match-beginning 0) (match-end 0) nil 'org-link)
+                    (org-fold-region (match-beginning 0) (match-end 0) nil 'org-link-description))
+                  (remove-text-properties (match-beginning 2) (match-end 2)
+                                          '(display t invisible t intangible t)))
+                (add-text-properties (match-beginning 2) (match-end 2)
+                                     '(font-lock-multiline t org-emphasis t))
+                (when (and org-hide-emphasis-markers
+                           (not (org-at-comment-p)))
+                  (add-text-properties (match-end 4) (match-beginning 5)
+                                       '(invisible t))
+                  (add-text-properties (match-beginning 3) (match-end 3)
+                                       '(invisible t)))
+                (throw :exit t))))))))
+
+  (advice-add #'org-do-emphasis-faces :override #'eli/org-do-emphasis-faces)
+
+  (defun eli/org-element--parse-generic-emphasis (mark type)
+    "Parse emphasis object at point, if any.
+
+MARK is the delimiter string used.  TYPE is a symbol among
+`bold', `code', `italic', `strike-through', `underline', and
+`verbatim'.
+
+Assume point is at first MARK."
+    (save-excursion
+      (let ((origin (point)))
+        (unless (bolp) (forward-char -1))
+        (let ((opening-re
+               (rx-to-string
+                `(seq (or line-start (any space ?- ?\( ?' ?\" ?\{ nonascii))
+                  ,mark
+                  (not space)))))
+          (when (looking-at opening-re)
+            (goto-char (1+ origin))
+            (let ((closing-re
+                   (rx-to-string
+                    `(seq
+                      (not space)
+                      (group ,mark)
+                      (or (any space ?- ?. ?, ?\; ?: ?! ?? ?' ?\" ?\) ?\} ?\\ ?\[
+                               nonascii)
+                          line-end)))))
+              (when (re-search-forward closing-re nil t)
+                (let ((closing (match-end 1)))
+                  (goto-char closing)
+                  (let* ((post-blank (skip-chars-forward " \t"))
+                         (contents-begin (1+ origin))
+                         (contents-end (1- closing)))
+                    (list type
+                          (append
+                           (list :begin origin
+                                 :end (point)
+                                 :post-blank post-blank)
+                           (if (memq type '(code verbatim))
+                               (list :value
+                                     (and (memq type '(code verbatim))
+                                          (buffer-substring
+                                           contents-begin contents-end)))
+                             (list :contents-begin contents-begin
+                                   :contents-end contents-end)))))))))))))
+
+  (advice-add #'org-element--parse-generic-emphasis :override #'eli/org-element--parse-generic-emphasis))
+#+end_src
+
+* Org Clipboard Helpers
+Screenshot and rich text paste support across platforms.
+
+#+begin_src emacs-lisp
 (defun my/org-download-screenshot-command ()
   "Platform-appropriate screenshot command for org-download."
   (cond
@@ -795,26 +1288,35 @@ Used as `org-download-file-format-function'."
              (message "OK: plain text pasted (macOS fallback)"))))
         (t (message "WARN: pbpaste not found")))))
     (_ (message "WARN: rich text clipboard not implemented for this platform"))))
-;; Pixel-aligned agenda tags (fix CJK misalignment)
-(defun my/org-agenda-align-tags-pixel ()
-  "Right-align agenda tags using pixel-based display alignment."
-  ;; Windows Emacs 30.2 is currently crashing in agenda display paths on this
-  ;; machine, so keep the safer default spacing there.
-  (unless (eq system-type 'windows-nt)
-    (let ((inhibit-read-only t)
-          (target-pixel (- (window-text-width nil t)
-                           (* 2 (string-pixel-width " ")))))
-      (save-excursion
-        (goto-char (point-min))
-        (while (re-search-forward "\\([ \t]+\\)\\(:[[:alnum:]_@#%:]+:\\)[ \t]*$" nil t)
-          (let* ((tags-str (match-string 2))
-                 (tags-pixel (string-pixel-width tags-str))
-                 (align-to (- target-pixel tags-pixel)))
-            (when (> align-to 0)
-              (put-text-property (match-beginning 1) (match-end 1)
-                                 'display `(space :align-to (,align-to))))))))))
+#+end_src
 
-(add-hook 'org-agenda-finalize-hook #'my/org-agenda-align-tags-pixel)
+* Org Visual Enhancements
+** Pixel-aligned Agenda Tags
+#+begin_src emacs-lisp
+;; ;; Pixel-aligned agenda tags (fix CJK misalignment)
+;; (defun my/org-agenda-align-tags-pixel ()
+;;   "Right-align agenda tags using pixel-based display alignment."
+;;   ;; Windows Emacs 30.2 is currently crashing in agenda display paths on this
+;;   ;; machine, so keep the safer default spacing there.
+;;   (unless (eq system-type 'windows-nt)
+;;     (let ((inhibit-read-only t)
+;;           (target-pixel (- (window-text-width nil t)
+;;                            (* 2 (string-pixel-width " ")))))
+;;       (save-excursion
+;;         (goto-char (point-min))
+;;         (while (re-search-forward "\\([ \t]+\\)\\(:[[:alnum:]_@#%:]+:\\)[ \t]*$" nil t)
+;;           (let* ((tags-str (match-string 2))
+;;                  (tags-pixel (string-pixel-width tags-str))
+;;                  (align-to (- target-pixel tags-pixel)))
+;;             (when (> align-to 0)
+;;               (put-text-property (match-beginning 1) (match-end 1)
+;;                                  'display `(space :align-to (,align-to))))))))))
+
+;; (add-hook 'org-agenda-finalize-hook #'my/org-agenda-align-tags-pixel)
+#+end_src
+
+** Org-download
+#+begin_src emacs-lisp
 ;; org-download — 走 org-attach 体系
 (after! org
   (use-package! org-download
@@ -828,7 +1330,12 @@ Used as `org-download-file-format-function'."
           org-download-image-org-width 800
           org-download-annotate-function (lambda (_link) "")
           org-download-screenshot-method (my/org-download-screenshot-command)
-          org-download-file-format-function #'my/org-download-denote-file-format)
+          org-download-file-format-function #'my/org-download-denote-file-format
+          org-download-link-format-function
+          (lambda (filename)
+            (format "[[file:%s]]\n"
+                    (org-link-escape
+                     (file-relative-name filename default-directory)))))
 
     ;; Fix: org-download-dnd-fallback for Emacs 30+
     (when (fboundp 'dnd-handle-multiple-urls)
@@ -876,6 +1383,10 @@ EXT can hold the file extension, in case LINK doesn't provide it.
         :override #'org-download-clipboard
         (org-id-get-create)
         (org-download-screenshot basename)))))
+#+end_src
+
+** DnD: Flat File Copy to data/
+#+begin_src emacs-lisp
 ;; 任意文件拖入 org buffer → 复制到 ~/org/data/ 并用 denote 命名 +
 ;; 在光标处插入 file: 链接。对 epub / pdf / zip 等非图片也生效。
 (defun my/org-dnd-copy-to-data (uri _action)
@@ -905,6 +1416,10 @@ Only active in `org-mode'; returns nil elsewhere so the next handler runs."
               (cons '("^file:" . my/org-dnd-copy-to-data)
                     dnd-protocol-alist)))
 (add-hook 'org-mode-hook #'my/org-prepend-flat-dnd-handler)
+#+end_src
+
+** DnD: Markdown
+#+begin_src emacs-lisp
 ;; Markdown: 同样的扁平 + denote 命名流程。插入 ![alt](path) 或 [name](path)。
 (defconst my/markdown-image-extensions
   '("png" "jpg" "jpeg" "gif" "svg" "webp" "bmp" "avif")
@@ -937,6 +1452,11 @@ Only active in `markdown-mode'; returns nil elsewhere."
               (cons '("^file:" . my/markdown-dnd-copy-to-data)
                     dnd-protocol-alist)))
 (add-hook 'markdown-mode-hook #'my/markdown-prepend-flat-dnd-handler)
+#+end_src
+
+* Org-gcal (Google Calendar Sync)
+** plstore Workaround
+#+begin_src emacs-lisp
 ;; plstore encryption workaround (defer until needed)
 (after! plstore
   (advice-add 'plstore-save :around
@@ -949,6 +1469,10 @@ Only active in `markdown-mode'; returns nil elsewhere."
                   (unwind-protect
                       (funcall orig-fun plstore)
                     (plstore--set-secret-alist plstore secret-alist))))))
+#+end_src
+
+** org-gcal Config & Helpers
+#+begin_src emacs-lisp
 (use-package! org-gcal
   :commands (org-gcal-sync org-gcal-fetch org-gcal-delete-at-point org-gcal-post-at-point)
   :config
@@ -1091,6 +1615,11 @@ Only active in `markdown-mode'; returns nil elsewhere."
                     (when (not org-gcal--sync-lock)
                       (org-gcal-sync)
                       (my/org-gcal-auto-post)))))
+#+end_src
+
+* Denote
+** Core Config
+#+begin_src emacs-lisp
 (use-package! denote
   ;; NOT lazy-loaded: we need denote-dired-directories and the dired-mode-hook
   ;; in place as soon as any dired buffer opens, otherwise keyword highlighting
@@ -1125,23 +1654,26 @@ Only active in `markdown-mode'; returns nil elsewhere."
 
         ;; 形态标记（2，用于非 denote 的特殊文件）
         "journal"      ; 日记（journal/ 下专用）
-        "document"))   ; 附件/扫描件/材料（data/ 下专用）
+        "document")    ; 附件/扫描件/材料（data/ 下专用）
   
         denote-infer-keywords nil ;防止手滑加新keywords 
         denote-sort-keywords t
         
-        ;; Prompt for subdir so new notes land in references/ | denote/ | notes/
-        denote-prompts '(subdirectory title keywords)
+        ;; New notes land directly in denote-directory, no subdir prompt
+        denote-prompts '(title keywords)
         denote-date-prompt-use-org-read-date t
         ;; Only scan references/, denote/, notes/, journal/ — skip everything else under ~/org/
         denote-excluded-directories-regexp
         (rx (or (seq bos ".")
                 (seq bos (or "data" "investment" "templates" "tmp") eos)))
         denote-rename-confirmations nil
-        denote-backlinks-show-context t
         denote-dired-directories (list denote-directory)
         denote-dired-directories-include-subdirectories t)
-;; Windows-safe replacement for `denote-dired-mode-in-directories' — the
+#+end_src
+
+** Windows-safe Dired Mode
+#+begin_src emacs-lisp
+  ;; Windows-safe replacement for `denote-dired-mode-in-directories' — the
   ;; stock version uses case-sensitive `string-prefix-p' against file-truename,
   ;; which fails on Windows when drive-letter or path case disagrees
   ;; (e.g. "c:/Users/..." vs "C:/Users/...").
@@ -1186,6 +1718,10 @@ modes first, so when our hook lands everything is settled."
   ;; the pipeline (title prompt, slug, or upstream callers).
   (advice-add 'denote-format-file-name :filter-return
               (lambda (filename) (replace-regexp-in-string "[\n\r]" "" filename))))
+#+end_src
+
+** Dirvish Disable & Dired Hide Details
+#+begin_src emacs-lisp
 ;; Disable dirvish globally — its pre-redisplay overlay attrs cover denote's
 ;; font-lock-based filename highlighting, and user prefers plain dired anyway.
 (after! dirvish
@@ -1212,6 +1748,10 @@ modes first, so when our hook lands everything is settled."
                        (dired-hide-details-mode 1))))
                  (current-buffer))))
 (add-hook 'after-change-major-mode-hook #'my/dired-hide-details-on t)
+#+end_src
+
+** denote-org & denote-markdown
+#+begin_src emacs-lisp
 (use-package! denote-org
   :after (denote org))
 
@@ -1221,6 +1761,10 @@ modes first, so when our hook lands everything is settled."
              denote-markdown-convert-links-to-denote-type
              denote-markdown-convert-links-to-obsidian-type
              denote-markdown-convert-obsidian-links-to-denote-type))
+#+end_src
+
+** consult-notes
+#+begin_src emacs-lisp
 ;; ---- consult-notes: 多源统一检索 ----
 (use-package! consult-notes
   :after (consult denote)
@@ -1244,6 +1788,23 @@ modes first, so when our hook lands everything is settled."
   ;; Only text files from denote dir (Denote 3.x API)
   (setq consult-notes-denote-files-function
         (lambda () (denote-directory-files nil t t))))
+
+(after! consult-notes
+  ;; 禁用 consult 的默认排序，保留 source 提供的顺序
+  (consult-customize consult-notes :sort nil)
+
+  ;; 让 denote 文件列表按修改时间降序排列
+  (setq consult-notes-denote-files-function
+        (lambda ()
+          (sort (denote-directory-files)
+                (lambda (a b)
+                  (time-less-p
+                   (file-attribute-modification-time (file-attributes b))
+                   (file-attribute-modification-time (file-attributes a))))))))
+#+end_src
+
+** Capture Target Helpers
+#+begin_src emacs-lisp
 ;; Web article target for capture "w"
 (defun my/capture-web-article-target ()
   "Target function for org-capture: reference note from clipboard URL."
@@ -1255,14 +1816,15 @@ modes first, so when our hook lands everything is settled."
                         (when (re-search-forward "<title>\\([^<]*\\)</title>" nil t)
                           (string-trim (match-string 1)))))
                     (read-string "Title: ")))
+         (id (format-time-string "%Y%m%dT%H%M%S"))
          (slug (replace-regexp-in-string "[^a-zA-Z0-9一-鿿]+" "-"
                                          (downcase (string-trim title)) t t))
          (slug (replace-regexp-in-string "^-\\|-$" "" slug))
-         (file (expand-file-name (concat "references/" slug ".org") org-directory)))
+         (file (expand-file-name (format "notes/%s--%s__read.org" id slug) org-directory)))
     (set-buffer (org-capture-target-buffer file))
     (when (= (buffer-size) 0)
-      (insert (format "#+title: %s\n#+filetags: :ref:\n#+created: %s\n\n* Source\n%s\n\n* Summary\n\n* My Notes\n"
-                      title (format-time-string "[%Y-%m-%d %a]") url)))
+      (insert (format "#+title: %s\n#+date: [%s]\n#+filetags: :read:\n#+identifier: %s\n\n* Source\n%s\n\n* Summary\n\n* My Notes\n"
+                      title (format-time-string "%Y-%m-%d %a") id url)))
     (goto-char (point-max))
     (or (re-search-backward "^\\* My Notes" nil t) (goto-char (point-max)))
     (forward-line 1)))
@@ -1279,19 +1841,25 @@ modes first, so when our hook lands everything is settled."
                  (replace-regexp-in-string
                   "[^a-zA-Z0-9一-鿿]+" "-"
                   (downcase (string-trim title)) t t)))
-         (file  (expand-file-name (concat "references/" slug ".org") org-directory)))
+         (id    (format-time-string "%Y%m%dT%H%M%S"))
+         (file  (expand-file-name (format "notes/%s--%s__read.org" id slug) org-directory)))
     (set-buffer (org-capture-target-buffer file))
     (when (= (buffer-size) 0)
-      (insert (format "#+title: %s\n#+filetags: :ref:\n#+created: %s\n\n* Source\n%s\n\n* Summary\n\n* My Notes\n"
-                      title (format-time-string "[%Y-%m-%d %a]") url)))
+      (insert (format "#+title: %s\n#+date: [%s]\n#+filetags: :read:\n#+identifier: %s\n\n* Source\n%s\n\n* Summary\n\n* My Notes\n"
+                      title (format-time-string "%Y-%m-%d %a") id url)))
     (goto-char (point-max))
     (or (re-search-backward "^\\* My Notes" nil t) (goto-char (point-max)))
     (forward-line 1)))
+#+end_src
+
+* Elfeed & Elfeed-org
+** Elfeed Core
+#+begin_src emacs-lisp
 (use-package! elfeed
   :commands elfeed
   :config
   (require 'subr-x)
-  (setq elfeed-db-directory (expand-file-name "~/org/collections/.elfeed")
+  (setq elfeed-db-directory (expand-file-name "~/org/.elfeed")
         elfeed-curl-max-connections 4)
   (setq-default elfeed-search-filter "@1-month-ago +unread")
   (add-hook 'elfeed-search-mode-hook #'elfeed-update)
@@ -1480,11 +2048,19 @@ modes first, so when our hook lands everything is settled."
         :desc "Browse feed homepage" "B" #'my/elfeed-browse-homepage
         :desc "Toggle unread"       "R" #'my/elfeed-toggle-unread
         :desc "Play with mpv"       "v" #'my/elfeed-play-with-mpv))
+#+end_src
+
+** elfeed-org
+#+begin_src emacs-lisp
 (use-package! elfeed-org
   :after elfeed
   :config
   (elfeed-org)
-  (setq rmh-elfeed-org-files (list (expand-file-name "~/org/collections/elfeed.org"))))
+  (setq rmh-elfeed-org-files (list (expand-file-name "~/org/notes/20260101T000010--elfeed__emacs_index.org"))))
+#+end_src
+
+* Journal — denote-journal
+#+begin_src emacs-lisp
 (use-package! denote-journal
   :after denote
   :hook (calendar-mode . denote-journal-calendar-mode)
@@ -1513,6 +2089,10 @@ front-matter if it does not yet exist."
                  (current-time))))
     (denote-journal-path-to-new-or-existing-entry
      (format-time-string "%Y-%m-%d" time))))
+#+end_src
+
+* Weather (wttr.in)
+#+begin_src emacs-lisp
 (defvar my/weather-location "上海"
   "wttr.in 查询地点，中英文均可。")
 
@@ -1541,6 +2121,10 @@ front-matter if it does not yet exist."
       (insert "\n"))))
 
 (add-hook 'denote-after-new-note-hook #'my/denote-journal-auto-weather)
+#+end_src
+
+* Chinese Calendar (cal-china-x)
+#+begin_src emacs-lisp
 (use-package! cal-china-x
   :after calendar
   :config
@@ -1550,6 +2134,11 @@ front-matter if it does not yet exist."
         (append cal-china-x-important-holidays
                 cal-china-x-general-holidays))
   (setq org-agenda-include-diary nil))
+#+end_src
+
+* Reading: nov.el + org-noter
+** PDF & EPUB File Apps
+#+begin_src emacs-lisp
 ;; PDF file apps for org links
 (after! org
   (defun my/org-open-pdf-with-pdf-tools (file _link)
@@ -1573,6 +2162,10 @@ front-matter if it does not yet exist."
     (if epub-entry
         (setcdr epub-entry #'my/org-open-epub-with-nov)
       (add-to-list 'org-file-apps '("\\.epub\\'" . my/org-open-epub-with-nov)))))
+#+end_src
+
+** pdf-view Tweaks
+#+begin_src emacs-lisp
 ;; pdf-view tweaks
 (after! pdf-view
   (setq-default pdf-view-display-size 'fit-page)
@@ -1581,6 +2174,10 @@ front-matter if it does not yet exist."
         "C-c C-a h" #'pdf-annot-add-highlight-markup-annotation
         "C-c C-a t" #'pdf-annot-add-text-annotation
         "C-c C-a d" #'pdf-annot-add-strikeout-markup-annotation))
+#+end_src
+
+** nov.el (EPUB Reader)
+#+begin_src emacs-lisp
 ;; nov.el: EPUB reader
 (use-package! nov
   :mode ("\\.epub\\'" . nov-mode)
@@ -1608,18 +2205,22 @@ front-matter if it does not yet exist."
     (let ((coding-system-for-write 'utf-8))
       (apply orig-fn args)))
   (advice-add 'nov-save-place :around #'my/nov-save-place-a))
+#+end_src
+
+** org-noter
+#+begin_src emacs-lisp
 ;; org-noter
 (after! org-noter
   :commands org-noter
   :config
-  (setq org-noter-notes-search-path '("~/org/references/")
+  (setq org-noter-notes-search-path '("~/org/notes/")
         org-noter-default-notes-file-names '("notes.org")
         org-noter-auto-save-last-location t
         org-noter-notes-window-location 'horizontal-split
         org-noter-highlight-selected-text t)
 
   (defun my/org-noter-create-session-in-references (&optional arg document-file-name)
-    "Create org-noter session, always placing notes in ~/org/references/."
+    "Create org-noter session, always placing notes in ~/org/notes/."
     (let* ((document-file-name (or (run-hook-with-args-until-success
                                     'org-noter-get-buffer-file-name-hook major-mode)
                                    document-file-name))
@@ -1627,7 +2228,7 @@ front-matter if it does not yet exist."
                               (error "This buffer does not seem to be visiting any file")))
            (document-name (file-name-nondirectory document-path))
            (document-base (file-name-base document-name))
-           (notes-dir (expand-file-name "~/org/references/"))
+           (notes-dir (expand-file-name "~/org/notes/"))
            (notes-file (expand-file-name (concat document-base ".org") notes-dir)))
       (make-directory notes-dir t)
       (unless (file-exists-p notes-file)
@@ -1645,6 +2246,10 @@ front-matter if it does not yet exist."
 
   (setq org-noter-create-session-from-document-hook
         '(my/org-noter-create-session-in-references)))
+#+end_src
+
+* PowerShell Mode
+#+begin_src emacs-lisp
 (use-package! powershell
   :mode ("\\.ps1\\'" . powershell-mode)
   :config
@@ -1670,6 +2275,10 @@ front-matter if it does not yet exist."
         "C-c C-c" #'my/powershell-run-file
         "C-c C-r" #'my/powershell-run-region
         "C-c C-z" #'powershell))
+#+end_src
+
+* Markdown Enhancements
+#+begin_src emacs-lisp
 (after! markdown-mode
   (setq markdown-command "pandoc"
         markdown-open-command
@@ -1680,6 +2289,11 @@ front-matter if it does not yet exist."
         markdown-italic-underscore t
         markdown-asymmetric-header nil
         markdown-live-preview-delete-export 'delete-on-destroy))
+#+end_src
+
+* Keybindings
+** Leader Keys
+#+begin_src emacs-lisp
 (map! :leader
       ;; :desc "org-capture" "X" nil
       ;; Gcal
@@ -1716,6 +2330,10 @@ front-matter if it does not yet exist."
 
       ;; Org-noter
       :desc "org-noter" "N" #'org-noter)
+#+end_src
+
+** Org-mode Local Keybindings
+#+begin_src emacs-lisp
 ;; Org-mode local keybindings
 (map! :after org
       :map org-mode-map
@@ -1750,6 +2368,10 @@ front-matter if it does not yet exist."
       :desc "Paste rich text" "V" #'my/org-paste-rich
       ;; Archive
       :desc "Archive done tasks" "A" #'my/org-archive-done-tasks)
+#+end_src
+
+** Markdown Local Keybindings
+#+begin_src emacs-lisp
 ;; Markdown-mode local keybindings — denote-markdown link conversion
 (map! :after markdown-mode
       :map markdown-mode-map
@@ -1763,11 +2385,21 @@ front-matter if it does not yet exist."
        :desc "file path → denote:"      "F" #'denote-markdown-convert-links-to-denote-type
        :desc "denote: → Obsidian"       "o" #'denote-markdown-convert-links-to-obsidian-type
        :desc "Obsidian → denote:"       "O" #'denote-markdown-convert-obsidian-links-to-denote-type))
+#+end_src
+
+* Fix: C-c C-c in *Org Note* Buffer
+Doom's popup system can interfere with org-finish-function being buffer-local in =*Org Note*=.
+
+#+begin_src emacs-lisp
 (defadvice! my/org-ctrl-c-ctrl-c-note-fix (fn &rest args)
   :around #'org-ctrl-c-ctrl-c
   (if (string= (buffer-name) "*Org Note*")
       (org-store-log-note)
     (apply fn args)))
+#+end_src
+
+* Smart Input Source (sis) + Rime — Windows
+#+begin_src emacs-lisp
 (when (featurep :system 'windows)
   (use-package! sis
     :demand t
@@ -1830,6 +2462,10 @@ front-matter if it does not yet exist."
 
 ;; Load secrets (org-gcal credentials etc.)
 (load! "secrets" doom-user-dir t)
+#+end_src
+
+* Ace-window
+#+begin_src emacs-lisp
 (use-package! ace-window
   :config
   (setq aw-keys '(?a ?s ?d ?f ?g ?h ?j ?k ?l)
@@ -1847,16 +2483,26 @@ front-matter if it does not yet exist."
   (after! evil
     (define-key evil-motion-state-map (kbd "C-w w") #'ace-window)
     (define-key evil-normal-state-map (kbd "C-w w") #'ace-window)))
-(setq doom-scratch-default-major-mode 'org-mode)
+#+end_src
 
-(defun my/open-lisp-scratch ()
-  "Open a lisp-interaction-mode scratch buffer for Elisp testing."
-  (interactive)
-  (let ((buf (get-buffer-create "*lisp-scratch*")))
-    (with-current-buffer buf
-      (unless (eq major-mode 'lisp-interaction-mode)
-        (lisp-interaction-mode)))
-    (switch-to-buffer buf)))
+* Scratch Buffer (disabled)
+=SPC x= → org-mode scratch（临时笔记），=SPC X= → lisp scratch（Elisp 测试）。
+
+#+begin_src emacs-lisp
+;; (setq doom-scratch-default-major-mode 'org-mode)
+
+;; (defun my/open-lisp-scratch ()
+;;   "Open a lisp-interaction-mode scratch buffer for Elisp testing."
+;;   (interactive)
+;;   (let ((buf (get-buffer-create "*lisp-scratch*")))
+;;     (with-current-buffer buf
+;;       (unless (eq major-mode 'lisp-interaction-mode)
+;;         (lisp-interaction-mode)))
+;;     (switch-to-buffer buf)))
+#+end_src
+
+* Agent-shell — Claude Code in Emacs
+#+begin_src emacs-lisp
 (require 'acp)
 (require 'agent-shell)
 
@@ -1875,16 +2521,28 @@ front-matter if it does not yet exist."
 
 ;; Keyboard: SPC o s → start Claude Code agent shell
 ;; Keyboard: SPC o c → start Codex agent shell
-
-(setq agent-shell-openai-authentication
-      (agent-shell-openai-make-authentication
-       :api-key (lambda () my/athenai-api-key)))
-
-(setq agent-shell-openai-codex-environment
-      (agent-shell-make-environment-variables
-       "OPENAI_BASE_URL" "https://athenai.mihoyo.com/v1"))
-
 (map! :leader
       (:prefix ("o" . "open")
        :desc "Claude Code" "s" #'agent-shell-anthropic-start-claude-code
        :desc "Codex"       "c" #'agent-shell-openai-start-codex))
+
+;; ── Buffer 内 Evil 友好键位 ──────────────────────────────────
+;; insert mode：RET = 换行（防误发），S-RET = 发送
+;; normal mode：RET = 发送（vim 习惯），q = 关 buffer
+(map! :map agent-shell-mode-map
+      :i "RET"   #'newline
+      :i "S-RET" #'shell-maker-submit
+      :n "RET"   #'shell-maker-submit
+      :n "q"     #'quit-window
+      :nv "gr"   #'agent-shell-send-dwim)
+
+;; ── Diff buffer 自动进 emacs-state ──────────────────────────
+;; 看 agent 改动时按 y/n/p/q 不用先切 insert
+(add-hook 'diff-mode-hook
+          (lambda ()
+            (when (string-match-p "\\*agent-shell-diff\\*" (buffer-name))
+              (evil-emacs-state))))
+;; ── Viewport view-mode 自动进 emacs-state ───────────────────
+;; view 模式大量单字母键 (n/p/f/b/r/y/1-9/m/a/c/q) 会被 evil normal state 拦截
+(evil-set-initial-state 'agent-shell-viewport-view-mode 'emacs))
+#+end_src
