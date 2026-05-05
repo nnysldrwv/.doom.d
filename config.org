@@ -241,7 +241,7 @@ VC, process creation, file I/O, rendering, and large file handling.
 * Appearance
 ** Theme & UI
 #+begin_src emacs-lisp
-(setq doom-theme 'ef-day)
+(setq doom-theme 'ef-light)
 
 (use-package! doom-modeline
   :custom
@@ -1736,6 +1736,17 @@ Before 03:00 falls back to the previous day."
 #+end_src
 
 * Apps
+** Eshell
+#+begin_src emacs-lisp
+(defun my/eshell-here ()
+  "Open a new eshell rooted at the current buffer's directory."
+  (interactive)
+  (let ((default-directory (or (and buffer-file-name
+                                    (file-name-directory buffer-file-name))
+                               default-directory)))
+    (eshell t)))
+#+end_src
+
 ** Elfeed
 #+begin_src emacs-lisp
 (use-package! elfeed
@@ -2027,6 +2038,7 @@ Before 03:00 falls back to the previous day."
       ;; Open
       (:prefix ("o" . "open")
        :desc "Elfeed"      "e" #'elfeed
+       :desc "Eshell here" "E" #'my/eshell-here
        :desc "Claude Code" "s" #'agent-shell-anthropic-start-claude-code
        :desc "Codex"       "c" #'agent-shell-openai-start-codex)
 
