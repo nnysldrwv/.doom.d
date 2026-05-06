@@ -304,9 +304,9 @@ Maple Mono NF CN for monospace (CJK + Nerd Font all-in-one), LXGW WenKai Screen 
         (throw 'found font)))
     nil))
 
-(setq doom-font (font-spec :family "Maple Mono NF CN" :size 24)
-      doom-variable-pitch-font (font-spec :family "LXGW WenKai Screen" :size 26)
-      doom-big-font (font-spec :family "Maple Mono NF CN" :size 30))
+(setq doom-font (font-spec :family "Maple Mono NF CN" :size 20)
+      doom-variable-pitch-font (font-spec :family "LXGW WenKai Screen" :size 22)
+      doom-big-font (font-spec :family "Maple Mono NF CN" :size 26))
 
 ;; CJK font override — must run AFTER unicode-fonts-setup (depth -90)
 (defvar my/cjk-mono-font "Maple Mono NF CN"
@@ -1270,6 +1270,9 @@ Maple Mono NF CN for monospace (CJK + Nerd Font all-in-one), LXGW WenKai Screen 
                (dest      (expand-file-name dest-name dest-dir)))
           (make-directory dest-dir t)
           (copy-file src dest 1)
+          (unless (zerop org-download-image-org-width)
+            (insert (format "#+attr_org: :width %dpx\n"
+                            org-download-image-org-width)))
           (insert (format "[[file:%s]]"
                           (file-relative-name dest default-directory)))
           'copy)))))
