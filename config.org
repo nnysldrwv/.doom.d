@@ -1848,6 +1848,19 @@ Before 03:00 falls back to the previous day."
                                     (file-name-directory buffer-file-name))
                                default-directory)))
     (eshell t)))
+
+(defun eshell/doom (&rest args)
+  "Run Doom Emacs CLI from eshell.
+Invokes the current Emacs executable in batch mode with the doom script,
+identical to what `doom.ps1' does on Windows."
+  (let ((doom-script (expand-file-name "~/.emacs.d/bin/doom"))
+        (emacs-bin (expand-file-name invocation-name invocation-directory)))
+    (if (file-exists-p doom-script)
+        (apply #'call-process emacs-bin nil t nil
+               "-q" "--no-site-file" "--batch"
+               "--load" doom-script "--" "--no-color"
+               args)
+      (error "Doom script not found at %s" doom-script))))
 #+end_src
 
 ** Elfeed
