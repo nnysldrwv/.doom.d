@@ -304,8 +304,8 @@ Maple Mono NF CN for monospace (CJK + Nerd Font all-in-one), LXGW WenKai Screen 
         (throw 'found font)))
     nil))
 
-(setq doom-font (font-spec :family "Maple Mono NF CN" :size 20)
-      doom-variable-pitch-font (font-spec :family "LXGW WenKai Screen" :size 22)
+(setq doom-font (font-spec :family "Maple Mono NF CN" :size 18)
+      doom-variable-pitch-font (font-spec :family "LXGW WenKai Screen" :size 20)
       doom-big-font (font-spec :family "Maple Mono NF CN" :size 26))
 
 ;; CJK font override — must run AFTER unicode-fonts-setup (depth -90)
@@ -1070,7 +1070,7 @@ Maple Mono NF CN for monospace (CJK + Nerd Font all-in-one), LXGW WenKai Screen 
                            :end end
                            :text (buffer-substring-no-properties beg end))
                      items))))
-         "/DONE|CANCELLED" 'file))
+         "/DONE|FAIL" 'file))
       (setq items
             (sort items
                   (lambda (a b)
@@ -1255,6 +1255,42 @@ Maple Mono NF CN for monospace (CJK + Nerd Font all-in-one), LXGW WenKai Screen 
         (message (if (eq result 'deleted)
                      "Deleted file and removed link"
                    "Removed link (file was already missing"))))))
+#+end_src
+
+** Rotate image file permanently
+#+begin_src emacs-lisp
+(defun my/org-rotate-image-file (&optional angle)
+  "Rotate the image ATTACHMENT/FILE at point by ANGLE (default 90°) using ImageMagick.
+With universal prefix (\\[universal-argument]), prompt for angle.
+This physically modifies the file, so rotation survives cache/reboot."
+  (interactive "P")
+  (let* ((context (org-element-context))
+         (type (org-element-property :type context))
+         (path (when (member type '("file" "attachment"))
+                 (org-element-property :path context)))
+         (file (when path
+                 (expand-file-name (org-link-unescape path)
+                                   (if (equal type "attachment")
+                                       (and (boundp 'org-attach-id-dir) org-attach-id-dir)
+                                     default-directory))))
+         (angle (cond ((numberp angle) angle)
+                      ((not angle) 90)
+                      (t (read-number "Rotation angle: " 90)))))
+    (unless (and file (file-exists-p file) (file-regular-p file))
+      (user-error "No image file at point"))
+    (let* ((magick (or (executable-find "magick")
+                        (let ((candidates '("C:/ProgramData/scoop/apps/imagemagick/current/magick.exe"
+                                            "C:/PROGRA~3/scoop/apps/imagemagick/current/magick.exe")))
+                          (catch 'found
+                            (dolist (c candidates)
+                              (when (file-executable-p c) (throw 'found c)))))))
+           (cmd (format "\"%s\" mogrify -rotate %d \"%s\"" magick angle file)))
+      (unless magick (user-error "ImageMagick not found"))
+      (if (zerop (shell-command cmd))
+          (progn
+            (message "Rotated %s by %d°" (file-name-nondirectory file) angle)
+            (org-redisplay-inline-images))
+        (user-error "ImageMagick `mogrify` failed — check: magick mogrify -rotate 90 \"some.png\"")))))
 #+end_src
 
 ** DnD: flat copy to data/ (Org)
@@ -2142,7 +2178,8 @@ Before 03:00 falls back to the previous day."
        :desc "Paste clipboard" "p" #'org-download-clipboard
        :desc "Screenshot"     "s" #'org-download-screenshot
        :desc "Yank"           "y" #'org-download-yank
-       :desc "Delete file"   "d" #'my/org-delete-file-link-at-point)
+       :desc "Delete file"   "d" #'my/org-delete-file-link-at-point
+       :desc "Rotate file"  "r" #'my/org-rotate-image-file)
       (:prefix ("d" . "denote")
        :desc "Insert link"            "i" #'denote-link-or-create
        :desc "Backlinks"              "b" #'denote-backlinks
