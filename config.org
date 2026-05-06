@@ -191,6 +191,23 @@ Loaded early so downstream config (org-gcal, agent-shell …) sees the credentia
 (advice-add 'evil-join :after #'my/evil-join-cjk-advice)
 #+end_src
 
+** Delete file link + underlying attachment (shared helper)
+#+begin_src emacs-lisp
+;; 删除文件链接时同时删除附件文件（图片/PDF/EPUB 等）—— 共享确认/删除逻辑
+(defun my/delete-file-link--try-delete (abspath)
+  "Try to delete ABSPATH after user confirmation.
+Returns 'deleted, 'link-only, or nil."
+  (cond
+   ((file-exists-p abspath)
+    (if (y-or-n-p (format "Delete \"%s\"? " (file-name-nondirectory abspath)))
+        (progn (delete-file abspath) 'deleted)
+      (message "Cancelled") nil))
+   ((y-or-n-p (format "File \"%s\" not found. Remove link? "
+                      (file-name-nondirectory abspath)))
+    'link-only)
+   (t nil)))
+#+end_src
+
 ** Windows-specific Performance
 VC, process creation, file I/O, rendering, and large file handling.
 #+begin_src emacs-lisp
@@ -1212,6 +1229,34 @@ Maple Mono NF CN for monospace (CJK + Nerd Font all-in-one), LXGW WenKai Screen 
         (org-download-screenshot basename)))))
 #+end_src
 
+** Delete file link in Org (replaces org-download-delete)
+#+begin_src emacs-lisp
+;; 用 org-element-context 解析链接，支持 file:/attachment: 类型及带描述的 [[file:x.png][caption]]
+(defun my/org-delete-file-link-at-point ()
+  "Delete the file link at point and the underlying attached file."
+  (interactive)
+  (let* ((context (org-element-context))
+         (type (org-element-property :type context)))
+    (unless (member type '("file" "attachment"))
+      (user-error "Not on a file or attachment link"))
+    (let* ((path (org-element-property :path context))
+           (unescaped (org-link-unescape path))
+           (abspath (expand-file-name unescaped
+                                      (if (equal type "attachment")
+                                          (and (boundp 'org-attach-id-dir) org-attach-id-dir)
+                                        default-directory)))
+           (beg (org-element-property :begin context))
+           (end (org-element-property :end context))
+           (result (my/delete-file-link--try-delete abspath)))
+      (when result
+        (delete-region beg end)
+        (when (and (looking-at "[ \t]*$") (not (bolp)))
+          (delete-region (point) (line-end-position)))
+        (message (if (eq result 'deleted)
+                     "Deleted file and removed link"
+                   "Removed link (file was already missing"))))))
+#+end_src
+
 ** DnD: flat copy to data/ (Org)
 #+begin_src emacs-lisp
 (defun my/org-dnd-copy-to-data (uri _action)
@@ -1235,6 +1280,25 @@ Maple Mono NF CN for monospace (CJK + Nerd Font all-in-one), LXGW WenKai Screen 
               (cons '("^file:" . my/org-dnd-copy-to-data)
                     dnd-protocol-alist)))
 (add-hook 'org-mode-hook #'my/org-prepend-flat-dnd-handler)
+#+end_src
+
+** Delete file link in Markdown
+#+begin_src emacs-lisp
+;; 用 markdown-link-at-pos 解析，同时处理 [file](pdf) 和 ![image](png)
+(defun my/markdown-delete-file-link-at-point ()
+  "Delete the file link at point and the underlying attached file."
+  (interactive)
+  (let ((info (markdown-link-at-pos (point))))
+    (unless info (user-error "Not on a link"))
+    (let* ((beg (nth 0 info)) (end (nth 1 info))
+           (url (nth 3 info))
+           (abspath (expand-file-name url default-directory))
+           (result (my/delete-file-link--try-delete abspath)))
+      (when result
+        (delete-region beg end)
+        (message (if (eq result 'deleted)
+                     "Deleted file and removed link"
+                   "Removed link (file was already missing"))))))
 #+end_src
 
 ** DnD: Markdown
@@ -1697,7 +1761,7 @@ Before 03:00 falls back to the previous day."
 
 ** org-noter
 #+begin_src emacs-lisp
-(after! org-noter
+(use-package! org-noter
   :commands org-noter
   :config
   (setq org-noter-notes-search-path '("~/org/notes/")
@@ -2075,7 +2139,7 @@ Before 03:00 falls back to the previous day."
        :desc "Paste clipboard" "p" #'org-download-clipboard
        :desc "Screenshot"     "s" #'org-download-screenshot
        :desc "Yank"           "y" #'org-download-yank
-       :desc "Delete"         "d" #'org-download-delete)
+       :desc "Delete file"   "d" #'my/org-delete-file-link-at-point)
       (:prefix ("d" . "denote")
        :desc "Insert link"            "i" #'denote-link-or-create
        :desc "Backlinks"              "b" #'denote-backlinks
@@ -2107,7 +2171,9 @@ Before 03:00 falls back to the previous day."
        :desc "denote: → file path"      "f" #'denote-markdown-convert-links-to-file-paths
        :desc "file path → denote:"      "F" #'denote-markdown-convert-links-to-denote-type
        :desc "denote: → Obsidian"       "o" #'denote-markdown-convert-links-to-obsidian-type
-       :desc "Obsidian → denote:"       "O" #'denote-markdown-convert-obsidian-links-to-denote-type))
+       :desc "Obsidian → denote:"       "O" #'denote-markdown-convert-obsidian-links-to-denote-type)
+      (:prefix ("i" . "image")
+       :desc "Delete file link" "d" #'my/markdown-delete-file-link-at-point))
 #+end_src
 
 * Late fixes
