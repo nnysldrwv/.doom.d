@@ -1113,13 +1113,14 @@ Maple Mono NF CN for monospace (CJK + Nerd Font all-in-one), LXGW WenKai Screen 
    (t
     "sh -c 'if command -v xclip >/dev/null 2>&1; then xclip -selection clipboard -t image/png -o > \"$1\" 2>/dev/null || true; fi; if [ ! -s \"$1\" ]; then if command -v wl-paste >/dev/null 2>&1; then wl-paste --no-newline --type image/png > \"$1\" 2>/dev/null || true; fi; fi; if [ ! -s \"$1\" ]; then if command -v maim >/dev/null 2>&1; then maim -s \"$1\"; elif command -v grim >/dev/null 2>&1 && command -v slurp >/dev/null 2>&1; then grim -g \"$(slurp)\" \"$1\"; fi; fi' _ %s")))
 
-(defun my/org-download-denote-file-format (filename)
-  "Rewrite FILENAME to denote style: <id>--<slug><ext>."
+(defun my/org-download-denote-file-format (filename &optional keywords)
+  "Rewrite FILENAME to denote style: <id>--<slug>__<keywords><ext>.
+When KEYWORDS is non-nil, include them in the denote-style name."
   (let* ((ext  (or (file-name-extension filename t) ""))
          (base (or (file-name-sans-extension filename) ""))
          (id   (format-time-string denote-date-identifier-format)))
     (file-name-nondirectory
-     (denote-format-file-name "./" id nil base ext nil))))
+     (denote-format-file-name "./" id keywords base ext nil))))
 
 (defun my/org-paste-rich ()
   "Paste rich text (HTML with images) from clipboard as Org content."
@@ -1296,19 +1297,21 @@ This physically modifies the file, so rotation survives cache/reboot."
 ** DnD: flat copy to data/ (Org)
 #+begin_src emacs-lisp
 (defun my/org-dnd-copy-to-data (uri _action)
-  "Copy locally-dropped file URI into ~/org/data/ with a denote-style name."
+  "Copy locally-dropped file URI into ~/org/data/ with a denote-style name.
+Prompts for denote keywords interactively."
   (when (derived-mode-p 'org-mode)
     (let ((src (ignore-errors (dnd-get-local-file-name uri t))))
       (when (and src (file-regular-p src))
-        (let* ((dest-dir  (expand-file-name "data/" org-directory))
+        (let* ((keywords (denote-keywords-prompt))
+               (dest-dir  (expand-file-name "data/" org-directory))
                (dest-name (my/org-download-denote-file-format
-                           (file-name-nondirectory src)))
+                           (file-name-nondirectory src) keywords))
+               (width     (or (bound-and-true-p org-download-image-org-width) 800))
                (dest      (expand-file-name dest-name dest-dir)))
           (make-directory dest-dir t)
           (copy-file src dest 1)
-          (unless (zerop org-download-image-org-width)
-            (insert (format "#+attr_org: :width %dpx\n"
-                            org-download-image-org-width)))
+          (unless (zerop width)
+            (insert (format "#+attr_org: :width %dpx\n" width)))
           (insert (format "[[file:%s]]"
                           (file-relative-name dest default-directory)))
           'copy)))))
@@ -1347,17 +1350,19 @@ This physically modifies the file, so rotation survives cache/reboot."
   "Extensions treated as images for markdown DnD insertion.")
 
 (defun my/markdown-dnd-copy-to-data (uri _action)
-  "Copy locally-dropped file URI into ~/org/data/ with denote-style name."
+  "Copy locally-dropped file URI into ~/org/data/ with denote-style name.
+Prompts for denote keywords interactively."
   (when (derived-mode-p 'markdown-mode)
     (let ((src (ignore-errors (dnd-get-local-file-name uri t))))
       (when (and src (file-regular-p src))
-        (let* ((dest-dir  (expand-file-name "data/" org-directory))
-               (orig-name (file-name-nondirectory src))
-               (dest-name (my/org-download-denote-file-format orig-name))
-               (dest      (expand-file-name dest-name dest-dir))
-               (ext       (downcase (or (file-name-extension orig-name) "")))
-               (rel       (file-relative-name dest default-directory))
-               (label     (file-name-base orig-name)))
+        (let* ((keywords   (denote-keywords-prompt))
+               (dest-dir   (expand-file-name "data/" org-directory))
+               (orig-name  (file-name-nondirectory src))
+               (dest-name  (my/org-download-denote-file-format orig-name keywords))
+               (dest       (expand-file-name dest-name dest-dir))
+               (ext        (downcase (or (file-name-extension orig-name) "")))
+               (rel        (file-relative-name dest default-directory))
+               (label      (file-name-base orig-name)))
           (make-directory dest-dir t)
           (copy-file src dest 1)
           (insert (if (member ext my/markdown-image-extensions)
