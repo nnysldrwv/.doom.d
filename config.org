@@ -296,38 +296,94 @@ VC, process creation, file I/O, rendering, and large file handling.
 ** Fonts
 Maple Mono NF CN for monospace (CJK + Nerd Font all-in-one), LXGW WenKai Screen for variable pitch.
 #+begin_src emacs-lisp
-(defun my/first-available-font (candidates)
-  "Return the first font family from CANDIDATES that is available."
-  (catch 'found
-    (dolist (font candidates)
-      (when (find-font (font-spec :family font))
-        (throw 'found font)))
-    nil))
+;; (defconst my/font-main "Maple Mono NF CN")
 
-(setq doom-font (font-spec :family "Maple Mono NF CN" :size 18)
-      doom-variable-pitch-font (font-spec :family "LXGW WenKai Screen" :size 20)
-      doom-big-font (font-spec :family "Maple Mono NF CN" :size 26))
+;; (setq doom-font (font-spec :family my/font-main :size 16)
+;;       doom-big-font (font-spec :family my/font-main :size 26)
+;;       doom-variable-pitch-font (font-spec :family my/font-main :size 18))
 
-;; CJK font override — must run AFTER unicode-fonts-setup (depth -90)
-(defvar my/cjk-mono-font "Maple Mono NF CN"
-  "CJK font for monospace contexts (code, fixed-pitch).")
+;; (defun my/apply-maple-fonts (&optional _frame)
+;;   "Use Maple Mono NF CN everywhere."
+;;   (when (display-graphic-p)
+;;     ;; 基础 face
+;;     (set-face-attribute 'default nil
+;;                         :family my/font-main
+;;                         :height 160
+;;                         :weight 'regular)
 
-(defun my/setup-cjk-fonts (&optional _frame)
-  "Force CJK characters to use a specific font."
-  (when (display-graphic-p)
-    (let ((font-family (or my/cjk-mono-font
-                           (my/first-available-font
-                            '("Maple Mono NF CN" "Sarasa Mono SC"
-                              "霞鹜文楷等宽" "LXGW WenKai Mono"
-                              "Noto Sans CJK SC")))))
-      (when font-family
-        (dolist (charset '(kana han cjk-misc bopomofo))
-          (set-fontset-font t charset (font-spec :family font-family) nil 'prepend))))))
+;;     (set-face-attribute 'fixed-pitch nil
+;;                         :family my/font-main
+;;                         :height 1.0
+;;                         :weight 'regular)
 
-;; Depth 0 = runs after unicode-fonts (depth -90), so prepend wins
-(add-hook 'after-setting-font-hook #'my/setup-cjk-fonts 0)
+;;     (set-face-attribute 'variable-pitch nil
+;;                         :family my/font-main
+;;                         :height 1.0
+;;                         :weight 'regular)
+
+;;     ;; 直接把中日韩字符也尽量交给 Maple
+;;     (dolist (charset '(han kana cjk-misc bopomofo))
+;;       (set-fontset-font t charset
+;;                         (font-spec :family my/font-main)
+;;                         nil 'prepend))
+
+;;     ;; 再补一层 unicode 范围
+;;     (set-fontset-font t '(#x2e80 . #x9fff)
+;;                       (font-spec :family my/font-main)
+;;                       nil 'prepend)
+
+;;     (message "[font-maple] %s" my/font-main)))
+
+;; (add-hook 'after-setting-font-hook #'my/apply-maple-fonts)
+;; (add-hook 'window-setup-hook #'my/apply-maple-fonts)
+
+;; (setq word-wrap-by-category t)
+
+;; (after! org
+;;   ;; 你如果想 Org 正文也统一 Maple，就不要开 variable-pitch-mode
+;;   ;; 如果你仍想保留 Org 的“正文风格”，可以打开，但字体仍然是 Maple
+;;   ;; (add-hook 'org-mode-hook #'variable-pitch-mode)
+
+;;   (custom-set-faces!
+;;     '(org-document-title :inherit (bold) :height 1.20)
+;;     '(org-level-1 :inherit (bold) :height 1.12)
+;;     '(org-level-2 :inherit (bold) :height 1.08)
+;;     '(org-level-3 :inherit (bold) :height 1.04)
+
+;;     '(org-block :inherit fixed-pitch)
+;;     '(org-block-begin-line :inherit (shadow fixed-pitch))
+;;     '(org-block-end-line :inherit (shadow fixed-pitch))
+;;     '(org-code :inherit fixed-pitch)
+;;     '(org-verbatim :inherit fixed-pitch)
+;;     '(org-table :inherit fixed-pitch)
+;;     '(org-formula :inherit fixed-pitch)
+;;     '(org-checkbox :inherit fixed-pitch)
+;;     '(org-meta-line :inherit (font-lock-comment-face fixed-pitch))
+;;     '(org-special-keyword :inherit (font-lock-comment-face fixed-pitch))
+;;     '(line-number :inherit fixed-pitch)
+;;     '(line-number-current-line :inherit fixed-pitch)))
+
+;; (message "[fonts-final] all=%s" my/font-main)
+
 #+end_src
 
+#+begin_src emacs-lisp
+
+;; Doom 自带的字体变量配置
+;; 中文Maple Mono, 英文Roboto Mono
+(setq doom-font (font-spec :family "Roboto Mono" :size 22)
+      doom-serif-font doom-font
+      doom-symbol-font (font-spec :family "Maple Mono NF CN")
+      doom-variable-pitch-font (font-spec :family "LXGW WenKai Screen" :weight 'extra-bold))
+;; 如果不把这玩意设置为 nil, 会默认去用 fontset-default 来展示, 配置无效
+(setq use-default-font-for-symbols nil)
+
+;; Doom 的字体加载顺序问题, 如果不设定这个 hook, 配置会被覆盖失效
+(add-hook! 'after-setting-font-hook
+  (set-fontset-font t 'symbol (font-spec :family "Symbola"))
+  (set-fontset-font t 'mathematical (font-spec :family "Symbola"))
+  (set-fontset-font t 'emoji (font-spec :family "Segoe UI Emoji")))
+#+end_src
 * Editor Enhancements
 ** dired-narrow
 #+begin_src emacs-lisp
@@ -1715,7 +1771,7 @@ Before 03:00 falls back to the previous day."
     (save-excursion
       (goto-char (point-max))
       (unless (bolp) (insert "\n"))
-      (insert "\n** 天气\n")
+      (insert "\n* 天气\n")
       (insert (my/get-weather))
       (insert "\n"))))
 
