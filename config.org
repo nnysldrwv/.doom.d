@@ -395,11 +395,12 @@ Maple Mono NF CN for monospace (CJK + Nerd Font all-in-one), LXGW WenKai Screen 
 
   ;; Doom 自带的字体变量配置
   ;; 拉丁用 Roboto Mono, 汉字用 Sarasa Mono SC
-  (setq doom-font (font-spec :family "Roboto Mono" :size 22)
-        doom-big-font (font-spec :family "Roboto Mono" :size 36)
+  ;; (setq doom-font (font-spec :family "Roboto Mono" :size 22)
+  (setq doom-font (font-spec :family "Ubuntu Mono" :size 22)
+        doom-big-font (font-spec :family "Ubuntu Mono" :size 36)
         doom-serif-font doom-font
         doom-symbol-font (font-spec :family "Sarasa Mono SC")
-        doom-variable-pitch-font (font-spec :family "Roboto Mono" :weight
+        doom-variable-pitch-font (font-spec :family "Ubuntu Mono" :weight
   'extra-bold))
   (setq use-default-font-for-symbols nil)
 
@@ -1870,11 +1871,11 @@ Before 03:00 falls back to the previous day."
   (setq nov-variable-pitch nil)
 
   (defun my/nov-setup ()
-    (let ((font (or (my/first-available-font '("Noto Sans SC"
-                                               "Noto Serif SC"
-                                               "Microsoft YaHei UI"
-                                               "Microsoft YaHei"))
-                    "Microsoft YaHei")))
+    (let* ((available (font-family-list))
+           (font (or (cl-find-if (lambda (f) (member f available))
+                                 '("Noto Sans SC" "Noto Serif SC"
+                                   "Microsoft YaHei UI" "Microsoft YaHei"))
+                     "Microsoft YaHei")))
       (face-remap-add-relative 'default :family font :height 140)
       (face-remap-add-relative 'variable-pitch :family font :height 140)
       (set-fontset-font t nil (font-spec :family font) nil 'prepend)
