@@ -1,4 +1,4 @@
-#+titl#+title: Doom Emacs Config
+#+title: Doom Emacs Config
 #+author: Sean Yuan
 #+property: header-args:emacs-lisp :tangle yes :cache yes :results silent :padline no
 
@@ -57,7 +57,14 @@
        :lang
        emacs-lisp
        markdown
-       (org +dragndrop +present +noter +pandoc)
+       
+       (org
+        +dragndrop
+        +present
+        +noter
+        +pandoc)
+
+       
        (python +lsp)
        sh
        yaml
@@ -108,6 +115,13 @@
 (package! ultra-scroll
   :recipe (:host github :repo "jdtsmith/ultra-scroll"))
 (package! dired-narrow)
+
+;; 完美解决中英文字符在表格中对齐的问题
+(package! valign)
+
+;; 快速跳转到任意位置, 通过汉字拼音的方式
+(package! ace-pinyin
+  :recipe (:host github :repo "cute-jumper/ace-pinyin"))
 #+end_src
 
 ** Speed (gcmh)
@@ -276,10 +290,10 @@ VC, process creation, file I/O, rendering, and large file handling.
 (fringe-mode '(0 . 0)) ;; No fringe
 
 ;; 指定启动时的窗口位置和大小
-(setq initial-frame-alist '((top . 10)
-                            (left . 1200)
-                            (width . 500)
-                            (height . 240)))
+(setq initial-frame-alist '((top . 137)
+                            (left . 657)
+                            (width . 81)
+                            (height . 38)))
 
 ;; 新开窗口时默认是左右结构
 (setq split-height-threshold nil)
@@ -483,7 +497,14 @@ Maple Mono NF CN for monospace (CJK + Nerd Font all-in-one), LXGW WenKai Screen 
   (setq image-use-external-converter t
         org-image-actual-width '(600))
 
-  (custom-set-variables '(org-startup-indented nil)))
+  (custom-set-variables '(org-startup-indented nil))
+  
+  ;; 抄的ljg的但还不知道是做什么的
+  (add-hook! 'org-babel-after-execute-hook 'org-display-inline-images 'append)
+
+  ;; Fix table truncation: use tabular + adjustbox auto-fit
+  (setq org-latex-default-table-environment "tabular"))
+  
 #+end_src
 
 ** Display: spacious-padding / olivetti / ultra-scroll / pangu-spacing / org-appear
@@ -514,7 +535,16 @@ Maple Mono NF CN for monospace (CJK + Nerd Font all-in-one), LXGW WenKai Screen 
     :config
     (setq org-appear-autoemphasis t
           org-appear-autosubmarkers t
-          org-appear-autolinks nil)))
+          org-appear-autolinks nil))
+
+  (use-package! valign
+    :config
+    (setq valign-fancy-bar t)
+    (add-hook 'org-mode-hook #'valign-mode))
+  
+  (use-package! ace-pinyin
+  :config
+  (ace-pinyin-global-mode +1)))
 #+end_src
 
 ** org-attach
