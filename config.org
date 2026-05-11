@@ -13,7 +13,7 @@
 
 (doom! :input
 
-       :completion
+       :completion 
        corfu
        (vertico +icons)
 
@@ -41,6 +41,7 @@
        :emacs
        undo
        (ibuffer +icons)
+       (dired +dirvish +icons)
 
        :checkers
        syntax
@@ -114,7 +115,7 @@
 (package! spacious-padding)
 (package! ultra-scroll
   :recipe (:host github :repo "jdtsmith/ultra-scroll"))
-(package! dired-narrow)
+;; (package! dired-narrow)
 
 ;; 完美解决中英文字符在表格中对齐的问题
 (package! valign)
@@ -433,10 +434,10 @@ Maple Mono NF CN for monospace (CJK + Nerd Font all-in-one), LXGW WenKai Screen 
 * Editor Enhancements
 ** dired-narrow
 #+begin_src emacs-lisp
-(use-package! dired-narrow
-  :after dired
-  :config
-  (evil-define-key 'normal dired-mode-map (kbd "/") #'dired-narrow))
+;; (use-package! dired-narrow
+;;   :after dired
+;;   :config
+;;   (evil-define-key 'normal dired-mode-map (kbd "/") #'dired-narrow))
 #+end_src
 
 ** ace-window
@@ -979,8 +980,7 @@ Maple Mono NF CN for monospace (CJK + Nerd Font all-in-one), LXGW WenKai Screen 
   (setq org-tag-alist '((:startgroup)
                         ("work" . ?w) ("personal" . ?p) ("learning" . ?l)
                         (:endgroup)
-                        ("projectS" . ?s) ("ai" . ?a) ("hiring" . ?h)
-                        ("@office" . ?o) ("@home" . ?H) ("@phone" . ?P))))
+                        ("emacs" . ?e) ("ai" . ?a) ("tools" . ?t))))
 #+end_src
 
 ** Babel: Image dir & Bash on Windows
@@ -1218,6 +1218,41 @@ Maple Mono NF CN for monospace (CJK + Nerd Font all-in-one), LXGW WenKai Screen 
                  count (file-name-nondirectory (buffer-file-name)))))))
 #+end_src
 
+** Org Sync
+#+begin_src emacs-lisp
+;; 1. 保存 org 文件后，延迟触发一次同步（防抖）
+(defvar my/org-sync-timer nil)
+(defun my/org-sync-debounced ()
+  (when my/org-sync-timer (cancel-timer my/org-sync-timer))
+  (setq my/org-sync-timer
+        (run-with-idle-timer
+         60 nil
+         (lambda ()
+           (start-process "org-sync" "*org-sync*"
+                          "powershell" "-NoProfile" "-File"
+                          (expand-file-name "~/org/.src/org-sync-runner.ps1"))))))
+
+(add-hook 'after-save-hook
+          (lambda ()
+            (when (and buffer-file-name
+                       (string-match-p "/org/" buffer-file-name)
+                       (string-match-p "\\.org\\'" buffer-file-name))
+              (my/org-sync-debounced))))
+
+;; 2. 退出 Emacs 前同步一次
+(add-hook 'kill-emacs-hook
+          (lambda ()
+            (call-process "powershell" nil nil nil "-NoProfile" "-File"
+                          (expand-file-name "~/org/.src/org-sync-runner.ps1"))))
+
+;; 3. 手动命令
+(defun my/org-sync-now ()
+  (interactive)
+  (async-shell-command
+   (format "powershell -NoProfile -File %s"
+           (expand-file-name "~/org/.src/org-sync-runner.ps1"))))
+
+#+end_src
 * Org Clipboard & DnD
 ** Screenshot / rich paste helpers
 #+begin_src emacs-lisp
@@ -1716,22 +1751,14 @@ denote-dired directory, matching case-insensitively."
               (lambda (filename) (replace-regexp-in-string "[\n\r]" "" filename))))
 #+end_src
 
-** Dirvish off / Dired hide details
+** Dirvish
 #+begin_src emacs-lisp
 (after! dirvish
-  (dirvish-override-dired-mode -1))
+  (setq dirvish-hide-details t)
+  (map! :map dirvish-mode-map
+        :n "/" #'dirvish-narrow))
 
-(defun my/dired-hide-details-on ()
-  (when (derived-mode-p 'dired-mode)
-    (run-at-time 0 nil
-                 (lambda (buf)
-                   (when (buffer-live-p buf)
-                     (with-current-buffer buf
-                       (dired-hide-details-mode 1))))
-                 (current-buffer))))
-(add-hook 'after-change-major-mode-hook #'my/dired-hide-details-on t)
 #+end_src
-
 ** denote-org & denote-markdown
 #+begin_src emacs-lisp
 (use-package! denote-org
@@ -2200,6 +2227,11 @@ identical to what `doom.ps1' does on Windows."
          "ANTHROPIC_BASE_URL" "https://athenai.mihoyo.com/v1"
          "ANTHROPIC_MODEL" "claude-sonnet-4-6"
          "ANTHROPIC_SMALL_FAST_MODEL" "claude-sonnet-4-6"))
+
+  ;; 统一 transcript 存储位置，无论在哪个 project 下都存到 ~/.agent-shell/
+  (setq agent-shell-dot-subdir-function
+        (lambda (subdir)
+          (expand-file-name subdir "~/.agent-shell")))
 
   ;; Buffer-local Evil-friendly bindings
   (map! :map agent-shell-mode-map
