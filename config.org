@@ -383,25 +383,6 @@ Maple Mono NF CN for monospace (CJK + Nerd Font all-in-one), LXGW WenKai Screen 
 #+end_src
 
 #+begin_src emacs-lisp
-;; ;; 抄的ljg的配置，但如果symbol-font配置的是Sarasa Mono SC,中文就会退化成Jhenghei
-;; ;; Doom 自带的字体变量配置
-;; ;; 中文Maple Mono, 英文Roboto Mono
-;; (setq doom-font (font-spec :family "Roboto Mono" :size 22)
-;;       doom-serif-font doom-font
-;;       ;; doom-symbol-font (font-spec :family "Maple Mono NF CN")
-;;       doom-symbol-font (font-spec :family "Sarasa Mono SC")
-;;       doom-variable-pitch-font (font-spec :family "LXGW WenKai Screen" :weight 'extra-bold))
-;; ;; 如果不把这玩意设置为 nil, 会默认去用 fontset-default 来展示, 配置无效
-;; (setq use-default-font-for-symbols nil)
-
-;; ;; Doom 的字体加载顺序问题, 如果不设定这个 hook, 配置会被覆盖失效
-;; (add-hook! 'after-setting-font-hook
-;;   (set-fontset-font t 'symbol (font-spec :family "Symbola"))
-;;   (set-fontset-font t 'mathematical (font-spec :family "Symbola"))
-;;   (set-fontset-font t 'emoji (font-spec :family "Segoe UI Emoji")))
-#+end_src
-
-#+begin_src emacs-lisp
 ;; 问题很清楚。doom-symbol-font 只影响 symbol 范围（数学符号、箭头等），不覆盖 CJK
 ;; 汉字文字。汉字属于 han 脚本，Emacs 从默认 fontset 里捡了 Microsoft JhengHei。
 
@@ -1779,8 +1760,8 @@ denote-dired directory, matching case-insensitively."
   :commands (consult-notes consult-notes-search-in-all-notes)
   :config
   (setq consult-notes-file-dir-sources
-        `(("Notes"   ?n ,(expand-file-name "notes/"   org-directory))
-          ("Journal" ?j ,(expand-file-name "journal/" org-directory))))
+        `(("Notes"   ?n ,(expand-file-name "notes/"   org-directory))))
+          
 
   (setq consult-notes-org-headings-files
         (list (expand-file-name "inbox.org"       org-directory)
