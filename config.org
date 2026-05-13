@@ -13,8 +13,8 @@
 
 (doom! :input
 
-       :completion 
-       corfu
+       :completion
+       corfu                          ; babel 代码块里仍需要补全
        (vertico +icons)
 
        :ui
@@ -24,7 +24,7 @@
        nav-flash
        ophints
        (popup +all +defaults)
-       treemacs
+       ;; treemacs
        window-select
        unicode
        zen
@@ -33,42 +33,38 @@
        (evil +everywhere)
        file-templates
        fold
-       (format +onsave)
        snippets
        word-wrap
-       multiple-cursors
+       ;; 已移除: multiple-cursors (写中文笔记几乎用不上)
+       ;; 已移除: (format +onsave)  (写作场景不需要保存时格式化)
 
        :emacs
        undo
        (ibuffer +icons)
        (dired +dirvish +icons)
 
-       :checkers
-       syntax
+       ;; 已移除: :checkers syntax (写作不需要 flycheck/flymake)
 
        :tools
-       (eval +overlay)
-       lookup
+       (eval +overlay)                ; 保留: org-babel 结果 overlay
        magit
        pdf
+       ;; 已移除: lookup (主要服务于代码跳转)
 
        :os
        (:if (featurep :system 'windows) windows)
 
        :lang
-       emacs-lisp
+       emacs-lisp                     ; 自己写配置 + elisp babel
        markdown
-       
        (org
         +dragndrop
         +present
         +noter
         +pandoc)
-
-       
-       (python +lsp)
-       sh
-       yaml
+       python                         ; 保留以支持 babel (去掉 +lsp)
+       sh                             ; babel 经常跑 shell
+       yaml                           ; 轻量, 写 frontmatter/CI 有用
 
        :app
        (calendar +org-gcal)
@@ -96,7 +92,7 @@
 (package! consult-notes
   :recipe (:host github :repo "mclear-tools/consult-notes"))
 
-;; agent shell
+;; agent shell (高频使用, 保留)
 (package! shell-maker)
 (package! acp)
 (package! agent-shell)
@@ -104,6 +100,7 @@
 ;; performance
 (package! gcmh)
 
+;; theme
 (package! ef-themes)
 
 ;; writing & display
@@ -111,11 +108,11 @@
 (package! org-appear
   :recipe (:host github :repo "awth13/org-appear"))
 (package! pangu-spacing)
-(package! rainbow-identifiers)
 (package! spacious-padding)
 (package! ultra-scroll
   :recipe (:host github :repo "jdtsmith/ultra-scroll"))
-;; (package! dired-narrow)
+;; 已移除: rainbow-identifiers (彩色变量名, 写代码用, 写笔记无意义)
+;; 已移除: dired-narrow (dirvish 自带 dirvish-narrow)
 
 ;; 完美解决中英文字符在表格中对齐的问题
 (package! valign)
@@ -123,16 +120,43 @@
 ;; 快速跳转到任意位置, 通过汉字拼音的方式
 (package! ace-pinyin
   :recipe (:host github :repo "cute-jumper/ace-pinyin"))
+
+;; ---- 新增: 写作 / 笔记 / 工作流增强 ----
+
+;; Org 视觉现代化: 标题/TODO/tag/checkbox/timestamp 美化
+;; 与 valign 协同: 禁用 org-modern 的表格渲染, 交给 valign
+(package! org-modern)
+
+;; 可视化 undo 树, 比 Doom 默认 undo-fu 更直观
+(package! vundo)
+
+;; 高速增量拼写检查 (Windows 需要 enchant: scoop install enchant)
+(package! jinx)
+
+;; Agenda 视图按组分块, 比堆 tags-todo 漂亮且易维护
+(package! org-super-agenda)
+
+;; 跨笔记内容嵌入
+(package! org-transclusion)
+
+;; 强大的 org 查询语言, 比 org-agenda-custom-commands 灵活
+(package! org-ql)
+
+;; 复式记账 / 投资记录 (配套 CLI: pip install beancount fava)
+(package! beancount
+  :recipe (:host github :repo "beancount/beancount-mode"))
 #+end_src
 
 ** Speed (gcmh)
 #+begin_src emacs-lisp
 ;;; config.el -*- lexical-binding: t; -*-
 
+;; GCMH: idle 时回收 GC, 输入时提高阈值避免卡顿
+;; 256MB 在 idle 回收时会有明显停顿, 64MB 更平滑
 (use-package! gcmh
   :init
   (setq gcmh-idle-delay 5
-        gcmh-high-cons-threshold (* 256 1024 1024))  ; 256MB during idle
+        gcmh-high-cons-threshold (* 64 1024 1024))  ; 64MB during idle
   :config
   (gcmh-mode 1))
 #+end_src
@@ -162,7 +186,7 @@ Loaded early so downstream config (org-gcal, agent-shell …) sees the credentia
 
 (setq word-wrap-by-category t)
 
-;; 在 Org mode 中禁用自适应换行缩进，实现左对齐
+;; 在 Org mode 中禁用自适应换行缩进, 实现左对齐
 (add-hook 'org-mode-hook (lambda () (adaptive-wrap-prefix-mode -1)))
 
 (setq initial-major-mode 'org-mode)
@@ -173,6 +197,10 @@ Loaded early so downstream config (org-gcal, agent-shell …) sees the credentia
       mouse-wheel-progressive-speed nil
       mouse-wheel-follow-mouse t
       scroll-step 1)
+
+;; so-long-mode: 智能处理超长单行 (minified JS / 单行大 JSON 等)
+;; 比按文件大小一刀切禁用 font-lock 更聪明: 只有"行过长"才介入
+(global-so-long-mode 1)
 #+end_src
 
 ** Encoding
@@ -195,7 +223,7 @@ Loaded early so downstream config (org-gcal, agent-shell …) sees the credentia
 
 ** Editing: CJK join fix
 #+begin_src emacs-lisp
-;; J 合并行时，中文之间不插入多余空格
+;; J 合并行时, 中文之间不插入多余空格
 (defun my/evil-join-cjk-advice (&rest _)
   "Remove unwanted space between CJK characters after evil-join."
   (save-excursion
@@ -208,7 +236,7 @@ Loaded early so downstream config (org-gcal, agent-shell …) sees the credentia
 
 ** Delete file link + underlying attachment (shared helper)
 #+begin_src emacs-lisp
-;; 删除文件链接时同时删除附件文件（图片/PDF/EPUB 等）—— 共享确认/删除逻辑
+;; 删除文件链接时同时删除附件文件 (图片/PDF/EPUB 等) —— 共享确认/删除逻辑
 (defun my/delete-file-link--try-delete (abspath)
   "Try to delete ABSPATH after user confirmation.
 Returns 'deleted, 'link-only, or nil."
@@ -224,7 +252,7 @@ Returns 'deleted, 'link-only, or nil."
 #+end_src
 
 ** Windows-specific Performance
-VC, process creation, file I/O, rendering, and large file handling.
+VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode 处理。
 #+begin_src emacs-lisp
 (when (featurep :system 'windows)
   ;; VC / Git
@@ -251,13 +279,8 @@ VC, process creation, file I/O, rendering, and large file handling.
           large-hscroll-threshold 1000
           syntax-wholeline-max 1000))
 
-  ;; Large files: disable font-lock for >512KB
-  (add-hook 'find-file-hook
-            (lambda ()
-              (when (> (buffer-size) (* 512 1024))
-                (fundamental-mode)
-                (font-lock-mode -1)
-                (message "WARN: large file; disabled font-lock"))))
+  ;; 已移除: 按 buffer-size > 512KB 切到 fundamental-mode 的 hook
+  ;; (so-long-mode 已经更智能地处理长行问题)
 
   ;; pdf-tools: MSYS2 epdfinfo
   (setenv "PATH" (concat "C:\\Users\\fengxing.chen\\scoop\\apps\\msys2\\current\\mingw64\\bin" ";" (getenv "PATH")))
@@ -278,9 +301,7 @@ VC, process creation, file I/O, rendering, and large file handling.
 (use-package! doom-modeline
   :custom
   (doom-modeline-buffer-encoding nil)
-  (doom-modeline-enable-word-count nil)
-  ;; (doom-modeline-height 10)
-)
+  (doom-modeline-enable-word-count nil))
 
 ;; 全局 visual line
 (global-visual-line-mode)
@@ -309,118 +330,30 @@ VC, process creation, file I/O, rendering, and large file handling.
 #+end_src
 
 ** Fonts
-Maple Mono NF CN for monospace (CJK + Nerd Font all-in-one), LXGW WenKai Screen for variable pitch.
+拉丁用 Ubuntu Mono, 汉字用 Sarasa Mono SC。
 #+begin_src emacs-lisp
-;; (defconst my/font-main "Maple Mono NF CN")
+;; Doom 自带的字体变量配置
+(setq doom-font (font-spec :family "Ubuntu Mono" :size 22)
+      doom-big-font (font-spec :family "Ubuntu Mono" :size 36)
+      doom-serif-font doom-font
+      doom-symbol-font (font-spec :family "Sarasa Mono SC")
+      doom-variable-pitch-font (font-spec :family "Ubuntu Mono" :weight 'extra-bold))
+(setq use-default-font-for-symbols nil)
 
-;; (setq doom-font (font-spec :family my/font-main :size 16)
-;;       doom-big-font (font-spec :family my/font-main :size 26)
-;;       doom-variable-pitch-font (font-spec :family my/font-main :size 18))
-
-;; (defun my/apply-maple-fonts (&optional _frame)
-;;   "Use Maple Mono NF CN everywhere."
-;;   (when (display-graphic-p)
-;;     ;; 基础 face
-;;     (set-face-attribute 'default nil
-;;                         :family my/font-main
-;;                         :height 160
-;;                         :weight 'regular)
-
-;;     (set-face-attribute 'fixed-pitch nil
-;;                         :family my/font-main
-;;                         :height 1.0
-;;                         :weight 'regular)
-
-;;     (set-face-attribute 'variable-pitch nil
-;;                         :family my/font-main
-;;                         :height 1.0
-;;                         :weight 'regular)
-
-;;     ;; 直接把中日韩字符也尽量交给 Maple
-;;     (dolist (charset '(han kana cjk-misc bopomofo))
-;;       (set-fontset-font t charset
-;;                         (font-spec :family my/font-main)
-;;                         nil 'prepend))
-
-;;     ;; 再补一层 unicode 范围
-;;     (set-fontset-font t '(#x2e80 . #x9fff)
-;;                       (font-spec :family my/font-main)
-;;                       nil 'prepend)
-
-;;     (message "[font-maple] %s" my/font-main)))
-
-;; (add-hook 'after-setting-font-hook #'my/apply-maple-fonts)
-;; (add-hook 'window-setup-hook #'my/apply-maple-fonts)
-
-;; (setq word-wrap-by-category t)
-
-;; (after! org
-;;   ;; 你如果想 Org 正文也统一 Maple，就不要开 variable-pitch-mode
-;;   ;; 如果你仍想保留 Org 的“正文风格”，可以打开，但字体仍然是 Maple
-;;   ;; (add-hook 'org-mode-hook #'variable-pitch-mode)
-
-;;   (custom-set-faces!
-;;     '(org-document-title :inherit (bold) :height 1.20)
-;;     '(org-level-1 :inherit (bold) :height 1.12)
-;;     '(org-level-2 :inherit (bold) :height 1.08)
-;;     '(org-level-3 :inherit (bold) :height 1.04)
-
-;;     '(org-block :inherit fixed-pitch)
-;;     '(org-block-begin-line :inherit (shadow fixed-pitch))
-;;     '(org-block-end-line :inherit (shadow fixed-pitch))
-;;     '(org-code :inherit fixed-pitch)
-;;     '(org-verbatim :inherit fixed-pitch)
-;;     '(org-table :inherit fixed-pitch)
-;;     '(org-formula :inherit fixed-pitch)
-;;     '(org-checkbox :inherit fixed-pitch)
-;;     '(org-meta-line :inherit (font-lock-comment-face fixed-pitch))
-;;     '(org-special-keyword :inherit (font-lock-comment-face fixed-pitch))
-;;     '(line-number :inherit fixed-pitch)
-;;     '(line-number-current-line :inherit fixed-pitch)))
-
-;; (message "[fonts-final] all=%s" my/font-main)
-
+;; Doom 的字体加载顺序问题: 必须在 after-setting-font-hook 里设, 否则被覆盖
+(add-hook! 'after-setting-font-hook
+  ;; === 关键: 给 CJK 脚本指定 Sarasa Mono SC ===
+  (set-fontset-font t 'han      (font-spec :family "Sarasa Mono SC"))
+  (set-fontset-font t 'cjk-misc (font-spec :family "Sarasa Mono SC"))
+  (set-fontset-font t 'kana     (font-spec :family "Sarasa Mono SC"))
+  (set-fontset-font t 'hangul   (font-spec :family "Sarasa Mono SC"))
+  ;; === 符号 / 数学 / emoji ===
+  (set-fontset-font t 'symbol       (font-spec :family "Symbola"))
+  (set-fontset-font t 'mathematical (font-spec :family "Symbola"))
+  (set-fontset-font t 'emoji        (font-spec :family "Segoe UI Emoji")))
 #+end_src
 
-#+begin_src emacs-lisp
-;; 问题很清楚。doom-symbol-font 只影响 symbol 范围（数学符号、箭头等），不覆盖 CJK
-;; 汉字文字。汉字属于 han 脚本，Emacs 从默认 fontset 里捡了 Microsoft JhengHei。
-
-;; 你需要的配置是：拉丁用 Roboto Mono，汉字用 Sarasa Mono SC。在
-;; after-setting-font-hook 里加 han / cjk-misc / kana / hangul 脚本的映射：
-
-  ;; Doom 自带的字体变量配置
-  ;; 拉丁用 Roboto Mono, 汉字用 Sarasa Mono SC
-  ;; (setq doom-font (font-spec :family "Roboto Mono" :size 22)
-  (setq doom-font (font-spec :family "Ubuntu Mono" :size 22)
-        doom-big-font (font-spec :family "Ubuntu Mono" :size 36)
-        doom-serif-font doom-font
-        doom-symbol-font (font-spec :family "Sarasa Mono SC")
-        doom-variable-pitch-font (font-spec :family "Ubuntu Mono" :weight
-  'extra-bold))
-  (setq use-default-font-for-symbols nil)
-
-  ;; Doom 的字体加载顺序问题, 如果不设定这个 hook, 配置会被覆盖失效
-  (add-hook! 'after-setting-font-hook
-    ;; === 关键：给 CJK 脚本指定 Sarasa Mono SC ===
-    (set-fontset-font t 'han (font-spec :family "Sarasa Mono SC"))
-    (set-fontset-font t 'cjk-misc (font-spec :family "Sarasa Mono SC"))
-    (set-fontset-font t 'kana (font-spec :family "Sarasa Mono SC"))
-    (set-fontset-font t 'hangul (font-spec :family "Sarasa Mono SC"))
-    ;; === 符号/数学/emoji 保持不变 ===
-    (set-fontset-font t 'symbol (font-spec :family "Symbola"))
-    (set-fontset-font t 'mathematical (font-spec :family "Symbola"))
-    (set-fontset-font t 'emoji (font-spec :family "Segoe UI Emoji")))
-#+end_src
 * Editor Enhancements
-** dired-narrow
-#+begin_src emacs-lisp
-;; (use-package! dired-narrow
-;;   :after dired
-;;   :config
-;;   (evil-define-key 'normal dired-mode-map (kbd "/") #'dired-narrow))
-#+end_src
-
 ** ace-window
 #+begin_src emacs-lisp
 (use-package! ace-window
@@ -438,6 +371,17 @@ Maple Mono NF CN for monospace (CJK + Nerd Font all-in-one), LXGW WenKai Screen 
   (after! evil
     (define-key evil-motion-state-map (kbd "C-w w") #'ace-window)
     (define-key evil-normal-state-map (kbd "C-w w") #'ace-window)))
+#+end_src
+
+** vundo (visual undo tree)
+#+begin_src emacs-lisp
+;; vundo: 可视化 undo 树
+;; - Doom 默认 undo-fu 没有树形视图
+;; - 触发后用 hjkl 浏览历史分支, q 退出
+(use-package! vundo
+  :commands vundo
+  :config
+  (setq vundo-glyph-alist vundo-unicode-symbols))
 #+end_src
 
 * Org-mode
@@ -480,16 +424,15 @@ Maple Mono NF CN for monospace (CJK + Nerd Font all-in-one), LXGW WenKai Screen 
         org-image-actual-width '(600))
 
   (custom-set-variables '(org-startup-indented nil))
-  
-  ;; 抄的ljg的但还不知道是做什么的
+
+  ;; 抄的 ljg 的: babel 执行后重新显示 inline image
   (add-hook! 'org-babel-after-execute-hook 'org-display-inline-images 'append)
 
   ;; Fix table truncation: use tabular + adjustbox auto-fit
   (setq org-latex-default-table-environment "tabular"))
-  
 #+end_src
 
-** Display: spacious-padding / olivetti / ultra-scroll / pangu-spacing / org-appear
+** Display: org-modern / spacious-padding / olivetti / ultra-scroll / pangu-spacing / org-appear
 #+begin_src emacs-lisp
 (after! org
   (use-package! spacious-padding
@@ -523,10 +466,25 @@ Maple Mono NF CN for monospace (CJK + Nerd Font all-in-one), LXGW WenKai Screen 
     :config
     (setq valign-fancy-bar t)
     (add-hook 'org-mode-hook #'valign-mode))
-  
+
   (use-package! ace-pinyin
-  :config
-  (ace-pinyin-global-mode +1)))
+    :config
+    (ace-pinyin-global-mode +1))
+
+  ;; org-modern: 现代化的 org 视觉
+  ;; - 标题前缀、TODO 胶囊、tag、checkbox、timestamp 全部美化
+  ;; - 表格让给 valign 处理 (org-modern 的表格渲染与 valign 冲突)
+  (use-package! org-modern
+    :hook (org-mode . org-modern-mode)
+    :hook (org-agenda-finalize . org-modern-agenda)
+    :config
+    (setq org-modern-table nil          ; 表格交给 valign
+          org-modern-hide-stars nil
+          org-modern-todo t
+          org-modern-tag t
+          org-modern-timestamp t
+          org-modern-priority t
+          org-modern-list '((?+ . "•") (?- . "–") (?* . "▸")))))
 #+end_src
 
 ** org-attach
@@ -674,6 +632,7 @@ Maple Mono NF CN for monospace (CJK + Nerd Font all-in-one), LXGW WenKai Screen 
 #+end_src
 
 ** Agenda
+按 org-super-agenda 重构: 每个视图只用一个 agenda + 一个 todo block, 内部用 super-agenda group 分块。
 #+begin_src emacs-lisp
 (after! org
   (setq org-agenda-inhibit-startup t
@@ -702,7 +661,6 @@ Maple Mono NF CN for monospace (CJK + Nerd Font all-in-one), LXGW WenKai Screen 
   ;; Hide redundant tags in agenda
   (setq org-agenda-hide-tags-regexp "personal\\|habit\\|index")
 
-  ;; ---- Agenda views ----
   (setq org-stuck-projects '("" nil nil ""))
 
   (defun my/skip-habit ()
@@ -711,60 +669,158 @@ Maple Mono NF CN for monospace (CJK + Nerd Font all-in-one), LXGW WenKai Screen 
       (when (string= (org-entry-get nil "STYLE") "habit")
         subtree-end)))
 
+  ;; ---- org-super-agenda ----
+  (use-package! org-super-agenda
+    :after org-agenda
+    :config
+    (org-super-agenda-mode 1)
+
+    ;; super-agenda 在每个 group 标题行挂了一个独立 keymap,
+    ;; 里面绑定了 agenda 的 H (holidays) / J (goto date) / j / k 等,
+    ;; 与 evil 的 HJKL 移动冲突。
+    ;;
+    ;; 方案: 把冲突键从 header map 解绑, 让 evil motion 正常生效。
+    ;; (如果想完全清空 header map, 用 (setq org-super-agenda-header-map (make-sparse-keymap)))
+    (let ((map org-super-agenda-header-map))
+      (define-key map (kbd "H") nil)
+      (define-key map (kbd "J") nil)
+      (define-key map (kbd "K") nil)
+      (define-key map (kbd "L") nil)
+      (define-key map (kbd "j") nil)
+      (define-key map (kbd "k") nil)
+      (define-key map (kbd "h") nil)
+      (define-key map (kbd "l") nil)))
+
+  ;; ---- super-agenda group 预设 ----
+  ;; 抽出来命名, 方便在多个 custom command 里复用与对比
+
+  (defvar my/super-agenda-groups-daily
+    '((:name "⏰ 今日"
+       :time-grid t
+       :date today)
+      (:name "🔥 过期"
+       :scheduled past
+       :deadline past)
+      (:name "📅 即将到期 (3 天内)"
+       :deadline future)
+      (:name "⚡ Next Actions"
+       :todo "NEXT")
+      (:name "🚧 进行中"
+       :todo "PROG")
+      (:name "⏳ Waiting"
+       :todo ("WAIT" "WAITING"))
+      (:name "🌀 习惯"
+       :habit t)
+      (:discard (:anything t)))
+    "Daily 视图分组: 以今天为中心。")
+
+  (defvar my/super-agenda-groups-weekly
+    '((:name "⏰ 今日"
+       :time-grid t
+       :date today)
+      (:name "🔥 过期"
+       :scheduled past
+       :deadline past)
+      (:name "📅 本周日程"
+       :scheduled future
+       :deadline future)
+      (:name "🏢 工作"
+       :and (:tag "work" :not (:habit t)))
+      (:name "🏠 个人"
+       :and (:tag "personal" :not (:habit t)))
+      (:name "📚 学习"
+       :and (:tag "learning" :not (:habit t)))
+      (:name "📦 未分类"
+       :and (:todo ("TODO" "NEXT" "PROG")
+             :not (:tag ("work" "personal" "learning"))
+             :not (:habit t)))
+      (:name "🌀 习惯"
+       :habit t)
+      (:discard (:anything t)))
+    "Weekly 视图分组: 日程在前, 按 tag 分类 backlog。")
+
+  (defvar my/super-agenda-groups-gtd
+    '((:name "⚡ Next Actions"
+       :todo "NEXT")
+      (:name "🚧 进行中"
+       :todo "PROG")
+      (:name "⏳ Waiting"
+       :todo ("WAIT" "WAITING"))
+      (:name "🧊 On Hold"
+       :todo "HOLD")
+      (:name "📋 Backlog · 工作"
+       :and (:todo "TODO" :tag "work"))
+      (:name "📋 Backlog · 个人"
+       :and (:todo "TODO" :tag "personal"))
+      (:name "📋 Backlog · 学习"
+       :and (:todo "TODO" :tag "learning"))
+      (:name "📋 Backlog · 未分类"
+       :and (:todo "TODO"
+             :not (:tag ("work" "personal" "learning"))))
+      (:discard (:anything t)))
+    "GTD 周回顾视图分组。")
+
+  ;; ---- 视图定义 ----
+  ;; 三个视图都用 agenda + todo 两个 block:
+  ;; - agenda block: 处理有时间戳的条目 (schedule/deadline/today/past)
+  ;; - todo block:   处理无时间戳的纯任务
+  ;; super-agenda 在每个 block 内部继续做分组。
+  ;; 注意: 用反引号 ` 让 ,my/super-agenda-groups-* 在 setq 时展开为列表字面值。
+  ;; 修改 defvar 后需要重新求值这个 setq (或重启 Emacs)。
+
   (setq org-agenda-custom-commands
-        '(("d" "Daily"
-           ((agenda "" ((org-agenda-span 'day)
-                        (org-agenda-start-day nil)
-                        (org-deadline-warning-days 3)
-                        (org-agenda-skip-scheduled-if-done t)
-                        (org-agenda-skip-deadline-if-done t)))
-            (todo "NEXT"
-                  ((org-agenda-overriding-header "⚡ Next Actions")
+        `(("d" "Daily · 今日聚焦"
+           ((agenda ""
+                    ((org-agenda-span 'day)
+                     (org-agenda-start-day nil)
+                     (org-deadline-warning-days 3)
+                     (org-agenda-skip-scheduled-if-done t)
+                     (org-agenda-skip-deadline-if-done t)
+                     (org-agenda-overriding-header "")
+                     (org-super-agenda-groups ',my/super-agenda-groups-daily)))
+            (todo ""
+                  ((org-agenda-overriding-header "── Inbox / 无时间任务 ──")
                    (org-agenda-skip-function 'my/skip-habit)
-                   (org-agenda-sorting-strategy '(priority-down category-keep))))
-            (todo "WAITING"
-                  ((org-agenda-overriding-header "⏳ Waiting (FYI)")
-                   (org-agenda-sorting-strategy '(category-keep))))))
+                   (org-super-agenda-groups
+                    '((:name "⚡ Next Actions" :todo "NEXT")
+                      (:name "🚧 进行中"      :todo "PROG")
+                      (:name "⏳ Waiting"     :todo ("WAIT" "WAITING"))
+                      (:discard (:anything t))))))))
 
-          ("w" "Weekly"
-           ((agenda "" ((org-agenda-span 'week)
-                        (org-deadline-warning-days 7)
-                        (org-habit-show-habits nil)))
-            (tags-todo "+work"
-                       ((org-agenda-overriding-header "🏢 Work")
-                        (org-agenda-skip-function 'my/skip-habit)
-                        (org-agenda-sorting-strategy '(todo-state-down priority-down))))
-            (tags-todo "+personal"
-                       ((org-agenda-overriding-header "🏠 Personal")
-                        (org-agenda-skip-function 'my/skip-habit)
-                        (org-agenda-sorting-strategy '(todo-state-down priority-down))))
-            (tags-todo "+learning"
-                       ((org-agenda-overriding-header "📚 Learning")
-                        (org-agenda-skip-function 'my/skip-habit)
-                        (org-agenda-sorting-strategy '(todo-state-down priority-down))))
-            (tags-todo "-work-personal-learning"
-                       ((org-agenda-overriding-header "📦 Untagged")
-                        (org-agenda-skip-function 'my/skip-habit)
-                        (org-agenda-sorting-strategy '(todo-state-down category-keep))))))
+          ("w" "Weekly · 周视图"
+           ((agenda ""
+                    ((org-agenda-span 'week)
+                     (org-agenda-start-on-weekday 1)        ; 周一起
+                     (org-deadline-warning-days 7)
+                     (org-habit-show-habits nil)            ; 周视图不显示习惯网格
+                     (org-agenda-overriding-header "")
+                     (org-super-agenda-groups ',my/super-agenda-groups-weekly)))
+            (todo ""
+                  ((org-agenda-overriding-header "── Backlog · 按领域分类 ──")
+                   (org-agenda-skip-function 'my/skip-habit)
+                   (org-super-agenda-groups ',my/super-agenda-groups-weekly)))))
 
-          ("g" "GTD Review"
-           ((agenda "" ((org-agenda-span 'day)
-                        (org-agenda-start-day nil)))
-            (todo "NEXT"
-                  ((org-agenda-overriding-header "⚡ Next Actions")
+          ("g" "GTD · 周回顾"
+           ((agenda ""
+                    ((org-agenda-span 'day)
+                     (org-agenda-start-day nil)
+                     (org-agenda-overriding-header "── 今日日程 ──")
+                     (org-super-agenda-groups
+                      '((:name "⏰ 今日" :time-grid t :date today)
+                        (:name "🔥 过期" :scheduled past :deadline past)
+                        (:discard (:anything t))))))
+            (todo ""
+                  ((org-agenda-overriding-header "── 所有未完成任务 ──")
                    (org-agenda-skip-function 'my/skip-habit)
-                   (org-agenda-sorting-strategy '(priority-down category-keep))))
-            (todo "TODO"
-                  ((org-agenda-overriding-header "📋 All Tasks (Backlog)")
-                   (org-agenda-skip-function 'my/skip-habit)
-                   (org-agenda-sorting-strategy '(tag-up priority-down category-keep))))
-            (todo "WAITING"
-                  ((org-agenda-overriding-header "⏳ Waiting")
-                   (org-agenda-sorting-strategy '(category-keep))))
-            (todo "HOLD"
-                  ((org-agenda-overriding-header "🧊 On Hold")
-                   (org-agenda-sorting-strategy '(category-keep)))))))))
+                   (org-super-agenda-groups ',my/super-agenda-groups-gtd)))))
+
+          ;; 全局搜索入口, 不分组方便临时翻
+          ("A" "All TODOs (no grouping)"
+           ((alltodo ""
+                     ((org-agenda-overriding-header "All Open TODOs")
+                      (org-agenda-skip-function 'my/skip-habit))))))))
 #+end_src
+
 ** Capture helpers
 #+begin_src emacs-lisp
 (after! org
@@ -932,7 +988,12 @@ Maple Mono NF CN for monospace (CJK + Nerd Font all-in-one), LXGW WenKai Screen 
           ("pn" "Protocol: Note → references/" plain
            (function my/protocol-note-target)
            "#+begin_quote\n%i\n#+end_quote\n%?"
-           :jump-to-captured t))))
+           :jump-to-captured t)
+          ;; 投资交易暂存：信息不完整时先进 inbox；正式入账用 `SPC n i b/s/p/B` 写入 Beancount。
+          ("$" "Investment · 待补 Beancount 交易" entry
+           (file+olp+datetree "~/org/inbox.org" "Investment")
+           "* TODO 补 Beancount 交易：%^{动作|买入|卖出|分红|手续费} %^{标的/代码}\n:PROPERTIES:\n:CREATED: %U\n:交易日期: %^{交易日期}\n:成交价格: %^{成交价格}\n:成交份额: %^{成交份额}\n:成交金额: %^{成交金额}\n:手续费: %^{手续费|0}\n:END:\n%?"
+           :empty-lines 1))))
 #+end_src
 
 ** Refile & Tags
@@ -1201,13 +1262,13 @@ Maple Mono NF CN for monospace (CJK + Nerd Font all-in-one), LXGW WenKai Screen 
 
 ** Org Sync
 #+begin_src emacs-lisp
-;; 1. 保存 org 文件后，延迟触发一次同步（防抖）
+;; 1. 保存 org 文件后, 延迟触发一次同步 (防抖, 30s)
 (defvar my/org-sync-timer nil)
 (defun my/org-sync-debounced ()
   (when my/org-sync-timer (cancel-timer my/org-sync-timer))
   (setq my/org-sync-timer
         (run-with-idle-timer
-         60 nil
+         30 nil
          (lambda ()
            (start-process "org-sync" "*org-sync*"
                           "powershell" "-NoProfile" "-File"
@@ -1232,8 +1293,8 @@ Maple Mono NF CN for monospace (CJK + Nerd Font all-in-one), LXGW WenKai Screen 
   (async-shell-command
    (format "powershell -NoProfile -File %s"
            (expand-file-name "~/org/.src/org-sync-runner.ps1"))))
-
 #+end_src
+
 * Org Clipboard & DnD
 ** Screenshot / rich paste helpers
 #+begin_src emacs-lisp
@@ -1364,9 +1425,9 @@ When KEYWORDS is non-nil, include them in the denote-style name."
         (org-download-screenshot basename)))))
 #+end_src
 
-** Delete file link in Org (replaces org-download-delete)
+** Delete file link in Org
 #+begin_src emacs-lisp
-;; 用 org-element-context 解析链接，支持 file:/attachment: 类型及带描述的 [[file:x.png][caption]]
+;; 用 org-element-context 解析链接, 支持 file:/attachment: 类型及带描述的 [[file:x.png][caption]]
 (defun my/org-delete-file-link-at-point ()
   "Delete the file link at point and the underlying attached file."
   (interactive)
@@ -1460,7 +1521,7 @@ Prompts for denote keywords interactively."
 
 ** Delete file link in Markdown
 #+begin_src emacs-lisp
-;; 用 markdown-link-at-pos 解析，同时处理 [file](pdf) 和 ![image](png)
+;; 用 markdown-link-at-pos 解析, 同时处理 [file](pdf) 和 ![image](png)
 (defun my/markdown-delete-file-link-at-point ()
   "Delete the file link at point and the underlying attached file."
   (interactive)
@@ -1666,12 +1727,14 @@ Prompts for denote keywords interactively."
   (advice-add 'org-gcal-fetch :after
               (lambda (&rest _) (run-with-idle-timer 5 nil #'my/org-gcal-dedup-after-fetch)))
 
-  ;; Periodic sync every 30 min
-  (run-with-timer 120 1800
-                  (lambda ()
-                    (when (not org-gcal--sync-lock)
-                      (org-gcal-sync)
-                      (my/org-gcal-auto-post)))))
+  ;; Periodic sync: idle timer 替代固定周期
+  ;; 用户 idle 600s (10min) 后才触发, 避免后台静默偷网络/CPU
+  ;; repeat 间隔 1800s, 但需要 idle 状态才会执行
+  (run-with-idle-timer 600 t
+                       (lambda ()
+                         (when (not org-gcal--sync-lock)
+                           (org-gcal-sync)
+                           (my/org-gcal-auto-post)))))
 #+end_src
 
 * Knowledge Base
@@ -1738,8 +1801,8 @@ denote-dired directory, matching case-insensitively."
   (setq dirvish-hide-details t)
   (map! :map dirvish-mode-map
         :n "/" #'dirvish-narrow))
-
 #+end_src
+
 ** denote-org & denote-markdown
 #+begin_src emacs-lisp
 (use-package! denote-org
@@ -1761,7 +1824,7 @@ denote-dired directory, matching case-insensitively."
   :config
   (setq consult-notes-file-dir-sources
         `(("Notes"   ?n ,(expand-file-name "notes/"   org-directory))))
-          
+
 
   (setq consult-notes-org-headings-files
         (list (expand-file-name "inbox.org"       org-directory)
@@ -1782,7 +1845,64 @@ denote-dired directory, matching case-insensitively."
                 (lambda (a b)
                   (time-less-p
                    (file-attribute-modification-time (file-attributes b))
-                   (file-attribute-modification-time (file-attributes a))))))))
+                   (file-attribute-modification-time (file-attributes a)))))))
+  ;; 文件名筛选不区分大小写
+  (setq completion-ignore-case t)
+  ;; 全文搜索不区分大小写 (ripgrep)
+  (setq consult-ripgrep-args
+        "rg --null --line-buffered --color=never --max-columns=1000 --path-separator / --no-heading --with-filename --line-number --search-zip --ignore-case"))
+#+end_src
+
+** org-transclusion (cross-note embedding)
+#+begin_src emacs-lisp
+;; org-transclusion: 把另一个 org 文件/章节实时嵌入当前 buffer
+;; 用法: 插入 #+transclude: [[file:other.org::*某章节]]
+;;      然后 M-x org-transclusion-add 展开
+;; 适合: 把 denote 笔记里的某段话引用到日记 / 周报
+(use-package! org-transclusion
+  :after org
+  :commands (org-transclusion-add
+             org-transclusion-add-all
+             org-transclusion-mode))
+#+end_src
+
+* Writing
+** jinx (spell-check)
+#+begin_src emacs-lisp
+;; jinx: 基于 enchant 的高速增量拼写检查
+;; - 比 flyspell 快一个数量级, 只检查可见区域
+;; - Windows 安装依赖: scoop install enchant
+;; - 首次使用: M-x jinx-languages 选择字典 (如 en_US)
+;; - 在错词上 M-$ 显示候选
+;; - 默认不在 org-mode 开启 (中英混排误报较多), 想开启在 hook 里加上
+(use-package! jinx
+  :hook ((markdown-mode . jinx-mode))
+  :bind (("M-$"   . jinx-correct)
+         ("C-M-$" . jinx-languages)))
+#+end_src
+
+** Focus mode toggle
+#+begin_src emacs-lisp
+;; 一键切换"专注写作"模式: 隐藏 modeline, 加宽 olivetti
+(defvar my/focus-writing-active nil)
+
+(defun my/focus-writing-toggle ()
+  "Toggle distraction-free writing layout."
+  (interactive)
+  (if my/focus-writing-active
+      (progn
+        (when (fboundp 'hide-mode-line-mode) (hide-mode-line-mode -1))
+        (when (bound-and-true-p olivetti-mode)
+          (setq olivetti-body-width 92)
+          (olivetti--set-margins))
+        (setq my/focus-writing-active nil)
+        (message "Focus mode: OFF"))
+    (unless (bound-and-true-p olivetti-mode) (olivetti-mode 1))
+    (setq olivetti-body-width 110)
+    (when (fboundp 'olivetti--set-margins) (olivetti--set-margins))
+    (when (fboundp 'hide-mode-line-mode) (hide-mode-line-mode 1))
+    (setq my/focus-writing-active t)
+    (message "Focus mode: ON")))
 #+end_src
 
 * Journal
@@ -1816,34 +1936,53 @@ Before 03:00 falls back to the previous day."
      (format-time-string "%Y-%m-%d" time))))
 #+end_src
 
-** Weather (wttr.in)
+** Weather (wttr.in) — async
 #+begin_src emacs-lisp
 (defvar my/weather-location "上海"
   "wttr.in 查询地点。")
 
 (defun my/get-weather ()
-  "从 wttr.in 获取天气，返回单行字符串。"
+  "同步从 wttr.in 获取天气 (手动调用 my/insert-weather 时用)。"
   (let ((coding-system-for-read 'utf-8))
     (string-trim
      (shell-command-to-string
-      (format "curl -s --max-time 5 \"https://wttr.in/%s?format=3\""
+      (format "curl -s --max-time 3 \"https://wttr.in/%s?format=3\""
               (url-hexify-string my/weather-location))))))
 
 (defun my/insert-weather ()
-  "在光标处插入当前天气。"
+  "在光标处插入当前天气 (同步, 可能卡 ≤3s)。"
   (interactive)
   (insert (my/get-weather)))
 
+(defun my/denote-journal--insert-weather-async (target-file)
+  "异步获取天气并写入 TARGET-FILE 末尾, 避免新建 journal 时卡顿。"
+  (let ((buf (generate-new-buffer " *weather*")))
+    (make-process
+     :name "weather-fetch"
+     :buffer buf
+     :command (list "curl" "-s" "--max-time" "3"
+                    (format "https://wttr.in/%s?format=3"
+                            (url-hexify-string my/weather-location)))
+     :sentinel
+     (lambda (proc _event)
+       (when (memq (process-status proc) '(exit signal))
+         (let ((output (with-current-buffer buf
+                         (string-trim (buffer-string)))))
+           (kill-buffer buf)
+           (when (and (file-exists-p target-file)
+                      (not (string-empty-p output)))
+             (with-current-buffer (find-file-noselect target-file)
+               (save-excursion
+                 (goto-char (point-max))
+                 (unless (bolp) (insert "\n"))
+                 (insert "\n* 天气\n" output "\n"))
+               (save-buffer)))))))))
+
 (defun my/denote-journal-auto-weather ()
-  "新建 journal 文件时自动在末尾追加天气。"
+  "新建 journal 文件时异步追加天气, 不阻塞 capture 流程。"
   (when (and (buffer-file-name)
              (string-match-p "__journal" (buffer-file-name)))
-    (save-excursion
-      (goto-char (point-max))
-      (unless (bolp) (insert "\n"))
-      (insert "\n* 天气\n")
-      (insert (my/get-weather))
-      (insert "\n"))))
+    (my/denote-journal--insert-weather-async (buffer-file-name))))
 
 (add-hook 'denote-after-new-note-hook #'my/denote-journal-auto-weather)
 #+end_src
@@ -1967,6 +2106,257 @@ Before 03:00 falls back to the previous day."
 
   (setq org-noter-create-session-from-document-hook
         '(my/org-noter-create-session-in-references)))
+#+end_src
+
+* Investment
+** beancount
+#+begin_src emacs-lisp
+;; beancount: 复式记账 / 投资记录
+;; - 安装 CLI:  pip install beancount fava
+;; - 主账本放在 ~/org/investment/main.beancount
+;; - 正式交易用下面的 `my/beancount-record-*` 命令直接入账；org-capture 只做信息不完整时的暂存。
+;; - 通过 fava (浏览器 UI) 查看报表: fava ~/org/investment/main.beancount
+(use-package! beancount
+  :mode ("\\.beancount\\'" . beancount-mode)
+  :config
+  (setq beancount-electric-currency t
+        beancount-use-ido nil))           ; 用 vertico 接管补全
+
+(require 'subr-x)
+(require 'cl-lib)
+
+(defconst my/beancount-funds
+  '(("159501" :name "嘉实纳斯达克100ETF(QDII)" :commodity "ETF159501"
+     :account "Assets:Investment:Nasdaq100:ETF159501" :category "纳指100")
+    ("159696" :name "易方达纳斯达克100ETF(QDII)" :commodity "ETF159696"
+     :account "Assets:Investment:Nasdaq100:ETF159696" :category "纳指100")
+    ("513100" :name "国泰纳斯达克100ETF(QDII)" :commodity "ETF513100"
+     :account "Assets:Investment:Nasdaq100:ETF513100" :category "纳指100")
+    ("513870" :name "富国纳斯达克100ETF(QDII)" :commodity "ETF513870"
+     :account "Assets:Investment:Nasdaq100:ETF513870" :category "纳指100")
+    ("563510" :name "易方达中证A500红利低波动ETF" :commodity "ETF563510"
+     :account "Assets:Investment:DividendLowVol:ETF563510" :category "红利低波")
+    ("159209" :name "招商中证全指红利质量ETF" :commodity "ETF159209"
+     :account "Assets:Investment:DividendQuality:ETF159209" :category "红利质量")
+    ("159307" :name "红利低波100ETF" :commodity "ETF159307"
+     :account "Assets:Investment:DividendLowVol:ETF159307" :category "红利低波"))
+  "投资账本中的基金/ETF 映射。")
+
+(defun my/beancount-main-file ()
+  "Return the main investment Beancount ledger path."
+  (expand-file-name "investment/main.beancount" org-directory))
+
+(defun my/open-beancount-main ()
+  "打开主 beancount 账本。"
+  (interactive)
+  (find-file (my/beancount-main-file)))
+
+(defun my/beancount--fund-candidates ()
+  "Return completion candidates for `my/beancount-funds`."
+  (mapcar (lambda (cell)
+            (let* ((code (car cell))
+                   (fund (cdr cell))
+                   (name (plist-get fund :name)))
+              (cons (format "%s · %s" code name) code)))
+          my/beancount-funds))
+
+(defun my/beancount--read-fund-code ()
+  "Read a fund code from known Beancount fund mappings."
+  (let* ((candidates (my/beancount--fund-candidates))
+         (choice (completing-read "基金代码: " candidates nil t)))
+    (cdr (assoc choice candidates))))
+
+(defun my/beancount--fund (code)
+  "Return plist for CODE."
+  (or (cdr (assoc code my/beancount-funds))
+      (user-error "Unknown fund code: %s" code)))
+
+(defun my/beancount--normalize-number (value)
+  "Normalize numeric string VALUE for Beancount."
+  (replace-regexp-in-string "," "" (string-trim (format "%s" value))))
+
+(defun my/beancount--number (value)
+  "Convert VALUE to number after normalizing commas."
+  (string-to-number (my/beancount--normalize-number value)))
+
+(defun my/beancount--read-number-string (prompt &optional default)
+  "Read a decimal number as normalized string with PROMPT and optional DEFAULT."
+  (my/beancount--normalize-number
+   (read-string prompt nil nil default)))
+
+(defun my/beancount--read-date (&optional prompt)
+  "Read a Beancount date string."
+  (read-string (or prompt "交易日期: ") (format-time-string "%Y-%m-%d")))
+
+(defun my/beancount--insert-before-first-entry (text)
+  "Insert TEXT before the first price/transaction/balance entry, else at EOF."
+  (goto-char (point-min))
+  (if (re-search-forward "^[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\} \\(price\\|balance\\|[*!]\\)" nil t)
+      (progn
+        (beginning-of-line)
+        (insert text "\n"))
+    (goto-char (point-max))
+    (unless (bolp) (insert "\n"))
+    (insert text "\n")))
+
+(defun my/beancount--ensure-fund-open (date code)
+  "Ensure commodity and account directives for CODE exist, using DATE if inserted."
+  (let* ((fund (my/beancount--fund code))
+         (name (plist-get fund :name))
+         (commodity (plist-get fund :commodity))
+         (account (plist-get fund :account))
+         (category (plist-get fund :category))
+         directives)
+    (save-excursion
+      (goto-char (point-min))
+      (unless (re-search-forward (format "^[0-9-]+ commodity %s\\b" (regexp-quote commodity)) nil t)
+        (push (format "%s commodity %s\n  name: \"%s\"\n  code: \"%s\"\n  asset_category: \"%s\""
+                      date commodity name code category)
+              directives))
+      (goto-char (point-min))
+      (unless (re-search-forward (format "^[0-9-]+ open %s\\b" (regexp-quote account)) nil t)
+        (push (format "%s open %s %s" date account commodity) directives))
+      (when directives
+        (my/beancount--insert-before-first-entry
+         (mapconcat #'identity (nreverse directives) "\n\n"))))))
+
+(defun my/beancount--append-entry (entry &optional date code)
+  "Append ENTRY to main ledger, optionally ensuring CODE is open at DATE."
+  (find-file (my/beancount-main-file))
+  (when (and date code)
+    (my/beancount--ensure-fund-open date code))
+  (goto-char (point-max))
+  (unless (bolp) (insert "\n"))
+  (insert "\n" entry)
+  (save-buffer)
+  (my/beancount-check-main))
+
+(defun my/beancount-check-main ()
+  "Run bean-check against the main Beancount ledger."
+  (interactive)
+  (let ((file (my/beancount-main-file))
+        (program (or (executable-find "bean-check") "bean-check")))
+    (save-some-buffers t (lambda ()
+                           (and buffer-file-name
+                                (file-equal-p buffer-file-name file))))
+    (compilation-start
+     (format "\"%s\" \"%s\"" program file)
+     nil
+     (lambda (_) "*bean-check main.beancount*"))))
+
+(defun my/beancount-record-buy ()
+  "快速记录一笔 ETF/基金买入。"
+  (interactive)
+  (let* ((date (my/beancount--read-date))
+         (code (my/beancount--read-fund-code))
+         (fund (my/beancount--fund code))
+         (name (plist-get fund :name))
+         (commodity (plist-get fund :commodity))
+         (account (plist-get fund :account))
+         (category (plist-get fund :category))
+         (price (my/beancount--read-number-string "成交价格: "))
+         (shares (my/beancount--read-number-string "成交份额: "))
+         (amount-default (format "%.2f" (* (my/beancount--number price)
+                                            (my/beancount--number shares))))
+         (amount (my/beancount--read-number-string "成交金额: " amount-default))
+         (fee (my/beancount--read-number-string "手续费: " "0")))
+    (my/beancount--append-entry
+     (format "%s * \"买入 %s (%s)\"\n  fund_code: \"%s\"\n  fund_name: \"%s\"\n  asset_category: \"%s\"\n  trade_price: \"%s CNY\"\n  trade_amount: \"%s CNY\"\n  %s  %s %s {{%s CNY}}\n%s  Equity:Investment:Funding\n"
+             date name code code name category price amount
+             account shares commodity amount
+             (if (> (my/beancount--number fee) 0)
+                 (format "  Expenses:Investment:Fees  %s CNY\n" fee)
+               ""))
+     date code)))
+
+(defun my/beancount-record-sell ()
+  "快速记录一笔 ETF/基金卖出。"
+  (interactive)
+  (let* ((date (my/beancount--read-date))
+         (code (my/beancount--read-fund-code))
+         (fund (my/beancount--fund code))
+         (name (plist-get fund :name))
+         (commodity (plist-get fund :commodity))
+         (account (plist-get fund :account))
+         (category (plist-get fund :category))
+         (price (my/beancount--read-number-string "成交价格: "))
+         (shares (my/beancount--read-number-string "成交份额: "))
+         (amount-default (format "%.2f" (* (my/beancount--number price)
+                                            (my/beancount--number shares))))
+         (amount (my/beancount--read-number-string "成交金额: " amount-default))
+         (fee (my/beancount--read-number-string "手续费/税费: " "0")))
+    (my/beancount--append-entry
+     (format "%s * \"卖出 %s (%s)\"\n  fund_code: \"%s\"\n  fund_name: \"%s\"\n  asset_category: \"%s\"\n  trade_price: \"%s CNY\"\n  trade_amount: \"%s CNY\"\n  %s  -%s %s {} @ %s CNY\n%s  Equity:Investment:Funding\n"
+             date name code code name category price amount
+             account shares commodity price
+             (if (> (my/beancount--number fee) 0)
+                 (format "  Expenses:Investment:Fees  %s CNY\n" fee)
+               ""))
+     date code)))
+
+(defun my/beancount-record-price ()
+  "快速记录一条 ETF/基金净值 price。"
+  (interactive)
+  (let* ((date (my/beancount--read-date "净值日期: "))
+         (code (my/beancount--read-fund-code))
+         (commodity (plist-get (my/beancount--fund code) :commodity))
+         (price (my/beancount--read-number-string "当前净值: ")))
+    (my/beancount--append-entry
+     (format "%s price %s %s CNY\n" date commodity price)
+     date code)))
+
+(defun my/beancount-record-balance ()
+  "快速记录一条 ETF/基金持仓 balance 校验。"
+  (interactive)
+  (let* ((date (my/beancount--read-date "校验日期: "))
+         (code (my/beancount--read-fund-code))
+         (fund (my/beancount--fund code))
+         (commodity (plist-get fund :commodity))
+         (account (plist-get fund :account))
+         (shares (my/beancount--read-number-string "持有份额: ")))
+    (my/beancount--append-entry
+     (format "%s balance %s %s %s\n" date account shares commodity)
+     date code)))
+
+(defun my/beancount-fava-main ()
+  "Open main Beancount ledger and toggle/start Fava."
+  (interactive)
+  (my/open-beancount-main)
+  (if (fboundp 'beancount-fava)
+      (beancount-fava)
+    (start-process "fava" "*fava*" "fava" (my/beancount-main-file))))
+
+(defun my/beancount-update-prices-latest ()
+  "抓取最近两周 ETF 收盘价，更新 prices.beancount。"
+  (interactive)
+  (let* ((script (expand-file-name "investment/scripts/update_prices.py" org-directory))
+         (default-directory (expand-file-name "investment/" org-directory)))
+    (compilation-start
+     (format "python \"%s\" latest" script)
+     nil
+     (lambda (_) "*beancount update prices latest*"))))
+
+(defun my/beancount-rebuild-prices-history ()
+  "重建全部 ETF 历史收盘价 prices.beancount；建议每周跑一次。"
+  (interactive)
+  (let* ((script (expand-file-name "investment/scripts/update_prices.py" org-directory))
+         (default-directory (expand-file-name "investment/" org-directory)))
+    (compilation-start
+     (format "python \"%s\" history" script)
+     nil
+     (lambda (_) "*beancount rebuild prices history*"))))
+
+(map! :leader
+      (:prefix ("n i" . "investment")
+       :desc "Beancount buy"        "b" #'my/beancount-record-buy
+       :desc "Beancount sell"       "s" #'my/beancount-record-sell
+       :desc "Beancount price"      "p" #'my/beancount-record-price
+       :desc "Beancount balance"    "B" #'my/beancount-record-balance
+       :desc "Update prices latest" "u" #'my/beancount-update-prices-latest
+       :desc "Rebuild price history" "H" #'my/beancount-rebuild-prices-history
+       :desc "Open ledger"          "o" #'my/open-beancount-main
+       :desc "Check ledger"         "c" #'my/beancount-check-main
+       :desc "Fava"                 "f" #'my/beancount-fava-main))
 #+end_src
 
 * Apps
@@ -2190,7 +2580,7 @@ identical to what `doom.ps1' does on Windows."
 #+end_src
 
 ** Agent-shell
-=my/athenai-api-key= 由 =secrets.el= 提供；缺失时 agent-shell 配置静默跳过。
+=my/athenai-api-key= 由 =secrets.el= 提供; 缺失时 agent-shell 配置静默跳过。
 #+begin_src emacs-lisp
 (when (boundp 'my/athenai-api-key)
   (require 'acp)
@@ -2209,7 +2599,7 @@ identical to what `doom.ps1' does on Windows."
          "ANTHROPIC_MODEL" "claude-sonnet-4-6"
          "ANTHROPIC_SMALL_FAST_MODEL" "claude-sonnet-4-6"))
 
-  ;; 统一 transcript 存储位置，无论在哪个 project 下都存到 ~/.agent-shell/
+  ;; 统一 transcript 存储位置, 无论在哪个 project 下都存到 ~/.agent-shell/
   (setq agent-shell-dot-subdir-function
         (lambda (subdir)
           (expand-file-name subdir "~/.agent-shell")))
@@ -2289,10 +2679,14 @@ identical to what `doom.ps1' does on Windows."
 
       ;; Open
       (:prefix ("o" . "open")
-       :desc "Elfeed"      "e" #'elfeed
-       :desc "Eshell here" "E" #'my/eshell-here
-       :desc "Claude Code" "s" #'agent-shell-anthropic-start-claude-code
-       :desc "Codex"       "c" #'agent-shell-openai-start-codex)
+       :desc "Elfeed"           "e" #'elfeed
+       :desc "Eshell here"      "E" #'my/eshell-here
+       :desc "Claude Code"      "s" #'agent-shell-anthropic-start-claude-code
+       :desc "Codex"            "c" #'agent-shell-openai-start-codex
+       :desc "Daily agenda"     "d" (cmd! (org-agenda nil "d"))
+       :desc "Weekly agenda"    "w" (cmd! (org-agenda nil "w"))
+       :desc "GTD review"       "g" (cmd! (org-agenda nil "g"))
+       :desc "Beancount ledger" "$" #'my/open-beancount-main)
 
       ;; Notes / Denote
       (:prefix ("n" . "notes")
@@ -2314,7 +2708,12 @@ identical to what `doom.ps1' does on Windows."
         :desc "Dired in denote dir"            "d" #'denote-dired
         :desc "Today's journal"                "j" #'denote-journal-new-or-existing-entry))
 
-      :desc "org-noter" "N" #'org-noter)
+      ;; Toggle / utilities
+      (:prefix ("t" . "toggle")
+       :desc "Focus writing"         "F" #'my/focus-writing-toggle)
+
+      :desc "Visual undo tree" "u" #'vundo
+      :desc "org-noter"        "N" #'org-noter)
 #+end_src
 
 ** Org localleader
@@ -2343,8 +2742,14 @@ identical to what `doom.ps1' does on Windows."
         :desc "Missing links"         "m" #'denote-org-dblock-insert-missing-links
         :desc "Files"                 "f" #'denote-org-dblock-insert-files
         :desc "Files as headings"     "F" #'denote-org-dblock-insert-files-as-headings))
-      :desc "TODO state"        "t" #'org-todo
-      :desc "Paste rich text"   "V" #'my/org-paste-rich
+      ;; org-transclusion
+      (:prefix ("T" . "transclusion")
+       :desc "Add at point"    "a" #'org-transclusion-add
+       :desc "Add all"         "A" #'org-transclusion-add-all
+       :desc "Remove at point" "r" #'org-transclusion-remove
+       :desc "Toggle mode"     "t" #'org-transclusion-mode)
+      :desc "TODO state"         "t" #'org-todo
+      :desc "Paste rich text"    "V" #'my/org-paste-rich
       :desc "Archive done tasks" "A" #'my/org-archive-done-tasks)
 #+end_src
 
