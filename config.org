@@ -2158,7 +2158,9 @@ Before 03:00 falls back to the previous day."
     ("159209" :name "招商中证全指红利质量ETF" :commodity "ETF159209"
      :account "Assets:Investment:DividendQuality:ETF159209" :category "红利质量")
     ("159307" :name "红利低波100ETF" :commodity "ETF159307"
-     :account "Assets:Investment:DividendLowVol:ETF159307" :category "红利低波"))
+     :account "Assets:Investment:DividendLowVol:ETF159307" :category "红利低波")
+    ("511880" :name "银华日利ETF" :commodity "ETF511880"
+     :account "Assets:Investment:MoneyMarket:ETF511880" :category "货币基金" :fee-free t))
   "投资账本中的基金/ETF 映射。")
 
 (defun my/beancount-main-file ()
@@ -2275,16 +2277,14 @@ Before 03:00 falls back to the previous day."
          (category (plist-get fund :category))
          (price (my/beancount--read-number-string "成交价格: "))
          (shares (my/beancount--read-number-string "成交份额: "))
-         (amount-default (format "%.2f" (* (my/beancount--number price)
-                                            (my/beancount--number shares))))
-         (amount (my/beancount--read-number-string "成交金额: " amount-default))
-         (fee (my/beancount--read-number-string "手续费: " "0")))
+         (amount (* (my/beancount--number price) (my/beancount--number shares)))
+         (fee (if (plist-get fund :fee-free) 0 (* amount 0.00005))))
     (my/beancount--append-entry
-     (format "%s * \"买入 %s (%s)\"\n  fund_code: \"%s\"\n  fund_name: \"%s\"\n  asset_category: \"%s\"\n  trade_price: \"%s CNY\"\n  trade_amount: \"%s CNY\"\n  %s  %s %s {{%s CNY}}\n%s  Equity:Investment:Funding\n"
+     (format "%s * \"买入 %s (%s)\"\n  fund_code: \"%s\"\n  fund_name: \"%s\"\n  asset_category: \"%s\"\n  trade_price: \"%s CNY\"\n  trade_amount: \"%.2f CNY\"\n  %s  %s %s {{%.2f CNY}}\n%s  Equity:Investment:Funding\n"
              date name code code name category price amount
              account shares commodity amount
-             (if (> (my/beancount--number fee) 0)
-                 (format "  Expenses:Investment:Fees  %s CNY\n" fee)
+             (if (> fee 0)
+                 (format "  Expenses:Investment:Fees  %.4f CNY\n" fee)
                ""))
      date code)))
 
@@ -2300,16 +2300,14 @@ Before 03:00 falls back to the previous day."
          (category (plist-get fund :category))
          (price (my/beancount--read-number-string "成交价格: "))
          (shares (my/beancount--read-number-string "成交份额: "))
-         (amount-default (format "%.2f" (* (my/beancount--number price)
-                                            (my/beancount--number shares))))
-         (amount (my/beancount--read-number-string "成交金额: " amount-default))
-         (fee (my/beancount--read-number-string "手续费/税费: " "0")))
+         (amount (* (my/beancount--number price) (my/beancount--number shares)))
+         (fee (if (plist-get fund :fee-free) 0 (* amount 0.00005))))
     (my/beancount--append-entry
-     (format "%s * \"卖出 %s (%s)\"\n  fund_code: \"%s\"\n  fund_name: \"%s\"\n  asset_category: \"%s\"\n  trade_price: \"%s CNY\"\n  trade_amount: \"%s CNY\"\n  %s  -%s %s {} @ %s CNY\n%s  Equity:Investment:Funding\n"
+     (format "%s * \"卖出 %s (%s)\"\n  fund_code: \"%s\"\n  fund_name: \"%s\"\n  asset_category: \"%s\"\n  trade_price: \"%s CNY\"\n  trade_amount: \"%.2f CNY\"\n  %s  -%s %s {} @ %s CNY\n%s  Equity:Investment:Funding\n"
              date name code code name category price amount
              account shares commodity price
-             (if (> (my/beancount--number fee) 0)
-                 (format "  Expenses:Investment:Fees  %s CNY\n" fee)
+             (if (> fee 0)
+                 (format "  Expenses:Investment:Fees  %.4f CNY\n" fee)
                ""))
      date code)))
 
@@ -2624,12 +2622,22 @@ identical to what `doom.ps1' does on Windows."
           (expand-file-name subdir "~/.agent-shell")))
 
   ;; Buffer-local Evil-friendly bindings
-  (map! :map agent-shell-mode-map
-        :i "RET"   #'newline
-        :i "S-RET" #'shell-maker-submit
-        :n "RET"   #'shell-maker-submit
-        :n "q"     #'quit-window
-        :nv "gr"   #'agent-shell-send-dwim)
+  ;; NOTE: comint-mode-map 绑了 RET → comint-send-input，shell-maker-mode-map 又用 <remap>
+  ;; 转成 shell-maker-submit。evil-define-key 'insert 在 insert state 下不一定能拦截到 RET
+  ;; （insert state 设计透明，大部分键穿透到 mode map 链）。
+  ;;
+  ;; 解法：直接在 agent-shell-mode-map 上绑 RET → newline 截断穿透链；normal state 下
+  ;; 用 evil-define-key 单独绑 RET → shell-maker-submit。
+  (after! agent-shell
+    (define-key agent-shell-mode-map (kbd "RET")   #'newline)
+    (define-key agent-shell-mode-map (kbd "S-RET") #'shell-maker-submit)
+    (evil-define-key 'normal agent-shell-mode-map
+      (kbd "RET") #'shell-maker-submit
+      "q"         #'quit-window)
+    (evil-define-key 'normal agent-shell-mode-map
+      (kbd "gr") #'agent-shell-send-dwim)
+    (evil-define-key 'visual agent-shell-mode-map
+      (kbd "gr") #'agent-shell-send-dwim))
 
   ;; Diff buffer auto enters emacs-state
   (add-hook 'diff-mode-hook
