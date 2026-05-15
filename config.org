@@ -306,6 +306,25 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
 ;; 全局 visual line
 (global-visual-line-mode)
 
+;; j/k 按视觉行移动 —— evil-define-motion 确保 visual state (v/V/C-v) 都正常
+(evil-define-motion my/evil-next-visual-line (count)
+  "Move COUNT lines down, respecting `visual-line-mode' when active."
+  :type line
+  (let ((line-move-visual (and visual-line-mode t)))
+    (evil-line-move (or count 1))))
+
+(evil-define-motion my/evil-previous-visual-line (count)
+  "Move COUNT lines up, respecting `visual-line-mode' when active."
+  :type line
+  (let ((line-move-visual (and visual-line-mode t)))
+    (evil-line-move (- (or count 1)))))
+
+(after! evil
+  (define-key evil-motion-state-map "j" #'my/evil-next-visual-line)
+  (define-key evil-motion-state-map "k" #'my/evil-previous-visual-line)
+  (define-key evil-visual-state-map "j" #'my/evil-next-visual-line)
+  (define-key evil-visual-state-map "k" #'my/evil-previous-visual-line))
+
 (setq display-line-numbers-type nil
       use-short-answers t)
 
