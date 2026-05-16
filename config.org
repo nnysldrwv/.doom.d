@@ -104,7 +104,7 @@
 (package! ef-themes)
 
 ;; writing & display
-(package! olivetti)
+;; (package! olivetti)
 (package! org-appear
   :recipe (:host github :repo "awth13/org-appear"))
 (package! pangu-spacing)
@@ -125,7 +125,7 @@
 
 ;; Org 视觉现代化: 标题/TODO/tag/checkbox/timestamp 美化
 ;; 与 valign 协同: 禁用 org-modern 的表格渲染, 交给 valign
-(package! org-modern)
+;; (package! org-modern)
 
 ;; 可视化 undo 树, 比 Doom 默认 undo-fu 更直观
 (package! vundo)
@@ -463,9 +463,9 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
     (global-pangu-spacing-mode 1)
     (setq pangu-spacing-real-insert-separtor t))
 
-  (use-package! olivetti
-    :hook (org-mode . olivetti-mode)
-    :config (setq olivetti-body-width 92))
+  ;; (use-package! olivetti
+  ;;   :hook (org-mode . olivetti-mode)
+  ;;   :config (setq olivetti-body-width 98))
 
   (use-package! ultra-scroll
     :init
@@ -488,22 +488,22 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
 
   (use-package! ace-pinyin
     :config
-    (ace-pinyin-global-mode +1))
+    (ace-pinyin-global-mode +1)))
 
   ;; org-modern: 现代化的 org 视觉
   ;; - 标题前缀、TODO 胶囊、tag、checkbox、timestamp 全部美化
   ;; - 表格让给 valign 处理 (org-modern 的表格渲染与 valign 冲突)
-  (use-package! org-modern
-    :hook (org-mode . org-modern-mode)
-    :hook (org-agenda-finalize . org-modern-agenda)
-    :config
-    (setq org-modern-table nil          ; 表格交给 valign
-          org-modern-hide-stars nil
-          org-modern-todo t
-          org-modern-tag t
-          org-modern-timestamp t
-          org-modern-priority t
-          org-modern-list '((?+ . "•") (?- . "–") (?* . "▸")))))
+  ;; (use-package! org-modern
+  ;;   :hook (org-mode . org-modern-mode)
+  ;;   :hook (org-agenda-finalize . org-modern-agenda)
+  ;;   :config
+  ;;   (setq org-modern-table nil          ; 表格交给 valign
+  ;;         org-modern-hide-stars nil
+  ;;         org-modern-todo t
+  ;;         org-modern-tag t
+  ;;         org-modern-timestamp t
+  ;;         org-modern-priority t
+  ;;         org-modern-list '((?+ . "•") (?- . "–") (?* . "▸")))))
 #+end_src
 
 ** org-attach
@@ -1012,7 +1012,27 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
           ("$" "Investment · 待补 Beancount 交易" entry
            (file+olp+datetree "~/org/inbox.org" "Investment")
            "* TODO 补 Beancount 交易：%^{动作|买入|卖出|分红|手续费} %^{标的/代码}\n:PROPERTIES:\n:CREATED: %U\n:交易日期: %^{交易日期}\n:成交价格: %^{成交价格}\n:成交份额: %^{成交份额}\n:成交金额: %^{成交金额}\n:手续费: %^{手续费|0}\n:END:\n%?"
-           :empty-lines 1))))
+           :empty-lines 1)
+          ;; 银行理财赎回：SPC n i r
+          ;; 个人养老金定投买入：SPC n i y；红利再投：SPC n i R/Y
+          ;; 招行现金流入/流出：SPC n i C
+          ;; 招行现金转入股票账户：SPC n i t
+          ("I" "Investment · 快捷操作")
+          ("Ir" "招行理财赎回" plain
+           (function my/beancount-record-bank-redeem)
+           "" :immediate-finish t)
+          ("Iy" "养老金基金定投" plain
+           (function my/beancount-record-pension-buy)
+           "" :immediate-finish t)
+          ("IR" "养老金红利再投" plain
+           (function my/beancount-record-pension-reinvest)
+           "" :immediate-finish t)
+          ("Ic" "招行现金流入/流出" plain
+           (function my/beancount-record-cmb-cashflow)
+           "" :immediate-finish t)
+          ("It" "招行现金转入股票账户" plain
+           (function my/beancount-record-broker-transfer)
+           "" :immediate-finish t))))
 #+end_src
 
 ** Refile & Tags
@@ -1903,25 +1923,25 @@ denote-dired directory, matching case-insensitively."
 ** Focus mode toggle
 #+begin_src emacs-lisp
 ;; 一键切换"专注写作"模式: 隐藏 modeline, 加宽 olivetti
-(defvar my/focus-writing-active nil)
+;; (defvar my/focus-writing-active nil)
 
-(defun my/focus-writing-toggle ()
-  "Toggle distraction-free writing layout."
-  (interactive)
-  (if my/focus-writing-active
-      (progn
-        (when (fboundp 'hide-mode-line-mode) (hide-mode-line-mode -1))
-        (when (bound-and-true-p olivetti-mode)
-          (setq olivetti-body-width 92)
-          (olivetti--set-margins))
-        (setq my/focus-writing-active nil)
-        (message "Focus mode: OFF"))
-    (unless (bound-and-true-p olivetti-mode) (olivetti-mode 1))
-    (setq olivetti-body-width 110)
-    (when (fboundp 'olivetti--set-margins) (olivetti--set-margins))
-    (when (fboundp 'hide-mode-line-mode) (hide-mode-line-mode 1))
-    (setq my/focus-writing-active t)
-    (message "Focus mode: ON")))
+;; (defun my/focus-writing-toggle ()
+;;   "Toggle distraction-free writing layout."
+;;   (interactive)
+;;   (if my/focus-writing-active
+;;       (progn
+;;         (when (fboundp 'hide-mode-line-mode) (hide-mode-line-mode -1))
+;;         (when (bound-and-true-p olivetti-mode)
+;;           (setq olivetti-body-width 92)
+;;           (olivetti--set-margins))
+;;         (setq my/focus-writing-active nil)
+;;         (message "Focus mode: OFF"))
+;;     (unless (bound-and-true-p olivetti-mode) (olivetti-mode 1))
+;;     (setq olivetti-body-width 110)
+;;     (when (fboundp 'olivetti--set-margins) (olivetti--set-margins))
+;;     (when (fboundp 'hide-mode-line-mode) (hide-mode-line-mode 1))
+;;     (setq my/focus-writing-active t)
+;;     (message "Focus mode: ON")))
 #+end_src
 
 * Journal
@@ -2133,7 +2153,7 @@ Before 03:00 falls back to the previous day."
 ;; beancount: 复式记账 / 投资记录
 ;; - 安装 CLI:  pip install beancount fava
 ;; - 主账本放在 ~/org/investment/main.beancount
-;; - 正式交易用下面的 `my/beancount-record-*` 命令直接入账；org-capture 只做信息不完整时的暂存。
+;; - 正式交易/现金流用下面的 `my/beancount-record-*` 命令直接入账；org-capture 只做信息不完整时的暂存。
 ;; - 通过 fava (浏览器 UI) 查看报表: fava ~/org/investment/main.beancount
 (use-package! beancount
   :mode ("\\.beancount\\'" . beancount-mode)
@@ -2162,6 +2182,157 @@ Before 03:00 falls back to the previous day."
     ("511880" :name "银华日利ETF" :commodity "ETF511880"
      :account "Assets:Investment:MoneyMarket:ETF511880" :category "货币基金" :fee-free t))
   "投资账本中的基金/ETF 映射。")
+
+(defconst my/beancount-bank-wealth
+  '(("DYB" :name "招行多月宝" :commodity "WMDYB"
+     :account "Assets:Investment:BankWealth:DYB" :category "银行理财" :fee-free t)
+    ("DQB" :name "招行定期宝" :commodity "WMDQB"
+     :account "Assets:Investment:BankWealth:DQB" :category "银行理财" :fee-free t))
+  "银行理财映射。")
+
+(defconst my/beancount-pension-funds
+  '(("022907" :name "易方达创业板ETF联接Y" :commodity "P022907"
+     :account "Assets:Investment:Pension:Fund022907" :category "个人养老金" :fee-free t)
+    ("022918" :name "南方中证A500ETF联接Y" :commodity "P022918"
+     :account "Assets:Investment:Pension:Fund022918" :category "个人养老金" :fee-free t)
+    ("022945" :name "华夏上证科创板50成分ETF联接Y" :commodity "P022945"
+     :account "Assets:Investment:Pension:Fund022945" :category "个人养老金" :fee-free t)
+    ("022980" :name "天弘中证红利低波动100ETF联接Y" :commodity "P022980"
+     :account "Assets:Investment:Pension:Fund022980" :category "个人养老金" :fee-free t))
+  "个人养老金基金映射。")
+
+(defun my/beancount--bank-wealth-candidates ()
+  "Return completion candidates for bank wealth products."
+  (mapcar (lambda (cell)
+            (let* ((code (car cell))
+                   (fund (cdr cell))
+                   (name (plist-get fund :name)))
+              (cons (format "%s · %s" code name) code)))
+          my/beancount-bank-wealth))
+
+(defun my/beancount--pension-candidates ()
+  "Return completion candidates for pension funds."
+  (mapcar (lambda (cell)
+            (let* ((code (car cell))
+                   (fund (cdr cell))
+                   (name (plist-get fund :name)))
+              (cons (format "%s · %s" code name) code)))
+          my/beancount-pension-funds))
+
+(defun my/beancount--bank-wealth-fund (code)
+  "Return plist for bank wealth CODE."
+  (or (cdr (assoc code my/beancount-bank-wealth))
+      (user-error "Unknown bank wealth product: %s" code)))
+
+(defun my/beancount--pension-fund (code)
+  "Return plist for pension fund CODE."
+  (or (cdr (assoc code my/beancount-pension-funds))
+      (user-error "Unknown pension fund: %s" code)))
+
+(defun my/beancount--append-bank-wealth-entry (entry &optional date code)
+  "Append ENTRY to main ledger for bank wealth products."
+  (find-file (my/beancount-main-file))
+  (goto-char (point-max))
+  (unless (bolp) (insert "\n"))
+  (insert "\n" entry)
+  (save-buffer)
+  (my/beancount-check-main))
+
+(defun my/beancount-record-bank-redeem ()
+  "快速记录招行理财（多月宝/定期宝）赎回。"
+  (interactive)
+  (let* ((date (my/beancount--read-date))
+         (code (let ((candidates (my/beancount--bank-wealth-candidates))
+                     (choice (completing-read "理财产品: " candidates nil t)))
+                 (cdr (assoc choice candidates))))
+         (fund (my/beancount--bank-wealth-fund code))
+         (name (plist-get fund :name))
+         (commodity (plist-get fund :commodity))
+         (account (plist-get fund :account))
+         (amount (my/beancount--read-number-string "赎回金额: "))
+         (shares (my/beancount--read-number-string "赎回份额: "))
+         (price-input (read-string "赎回净值(可空，自动=金额/份额): "))
+         (price (if (string-empty-p price-input)
+                    (my/beancount--normalize-number
+                     (format "%.4f" (/ (my/beancount--number amount)
+                                       (my/beancount--number shares))))
+                  price-input))
+         (cost-price (read-string "成本价(可空): "))
+         (cost-date (unless (string= cost-price "")
+                       (my/beancount--read-date "成本日期: ")))
+         (cost-lot (if (string= cost-price "")
+                        "{}"
+                      (format "{%s CNY, %s}" cost-price cost-date))))
+    (when (string= cost-price "")
+      (user-error "银行理财赎回需要成本价，用来匹配 Beancount lot"))
+    (my/beancount--append-bank-wealth-entry
+     (format "%s * \"赎回 %s (%s)\"\n  product_code: \"%s\"\n  product_name: \"%s\"\n  asset_category: \"银行理财\"\n  trade_price: \"%s CNY\"\n  trade_value: \"%s CNY\"\n  %s  -%s %s %s\n  Assets:Bank:CMB:Cash  %s CNY\n  Income:Investment:CapitalGains\n"
+             date name code code name price amount
+             account shares commodity cost-lot amount)
+     date code)))
+
+(defun my/beancount-record-pension-buy ()
+  "快速记录个人养老金基金定投买入。"
+  (interactive)
+  (let* ((date (my/beancount--read-date))
+         (code (let ((candidates (my/beancount--pension-candidates))
+                     (choice (completing-read "养老金基金: " candidates nil t)))
+                 (cdr (assoc choice candidates))))
+         (fund (my/beancount--pension-fund code))
+         (name (plist-get fund :name))
+         (commodity (plist-get fund :commodity))
+         (account (plist-get fund :account))
+         (amount (my/beancount--read-number-string "定投金额: "))
+         (shares (my/beancount--read-number-string "成交份额: "))
+         (price-input (read-string "成交净值(可空，自动=金额/份额): "))
+         (num-amount (my/beancount--number amount))
+         (num-shares (my/beancount--number shares))
+         (price (if (string-empty-p price-input)
+                    (my/beancount--normalize-number
+                     (format "%.4f" (/ num-amount num-shares)))
+                  price-input))
+         (fee (read-string "手续费: " "0")))
+    (my/beancount--append-bank-wealth-entry
+     (format "%s * \"定投买入 %s (%s)\"\n  fund_code: \"%s\"\n  fund_name: \"%s\"\n  asset_category: \"个人养老金\"\n  trade_price: \"%s CNY\"\n  trade_value: \"%s CNY\"\n  %s  %s %s {{%s CNY}}\n%s  Assets:Bank:CMB:Cash\n"
+             date name code code name price amount
+             account (my/beancount--normalize-number shares) commodity amount
+             (if (and (stringp fee) (> (string-to-number fee) 0))
+                 (format "  Expenses:Investment:Fees  %s CNY\n" fee)
+               ""))
+     date code)))
+
+(defun my/beancount-record-pension-reinvest ()
+  "快速记录个人养老金基金红利再投。"
+  (interactive)
+  (let* ((date (my/beancount--read-date))
+         (code (let ((candidates (my/beancount--pension-candidates))
+                     (choice (completing-read "养老金基金: " candidates nil t)))
+                 (cdr (assoc choice candidates))))
+         (fund (my/beancount--pension-fund code))
+         (name (plist-get fund :name))
+         (commodity (plist-get fund :commodity))
+         (account (plist-get fund :account))
+         (shares (my/beancount--read-number-string "红利再投份额: "))
+         (price-input (read-string "红利再投净值(可空): "))
+         (amount-input (read-string "红利金额(可空，自动=份额*净值): "))
+         (amount (cond
+                  ((not (string-empty-p amount-input))
+                   (my/beancount--normalize-number amount-input))
+                  ((not (string-empty-p price-input))
+                   (format "%.2f" (* (my/beancount--number shares)
+                                     (my/beancount--number price-input))))
+                  (t
+                   (user-error "红利再投需要填写红利金额，或填写净值用于自动计算"))))
+         (price-line (if (string-empty-p price-input)
+                         ""
+                       (format "  trade_price: \"%s CNY\"\n" price-input))))
+    (my/beancount--append-bank-wealth-entry
+     (format "%s * \"红利再投 %s (%s)\"\n  fund_code: \"%s\"\n  fund_name: \"%s\"\n  asset_category: \"个人养老金\"\n%s  trade_value: \"%s CNY\"\n  %s  %s %s {{%s CNY}}\n  Income:Investment:Pension:Dividends  -%s CNY\n"
+             date name code code name
+             price-line amount
+             account (my/beancount--normalize-number shares) commodity amount
+             amount)
+     date code)))
 
 (defun my/beancount-main-file ()
   "Return the main investment Beancount ledger path."
@@ -2208,6 +2379,10 @@ Before 03:00 falls back to the previous day."
 (defun my/beancount--read-date (&optional prompt)
   "Read a Beancount date string."
   (read-string (or prompt "交易日期: ") (format-time-string "%Y-%m-%d")))
+
+(defun my/beancount--safe-string (value)
+  "Return VALUE trimmed and safe for a Beancount quoted string."
+  (replace-regexp-in-string "\"" "'" (string-trim value)))
 
 (defun my/beancount--insert-before-first-entry (text)
   "Insert TEXT before the first price/transaction/balance entry, else at EOF."
@@ -2265,6 +2440,47 @@ Before 03:00 falls back to the previous day."
      nil
      (lambda (_) "*bean-check main.beancount*"))))
 
+(defun my/beancount-record-cmb-cashflow ()
+  "快速记录招行现金账户的外部流入或流出。"
+  (interactive)
+  (let* ((date (my/beancount--read-date))
+         (direction (completing-read "方向: " '("流入" "流出") nil t))
+         (amount (my/beancount--read-number-string "金额: "))
+         (summary (my/beancount--safe-string (read-string "摘要: ")))
+         (note (my/beancount--safe-string (read-string "备注(可空): ")))
+         (title (if (string-empty-p summary)
+                    (format "招行现金%s" direction)
+                  (format "招行现金%s %s" direction summary)))
+         (cash-posting (if (string= direction "流入")
+                           (format "  Assets:Bank:CMB:Cash  %s CNY\n" amount)
+                         (format "  Assets:Bank:CMB:Cash  -%s CNY\n" amount)))
+         (counter-posting (if (string= direction "流入")
+                              "  Income:ExternalFunding\n"
+                            "  Expenses:ExternalOutflow\n"))
+         (note-line (if (string-empty-p note)
+                        ""
+                      (format "  note: \"%s\"\n" note))))
+    (my/beancount--append-entry
+     (format "%s * \"%s\"\n  cashflow_type: \"%s\"\n  trade_value: \"%s CNY\"\n%s%s%s"
+             date title direction amount note-line cash-posting counter-posting))))
+
+(defun my/beancount-record-broker-transfer ()
+  "快速记录招行现金转入股票账户。"
+  (interactive)
+  (let* ((date (my/beancount--read-date))
+         (amount (my/beancount--read-number-string "转入金额: "))
+         (summary (my/beancount--safe-string (read-string "摘要: ")))
+         (note (my/beancount--safe-string (read-string "备注(可空): ")))
+         (title (if (string-empty-p summary)
+                    "招行现金转入股票账户"
+                  (format "招行现金转入股票账户 %s" summary)))
+         (note-line (if (string-empty-p note)
+                        ""
+                      (format "  note: \"%s\"\n" note))))
+    (my/beancount--append-entry
+     (format "%s * \"%s\"\n  transfer_type: \"招行现金->股票账户\"\n  trade_value: \"%s CNY\"\n%s  Assets:Investment:Broker:Cash  %s CNY\n  Assets:Bank:CMB:Cash          -%s CNY\n"
+             date title amount note-line amount amount))))
+
 (defun my/beancount-record-buy ()
   "快速记录一笔 ETF/基金买入。"
   (interactive)
@@ -2280,7 +2496,7 @@ Before 03:00 falls back to the previous day."
          (amount (* (my/beancount--number price) (my/beancount--number shares)))
          (fee (if (plist-get fund :fee-free) 0 (* amount 0.00005))))
     (my/beancount--append-entry
-     (format "%s * \"买入 %s (%s)\"\n  fund_code: \"%s\"\n  fund_name: \"%s\"\n  asset_category: \"%s\"\n  trade_price: \"%s CNY\"\n  trade_amount: \"%.2f CNY\"\n  %s  %s %s {{%.2f CNY}}\n%s  Equity:Investment:Funding\n"
+     (format "%s * \"买入 %s (%s)\"\n  fund_code: \"%s\"\n  fund_name: \"%s\"\n  asset_category: \"%s\"\n  trade_price: \"%s CNY\"\n  trade_value: \"%.2f CNY\"\n  %s  %s %s {{%.2f CNY}}\n%s  Assets:Investment:Broker:Cash\n"
              date name code code name category price amount
              account shares commodity amount
              (if (> fee 0)
@@ -2300,12 +2516,18 @@ Before 03:00 falls back to the previous day."
          (category (plist-get fund :category))
          (price (my/beancount--read-number-string "成交价格: "))
          (shares (my/beancount--read-number-string "成交份额: "))
+         (cost-price (read-string "成本价(可空，例 100.427): "))
+         (cost-date (unless (string= cost-price "")
+                      (my/beancount--read-date "成本日期: ")))
+         (cost-lot (if (string= cost-price "")
+                       "{}"
+                     (format "{%s CNY, %s}" cost-price cost-date)))
          (amount (* (my/beancount--number price) (my/beancount--number shares)))
          (fee (if (plist-get fund :fee-free) 0 (* amount 0.00005))))
     (my/beancount--append-entry
-     (format "%s * \"卖出 %s (%s)\"\n  fund_code: \"%s\"\n  fund_name: \"%s\"\n  asset_category: \"%s\"\n  trade_price: \"%s CNY\"\n  trade_amount: \"%.2f CNY\"\n  %s  -%s %s {} @ %s CNY\n%s  Equity:Investment:Funding\n"
+     (format "%s * \"卖出 %s (%s)\"\n  fund_code: \"%s\"\n  fund_name: \"%s\"\n  asset_category: \"%s\"\n  trade_price: \"%s CNY\"\n  trade_value: \"%.2f CNY\"\n  %s  -%s %s %s @ %s CNY\n%s  Assets:Investment:Broker:Cash\n"
              date name code code name category price amount
-             account shares commodity price
+             account shares commodity cost-lot price
              (if (> fee 0)
                  (format "  Expenses:Investment:Fees  %.4f CNY\n" fee)
                ""))
@@ -2330,7 +2552,9 @@ Before 03:00 falls back to the previous day."
          (fund (my/beancount--fund code))
          (commodity (plist-get fund :commodity))
          (account (plist-get fund :account))
-         (shares (my/beancount--read-number-string "持有份额: ")))
+         (shares (my/beancount--read-number-string "持有份额/股数(不是基金代码): ")))
+    (when (string= shares code)
+      (user-error "这里要填持有份额/股数，不是基金代码；%s 当前应填实际剩余份额" code))
     (my/beancount--append-entry
      (format "%s balance %s %s %s\n" date account shares commodity)
      date code)))
@@ -2343,13 +2567,26 @@ Before 03:00 falls back to the previous day."
       (beancount-fava)
     (start-process "fava" "*fava*" "fava" (my/beancount-main-file))))
 
+(defun my/beancount-python-executable ()
+  "Return a Python executable with the investment script dependencies."
+  (let ((candidates (list (expand-file-name "scoop/apps/python311/current/python.exe" "~")
+                          (expand-file-name "scoop/apps/python314/current/python.exe" "~")
+                          (executable-find "python"))))
+    (catch 'found
+      (dolist (candidate candidates)
+        (when (and candidate (file-executable-p candidate))
+          (throw 'found candidate)))
+      "python")))
+
 (defun my/beancount-update-prices-latest ()
   "抓取最近两周 ETF 收盘价，更新 prices.beancount。"
   (interactive)
   (let* ((script (expand-file-name "investment/scripts/update_prices.py" org-directory))
          (default-directory (expand-file-name "investment/" org-directory)))
     (compilation-start
-     (format "python \"%s\" latest" script)
+     (format "%s %s latest"
+             (shell-quote-argument (my/beancount-python-executable))
+             (shell-quote-argument script))
      nil
      (lambda (_) "*beancount update prices latest*"))))
 
@@ -2359,21 +2596,29 @@ Before 03:00 falls back to the previous day."
   (let* ((script (expand-file-name "investment/scripts/update_prices.py" org-directory))
          (default-directory (expand-file-name "investment/" org-directory)))
     (compilation-start
-     (format "python \"%s\" history" script)
+     (format "%s %s history"
+             (shell-quote-argument (my/beancount-python-executable))
+             (shell-quote-argument script))
      nil
      (lambda (_) "*beancount rebuild prices history*"))))
 
 (map! :leader
-      (:prefix ("n i" . "investment")
-       :desc "Beancount buy"        "b" #'my/beancount-record-buy
-       :desc "Beancount sell"       "s" #'my/beancount-record-sell
-       :desc "Beancount price"      "p" #'my/beancount-record-price
-       :desc "Beancount balance"    "B" #'my/beancount-record-balance
-       :desc "Update prices latest" "u" #'my/beancount-update-prices-latest
-       :desc "Rebuild price history" "H" #'my/beancount-rebuild-prices-history
-       :desc "Open ledger"          "o" #'my/open-beancount-main
-       :desc "Check ledger"         "c" #'my/beancount-check-main
-       :desc "Fava"                 "f" #'my/beancount-fava-main))
+      (:prefix ("n i" . "investment · 投资")
+       :desc "Beancount buy · 买入"                  "b" #'my/beancount-record-buy
+       :desc "Beancount sell · 卖出"                 "s" #'my/beancount-record-sell
+       :desc "Beancount price · 记录价格"            "p" #'my/beancount-record-price
+       :desc "Beancount balance · 持仓校验"          "B" #'my/beancount-record-balance
+       :desc "Update prices latest · 更新近期价格"   "u" #'my/beancount-update-prices-latest
+       :desc "Rebuild price history · 重建历史价格"  "H" #'my/beancount-rebuild-prices-history
+       :desc "Open ledger · 打开账本"                "o" #'my/open-beancount-main
+       :desc "Check ledger · 检查账本"               "c" #'my/beancount-check-main
+       :desc "Fava · 打开报表"                       "f" #'my/beancount-fava-main
+       :desc "Bank wealth redeem · 银行理财赎回"     "r" #'my/beancount-record-bank-redeem
+       :desc "Pension fund buy · 养老金基金买入"     "y" #'my/beancount-record-pension-buy
+       :desc "Pension reinvest · 养老金红利再投"     "R" #'my/beancount-record-pension-reinvest
+       :desc "Pension reinvest · 养老金红利再投"     "Y" #'my/beancount-record-pension-reinvest
+       :desc "CMB cashflow · 招行现金流入流出"       "C" #'my/beancount-record-cmb-cashflow
+       :desc "CMB to broker · 招行转入股票账户"      "t" #'my/beancount-record-broker-transfer))
 #+end_src
 
 * Apps
@@ -2411,7 +2656,26 @@ identical to what `doom.ps1' does on Windows."
         elfeed-curl-max-connections 4)
   (setq-default elfeed-search-filter "@1-month-ago +unread")
   (add-hook 'elfeed-search-mode-hook #'elfeed-update)
-  (add-hook 'elfeed-show-mode-hook (lambda () (setq-local shr-use-fonts nil)))
+
+  (defun my/elfeed-show-buffer-setup ()
+    "Apply local display settings for Elfeed article buffers."
+    (setq-local shr-use-fonts nil)
+    (setq-local line-spacing 0))
+
+  (defun my/elfeed-select-show-window (&rest _)
+    "Keep focus in the Elfeed article pane after show-buffer navigation."
+    (when-let ((window (cl-find-if
+                        (lambda (window)
+                          (with-current-buffer (window-buffer window)
+                            (derived-mode-p 'elfeed-show-mode)))
+                        (window-list nil 'no-minibuf))))
+      (select-window window)))
+
+  (add-hook 'elfeed-show-mode-hook #'my/elfeed-show-buffer-setup)
+  (unless (advice-member-p #'my/elfeed-select-show-window 'elfeed-show-next)
+    (advice-add 'elfeed-show-next :after #'my/elfeed-select-show-window))
+  (unless (advice-member-p #'my/elfeed-select-show-window 'elfeed-show-prev)
+    (advice-add 'elfeed-show-prev :after #'my/elfeed-select-show-window))
 
   ;; Defensive fix: elfeed-db corruption
   (defun my/elfeed-db-sanitize-before-save (&rest _)
@@ -2737,7 +3001,7 @@ identical to what `doom.ps1' does on Windows."
 
       ;; Toggle / utilities
       (:prefix ("t" . "toggle")
-       :desc "Focus writing"         "F" #'my/focus-writing-toggle)
+       ;; :desc "Focus writing"         "F" #'my/focus-writing-toggle)
 
       :desc "Visual undo tree" "u" #'vundo
       :desc "org-noter"        "N" #'org-noter)
