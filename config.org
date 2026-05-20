@@ -68,7 +68,7 @@
 
        :app
        (calendar +org-gcal)
-       (rss +org)
+       (rss +org +youtube)
 
        :config
        literate
@@ -130,7 +130,7 @@
 ;; 可视化 undo 树, 比 Doom 默认 undo-fu 更直观
 (package! vundo)
 
-;; 高速增量拼写检查 (Windows 需要 enchant: scoop install enchant)
+;; 高速增量拼写检查 (Windows/MSYS2 需要 pkg-config 能找到 enchant-2)
 (package! jinx)
 
 ;; Agenda 视图按组分块, 比堆 tags-todo 漂亮且易维护
@@ -141,6 +141,9 @@
 
 ;; 强大的 org 查询语言, 比 org-agenda-custom-commands 灵活
 (package! org-ql)
+
+;; Elfeed Tube live transcript integration with mpv.
+(package! elfeed-tube-mpv :pin "2d7251d8363661f7bae3fd6b27ef88edc65d25ed")
 
 ;; 复式记账 / 投资记录 (配套 CLI: pip install beancount fava)
 (package! beancount
@@ -401,6 +404,27 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
   :commands vundo
   :config
   (setq vundo-glyph-alist vundo-unicode-symbols))
+#+end_src
+** evil-escape
+#+begin_src emacs-lisp
+(defun my/evil-escape-only-in-insert-state ()
+  "只有在 evil insert state 时才允许 evil-escape 生效。"
+  (not (evil-insert-state-p)))
+
+(after! evil-escape
+  (setq evil-escape-key-sequence "jk"
+        ;; 默认就是 0.1；对 jk 来说这个值通常比较合适，也更不容易误触
+        evil-escape-delay 0.10
+        ;; 只允许 jk，不允许 kj，减少误触发
+        evil-escape-unordered-key-sequence nil)
+
+  ;; 在终端类 buffer 里禁用
+  (dolist (mode '(vterm-mode term-mode))
+    (add-to-list 'evil-escape-excluded-major-modes mode))
+
+  ;; 只在 insert state 生效
+  (add-to-list 'evil-escape-inhibit-functions
+               #'my/evil-escape-only-in-insert-state))
 #+end_src
 
 * Org-mode
@@ -773,6 +797,8 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
        :and (:todo "TODO" :tag "personal"))
       (:name "📋 Backlog · 学习"
        :and (:todo "TODO" :tag "learning"))
+      (:name "📋 Backlog · Emacs"
+       :and (:todo "TODO" :tag "emacs"))
       (:name "📋 Backlog · 未分类"
        :and (:todo "TODO"
              :not (:tag ("work" "personal" "learning"))))
@@ -1910,11 +1936,15 @@ denote-dired directory, matching case-insensitively."
 #+begin_src emacs-lisp
 ;; jinx: 基于 enchant 的高速增量拼写检查
 ;; - 比 flyspell 快一个数量级, 只检查可见区域
-;; - Windows 安装依赖: scoop install enchant
+;; - Windows/MSYS2 依赖: pkg-config/pkgconf 能找到 enchant-2
+;;   也就是 `pkg-config --exists enchant-2` 返回 0
 ;; - 首次使用: M-x jinx-languages 选择字典 (如 en_US)
 ;; - 在错词上 M-$ 显示候选
 ;; - 默认不在 org-mode 开启 (中英混排误报较多), 想开启在 hook 里加上
+;; - Windows 上 jinx-mod.dll + enchant 已触发过 Emacs native crash,
+;;   所以这里不在 Windows 自动启用。
 (use-package! jinx
+  :if (not (featurep :system 'windows))
   :hook ((markdown-mode . jinx-mode))
   :bind (("M-$"   . jinx-correct)
          ("C-M-$" . jinx-languages)))
@@ -1994,7 +2024,7 @@ Before 03:00 falls back to the previous day."
   (insert (my/get-weather)))
 
 (defun my/denote-journal--insert-weather-async (target-file)
-  "异步获取天气并写入 TARGET-FILE 末尾, 避免新建 journal 时卡顿。"
+  "异步获取天气并写入 TARGET-FILE 顶部, 避免新建 journal 时卡顿。"
   (let ((buf (generate-new-buffer " *weather*")))
     (make-process
      :name "weather-fetch"
@@ -2012,13 +2042,18 @@ Before 03:00 falls back to the previous day."
                       (not (string-empty-p output)))
              (with-current-buffer (find-file-noselect target-file)
                (save-excursion
-                 (goto-char (point-max))
-                 (unless (bolp) (insert "\n"))
-                 (insert "\n* 天气\n" output "\n"))
+                 (goto-char (point-min))
+                 (unless (re-search-forward "^\\* 天气\\(?:[ \t].*\\)?$" nil t)
+                   (goto-char (point-min))
+                   (while (looking-at-p "^#\\+")
+                     (forward-line 1))
+                   (while (looking-at-p "^[ \t]*$")
+                     (forward-line 1))
+                   (insert "* 天气\n" output "\n\n")))
                (save-buffer)))))))))
 
 (defun my/denote-journal-auto-weather ()
-  "新建 journal 文件时异步追加天气, 不阻塞 capture 流程。"
+  "新建 journal 文件时异步插入顶部天气, 不阻塞 capture 流程。"
   (when (and (buffer-file-name)
              (string-match-p "__journal" (buffer-file-name)))
     (my/denote-journal--insert-weather-async (buffer-file-name))))
@@ -2844,7 +2879,7 @@ identical to what `doom.ps1' does on Windows."
         (message "No link found."))))
 
   (map! :map elfeed-search-mode-map
-        :desc "Filter by feed"      "F" #'my/elfeed-search-filter-by-feed
+        :desc "Filter by feed"      "C-c f" #'my/elfeed-search-filter-by-feed
         :desc "Browse feed homepage" "B" #'my/elfeed-browse-homepage
         :desc "Toggle unread"       "R" #'my/elfeed-toggle-unread
         :desc "Play with mpv"       "v" #'my/elfeed-play-with-mpv)
@@ -2858,6 +2893,19 @@ identical to what `doom.ps1' does on Windows."
   :config
   (elfeed-org)
   (setq rmh-elfeed-org-files (list (expand-file-name "~/org/notes/20260101T000010--elfeed__emacs_index.org"))))
+
+(after! elfeed-goodies
+  (setq elfeed-goodies/entry-pane-position 'right
+        elfeed-goodies/entry-pane-size 0.55
+        elfeed-goodies/switch-to-entry t
+        elfeed-goodies/feed-source-column-width 28
+        elfeed-goodies/tag-column-width 18))
+
+(after! elfeed-tube
+  (setq elfeed-tube-auto-fetch-p t
+        elfeed-tube-auto-save-p nil
+        elfeed-tube-fields '(duration captions chapters description)
+        elfeed-tube-backend 'yt-dlp))
 #+end_src
 
 ** Agent-shell
@@ -3001,7 +3049,8 @@ identical to what `doom.ps1' does on Windows."
 
       ;; Toggle / utilities
       (:prefix ("t" . "toggle")
-       ;; :desc "Focus writing"         "F" #'my/focus-writing-toggle)
+       ;; :desc "Focus writing"         "F" #'my/focus-writing-toggle
+       )
 
       :desc "Visual undo tree" "u" #'vundo
       :desc "org-noter"        "N" #'org-noter)
