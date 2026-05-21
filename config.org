@@ -352,14 +352,16 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
 #+end_src
 
 ** Fonts
-拉丁用 Ubuntu Mono, 汉字用 Sarasa Mono SC。
+方案 1: 拉丁用 Ubuntu Mono, 汉字用 Sarasa Mono SC。
+方案 2: 拉丁用 Jetbrains Mono, 汉字用 Sarasa Mono SC。
 #+begin_src emacs-lisp
 ;; Doom 自带的字体变量配置
-(setq doom-font (font-spec :family "Ubuntu Mono" :size 22)
-      doom-big-font (font-spec :family "Ubuntu Mono" :size 36)
+(setq doom-font (font-spec :family "Ubuntu Mono" :size 18)
+      doom-big-font (font-spec :family "Jetbrains Mono" :size 36)
       doom-serif-font doom-font
       doom-symbol-font (font-spec :family "Sarasa Mono SC")
-      doom-variable-pitch-font (font-spec :family "Ubuntu Mono" :weight 'extra-bold))
+      ;; doom-variable-pitch-font (font-spec :family "Ubuntu Mono" :weight 'bold))
+      doom-variable-pitch-font (font-spec :family "Jetbrains Mono" :weight 'bold))
 (setq use-default-font-for-symbols nil)
 
 ;; Doom 的字体加载顺序问题: 必须在 after-setting-font-hook 里设, 否则被覆盖
@@ -2277,7 +2279,7 @@ Before 03:00 falls back to the previous day."
   "快速记录招行理财（多月宝/定期宝）赎回。"
   (interactive)
   (let* ((date (my/beancount--read-date))
-         (code (let ((candidates (my/beancount--bank-wealth-candidates))
+         (code (let* ((candidates (my/beancount--bank-wealth-candidates))
                      (choice (completing-read "理财产品: " candidates nil t)))
                  (cdr (assoc choice candidates))))
          (fund (my/beancount--bank-wealth-fund code))
@@ -2292,13 +2294,13 @@ Before 03:00 falls back to the previous day."
                      (format "%.4f" (/ (my/beancount--number amount)
                                        (my/beancount--number shares))))
                   price-input))
-         (cost-price (read-string "成本价(可空): "))
-         (cost-date (unless (string= cost-price "")
-                       (my/beancount--read-date "成本日期: ")))
-         (cost-lot (if (string= cost-price "")
-                        "{}"
-                      (format "{%s CNY, %s}" cost-price cost-date))))
-    (when (string= cost-price "")
+         (cost-price-raw (read-string "成本价(必填): "))
+         (cost-price (my/beancount--normalize-number cost-price-raw))
+         (cost-date-input (read-string "成本日期(可空，留空仅按成本价匹配): "))
+         (cost-lot (if (string-empty-p cost-date-input)
+                       (format "{%s CNY}" cost-price)
+                     (format "{%s CNY, %s}" cost-price cost-date-input))))
+    (when (string-empty-p cost-price)
       (user-error "银行理财赎回需要成本价，用来匹配 Beancount lot"))
     (my/beancount--append-bank-wealth-entry
      (format "%s * \"赎回 %s (%s)\"\n  product_code: \"%s\"\n  product_name: \"%s\"\n  asset_category: \"银行理财\"\n  trade_price: \"%s CNY\"\n  trade_value: \"%s CNY\"\n  %s  -%s %s %s\n  Assets:Bank:CMB:Cash  %s CNY\n  Income:Investment:CapitalGains\n"
@@ -2310,7 +2312,7 @@ Before 03:00 falls back to the previous day."
   "快速记录个人养老金基金定投买入。"
   (interactive)
   (let* ((date (my/beancount--read-date))
-         (code (let ((candidates (my/beancount--pension-candidates))
+         (code (let* ((candidates (my/beancount--pension-candidates))
                      (choice (completing-read "养老金基金: " candidates nil t)))
                  (cdr (assoc choice candidates))))
          (fund (my/beancount--pension-fund code))
@@ -2340,7 +2342,7 @@ Before 03:00 falls back to the previous day."
   "快速记录个人养老金基金红利再投。"
   (interactive)
   (let* ((date (my/beancount--read-date))
-         (code (let ((candidates (my/beancount--pension-candidates))
+         (code (let* ((candidates (my/beancount--pension-candidates))
                      (choice (completing-read "养老金基金: " candidates nil t)))
                  (cdr (assoc choice candidates))))
          (fund (my/beancount--pension-fund code))
