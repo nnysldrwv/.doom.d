@@ -1348,11 +1348,14 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
                        (string-match-p "\\.org\\'" buffer-file-name))
               (my/org-sync-debounced))))
 
-;; 2. 退出 Emacs 前同步一次
-(add-hook 'kill-emacs-hook
-          (lambda ()
-            (call-process "powershell" nil nil nil "-NoProfile" "-File"
-                          (expand-file-name "~/org/.src/org-sync-runner.ps1"))))
+;; 2. 退出 Emacs 时后台触发一次同步（不阻塞退出）
+(defun my/org-sync-on-exit ()
+  (ignore-errors
+    (let ((proc (start-process "org-sync-exit" nil
+                               "powershell" "-NoProfile" "-File"
+                               (expand-file-name "~/org/.src/org-sync-runner.ps1"))))
+      (set-process-query-on-exit-flag proc nil))))
+(add-hook 'kill-emacs-hook #'my/org-sync-on-exit)
 
 ;; 3. 手动命令
 (defun my/org-sync-now ()
@@ -1360,6 +1363,22 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
   (async-shell-command
    (format "powershell -NoProfile -File %s"
            (expand-file-name "~/org/.src/org-sync-runner.ps1"))))
+#+end_src
+
+** Pcache compatibility (Emacs 31)
+#+begin_src emacs-lisp
+(after! pcache
+  ;; pcache 0.5.1 uses obsolete `:slot' style in `oset', which causes
+  ;; noisy warnings on Emacs 31 during kill-emacs hooks.
+  (cl-defmethod pcache-save ((cache pcache-repository) &optional force)
+    (let ((timestamp (oref cache timestamp))
+          (delay (oref cache save-delay))
+          (time (float-time (current-time))))
+      (when (or force (> time (+ timestamp delay)))
+        (oset cache timestamp time)
+        (oset cache version
+              (oref-default (eieio-object-class cache) version-constant))
+        (eieio-persistent-save cache)))))
 #+end_src
 
 * Org Clipboard & DnD
@@ -2714,13 +2733,20 @@ identical to what `doom.ps1' does on Windows."
   (unless (advice-member-p #'my/elfeed-select-show-window 'elfeed-show-prev)
     (advice-add 'elfeed-show-prev :after #'my/elfeed-select-show-window))
 
-  ;; Defensive fix: elfeed-db corruption
-  (defun my/elfeed-db-sanitize-before-save (&rest _)
-    (unless (and elfeed-db (plistp elfeed-db))
-      (message "elfeed-db is corrupt (%S), reloading from disk..." elfeed-db)
-      (setf elfeed-db nil)
-      (elfeed-db-load)))
-  (advice-add 'elfeed-db-save :before #'my/elfeed-db-sanitize-before-save)
+  ;; Avoid expensive reload/save on exit when Elfeed DB is not initialized.
+  (defun my/elfeed-db-save-if-initialized (orig-fn &rest args)
+    (cond
+     ((null elfeed-db)
+      (message "Skip elfeed-db-save: elfeed-db is not initialized in this session."))
+     ((not (plistp elfeed-db))
+      (message "Skip elfeed-db-save: invalid elfeed-db (%S)." elfeed-db))
+     (t
+      (apply orig-fn args))))
+  (when (advice-member-p #'my/elfeed-db-sanitize-before-save 'elfeed-db-save)
+    (advice-remove 'elfeed-db-save #'my/elfeed-db-sanitize-before-save))
+  (unless (advice-member-p #'my/elfeed-db-save-if-initialized 'elfeed-db-save)
+    (advice-add 'elfeed-db-save :around #'my/elfeed-db-save-if-initialized))
+  (remove-hook 'kill-emacs-hook #'elfeed-db-gc-safe)
 
   (defvar my/elfeed-feed-history nil
     "Minibuffer history for feed selection commands.")
