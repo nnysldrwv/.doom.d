@@ -65,6 +65,7 @@
        python                         ; 保留以支持 babel (去掉 +lsp)
        sh                             ; babel 经常跑 shell
        yaml                           ; 轻量, 写 frontmatter/CI 有用
+       latex
 
        :app
        (calendar +org-gcal)
@@ -148,6 +149,8 @@
 ;; 复式记账 / 投资记录 (配套 CLI: pip install beancount fava)
 (package! beancount
   :recipe (:host github :repo "beancount/beancount-mode"))
+
+(package! org-fragtog)
 #+end_src
 
 ** Speed (gcmh)
@@ -299,7 +302,7 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
 * Appearance
 ** Theme & UI
 #+begin_src emacs-lisp
-(setq doom-theme 'ef-light)
+(setq doom-theme 'ef-spring)
 
 (use-package! doom-modeline
   :custom
@@ -1380,6 +1383,46 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
               (oref-default (eieio-object-class cache) version-constant))
         (eieio-persistent-save cache)))))
 #+end_src
+** latex
+#+begin_src emacs-lisp
+;; LaTeX previews
+(use-package! org-fragtog
+  :after org
+  :hook
+  (org-mode . org-fragtog-mode)
+  :config
+  (setq org-format-latex-header "\\documentclass{article}
+  \\usepackage[usenames]{color}
+  \\usepackage{xeCJK}
+  \\setCJKmainfont{KingHwa_OldSong}
+  \\usepackage{amsmath,amssymb}
+  \\usepackage{unicode-math}
+  \\setmathfont{Latin Modern Math}
+  [PACKAGES]
+  [DEFAULT-PACKAGES]
+  \\pagestyle{empty}")
+  (setq org-format-latex-options
+        (plist-put org-format-latex-options :scale 2))
+  (setq org-format-latex-options
+        (plist-put org-format-latex-options :foreground 'default))
+  (setq org-format-latex-options
+        (plist-put org-format-latex-options :background 'default))
+  ;; 用 xelatex + dvisvgm 生成 SVG，暗色主题下显示更好
+  (setq org-preview-latex-default-process 'dvisvgm)
+  ;; 覆盖 dvisvgm 流程：xelatex -no-pdf 生成 xdv，dvisvgm 转 svg
+  (setf (alist-get 'dvisvgm org-preview-latex-process-alist)
+        '(:programs ("xelatex" "dvisvgm")
+          :description "xelatex > xdv > svg"
+          :message "you need to install xelatex and dvisvgm."
+          :image-input-type "xdv"
+          :image-output-type "svg"
+          ;; :image-size-adjust (1.7 . 1.5)
+          :image-size-adjust (0.7 . 0.7)
+          :latex-compiler ("xelatex -interaction nonstopmode -no-pdf -output-directory %o %f")
+          :image-converter ("dvisvgm %f --no-fonts --exact-bbox --scale=%S -o %O")))
+  ;; 打开 org 文件时自动渲染所有 LaTeX 公式
+  (setq org-startup-with-latex-preview t))
+#+end_src
 
 * Org Clipboard & DnD
 ** Screenshot / rich paste helpers
@@ -2229,12 +2272,6 @@ Before 03:00 falls back to the previous day."
      :account "Assets:Investment:Nasdaq100:ETF513100" :category "纳指100")
     ("513870" :name "富国纳斯达克100ETF(QDII)" :commodity "ETF513870"
      :account "Assets:Investment:Nasdaq100:ETF513870" :category "纳指100")
-    ("563510" :name "易方达中证A500红利低波动ETF" :commodity "ETF563510"
-     :account "Assets:Investment:DividendLowVol:ETF563510" :category "红利低波")
-    ("159209" :name "招商中证全指红利质量ETF" :commodity "ETF159209"
-     :account "Assets:Investment:DividendQuality:ETF159209" :category "红利质量")
-    ("159307" :name "红利低波100ETF" :commodity "ETF159307"
-     :account "Assets:Investment:DividendLowVol:ETF159307" :category "红利低波")
     ("511880" :name "银华日利ETF" :commodity "ETF511880"
      :account "Assets:Investment:MoneyMarket:ETF511880" :category "货币基金" :fee-free t))
   "投资账本中的基金/ETF 映射。")
@@ -2414,6 +2451,33 @@ Before 03:00 falls back to the previous day."
          (choice (completing-read "基金代码: " candidates nil t)))
     (cdr (assoc choice candidates))))
 
+(defun my/beancount--price-candidates ()
+  "Return completion candidates for price capture (funds + bank wealth)."
+  (append
+   (mapcar (lambda (cell)
+             (let* ((code (car cell))
+                    (fund (cdr cell))
+                    (name (plist-get fund :name))
+                    (commodity (plist-get fund :commodity)))
+               (cons (format "基金 %s · %s" code name)
+                     (list :type 'fund :code code :commodity commodity))))
+           my/beancount-funds)
+   (mapcar (lambda (cell)
+             (let* ((code (car cell))
+                    (fund (cdr cell))
+                    (name (plist-get fund :name))
+                    (commodity (plist-get fund :commodity)))
+               (cons (format "理财 %s · %s" code name)
+                     (list :type 'bank-wealth :code code :commodity commodity))))
+           my/beancount-bank-wealth)))
+
+(defun my/beancount--read-price-target ()
+  "Read an instrument target for price capture."
+  (let* ((candidates (my/beancount--price-candidates))
+         (choice (completing-read "价格标的: " candidates nil t)))
+    (or (cdr (assoc choice candidates))
+        (user-error "Unknown price target: %s" choice))))
+
 (defun my/beancount--fund (code)
   "Return plist for CODE."
   (or (cdr (assoc code my/beancount-funds))
@@ -2578,27 +2642,31 @@ Before 03:00 falls back to the previous day."
          (cost-lot (if (string= cost-price "")
                        "{}"
                      (format "{%s CNY, %s}" cost-price cost-date)))
-         (amount (* (my/beancount--number price) (my/beancount--number shares)))
-         (fee (if (plist-get fund :fee-free) 0 (* amount 0.00005))))
+         (trade-value (* (my/beancount--number price) (my/beancount--number shares)))
+         (fee (if (plist-get fund :fee-free) 0 (* trade-value 0.00005)))
+         (cash-received (- trade-value fee)))
     (my/beancount--append-entry
-     (format "%s * \"卖出 %s (%s)\"\n  fund_code: \"%s\"\n  fund_name: \"%s\"\n  asset_category: \"%s\"\n  trade_price: \"%s CNY\"\n  trade_value: \"%.2f CNY\"\n  %s  -%s %s %s @ %s CNY\n%s  Assets:Investment:Broker:Cash\n"
-             date name code code name category price amount
+     (format "%s * \"卖出 %s (%s)\"\n  fund_code: \"%s\"\n  fund_name: \"%s\"\n  asset_category: \"%s\"\n  trade_price: \"%s CNY\"\n  trade_value: \"%.2f CNY\"\n  %s  -%s %s %s @ %s CNY\n%s  Assets:Investment:Broker:Cash  %.2f CNY\n  Income:Investment:CapitalGains\n"
+             date name code code name category price trade-value
              account shares commodity cost-lot price
              (if (> fee 0)
-                 (format "  Expenses:Investment:Fees  %.4f CNY\n" fee)
-               ""))
+                 (format "  Expenses:Investment:Fees  %.2f CNY\n" fee)
+               "")
+             cash-received)
      date code)))
 
 (defun my/beancount-record-price ()
-  "快速记录一条 ETF/基金净值 price。"
+  "快速记录一条 ETF/基金/理财净值 price。"
   (interactive)
   (let* ((date (my/beancount--read-date "净值日期: "))
-         (code (my/beancount--read-fund-code))
-         (commodity (plist-get (my/beancount--fund code) :commodity))
-         (price (my/beancount--read-number-string "当前净值: ")))
+         (target (my/beancount--read-price-target))
+         (commodity (plist-get target :commodity))
+         (price (my/beancount--read-number-string "当前净值: "))
+         (ensure-code (when (eq (plist-get target :type) 'fund)
+                        (plist-get target :code))))
     (my/beancount--append-entry
      (format "%s price %s %s CNY\n" date commodity price)
-     date code)))
+     date ensure-code)))
 
 (defun my/beancount-record-balance ()
   "快速记录一条 ETF/基金持仓 balance 校验。"
