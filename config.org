@@ -359,7 +359,8 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
 方案 2: 拉丁用 Jetbrains Mono, 汉字用 Sarasa Mono SC。
 #+begin_src emacs-lisp
 ;; Doom 自带的字体变量配置
-(setq doom-font (font-spec :family "Ubuntu Mono" :size 18)
+;; (setq doom-font (font-spec :family "Ubuntu Mono" :size 18)
+(setq doom-font (font-spec :family "Jetbrains Mono" :size 18)
       doom-big-font (font-spec :family "Jetbrains Mono" :size 36)
       doom-serif-font doom-font
       doom-symbol-font (font-spec :family "Sarasa Mono SC")
@@ -1045,9 +1046,8 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
            "* TODO 补 Beancount 交易：%^{动作|买入|卖出|分红|手续费} %^{标的/代码}\n:PROPERTIES:\n:CREATED: %U\n:交易日期: %^{交易日期}\n:成交价格: %^{成交价格}\n:成交份额: %^{成交份额}\n:成交金额: %^{成交金额}\n:手续费: %^{手续费|0}\n:END:\n%?"
            :empty-lines 1)
           ;; 银行理财赎回：SPC n i r
-          ;; 个人养老金定投买入：SPC n i y；红利再投：SPC n i R/Y
-          ;; 招行现金流入/流出：SPC n i C
-          ;; 招行现金转入股票账户：SPC n i t
+          ;; 个人养老金定投买入：SPC n i y
+          ;; 招行转入/转出：SPC n i C
           ("I" "Investment · 快捷操作")
           ("Ir" "招行理财赎回" plain
            (function my/beancount-record-bank-redeem)
@@ -1055,14 +1055,8 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
           ("Iy" "养老金基金定投" plain
            (function my/beancount-record-pension-buy)
            "" :immediate-finish t)
-          ("IR" "养老金红利再投" plain
-           (function my/beancount-record-pension-reinvest)
-           "" :immediate-finish t)
-          ("Ic" "招行现金流入/流出" plain
+          ("Ic" "招行转入/转出" plain
            (function my/beancount-record-cmb-cashflow)
-           "" :immediate-finish t)
-          ("It" "招行现金转入股票账户" plain
-           (function my/beancount-record-broker-transfer)
            "" :immediate-finish t))))
 #+end_src
 
@@ -1872,7 +1866,7 @@ Prompts for denote keywords interactively."
 (use-package! denote
   :demand t
   :init
-  (make-directory (expand-file-name "denote/" org-directory) t)
+  ;; (make-directory (expand-file-name "denote/" org-directory) t)
   :config
   (setq denote-directory (expand-file-name "notes/" org-directory)
         denote-file-type 'org
@@ -2185,18 +2179,37 @@ Before 03:00 falls back to the previous day."
     (setq nov-unzip-program "C:/Program Files/Git/usr/bin/unzip.exe"))
   (setq nov-variable-pitch nil)
 
+  ;; (defun my/nov-setup ()
+  ;;   (let* ((available (font-family-list))
+  ;;          (font (or (cl-find-if (lambda (f) (member f available))
+  ;;                                '("霞鹜文楷 屏幕阅读版" "Noto Sans SC" "Noto Serif SC"
+  ;;                                  "Microsoft YaHei UI" "Microsoft YaHei"))
+  ;;                    "Microsoft YaHei")))
+  ;;     (face-remap-add-relative 'default :family font :height 140)
+  ;;     (face-remap-add-relative 'variable-pitch :family font :height 140)
+  ;;     (set-fontset-font t nil (font-spec :family font) nil 'prepend)
+  ;;     (message "nov: using font \"%s\"" font))
+  ;;   (visual-line-mode 1)
+  ;;   (setq nov-text-width 80))
   (defun my/nov-setup ()
-    (let* ((available (font-family-list))
-           (font (or (cl-find-if (lambda (f) (member f available))
-                                 '("Noto Sans SC" "Noto Serif SC"
-                                   "Microsoft YaHei UI" "Microsoft YaHei"))
+    (let* ((font (or (my/first-available-font
+                      "霞鹜文楷 屏幕阅读版"
+                      "霞鹜文楷等宽"
+                      "Noto Sans SC"
+                      "Noto Serif SC"
+                      "Microsoft YaHei UI"
+                      "Microsoft YaHei")
                      "Microsoft YaHei")))
       (face-remap-add-relative 'default :family font :height 140)
       (face-remap-add-relative 'variable-pitch :family font :height 140)
-      (set-fontset-font t nil (font-spec :family font) nil 'prepend)
+
+      ;; 中文字符优先使用这个字体
+      (set-fontset-font t 'han (font-spec :family font) nil 'prepend)
+
       (message "nov: using font \"%s\"" font))
     (visual-line-mode 1)
     (setq nov-text-width 80))
+
   (add-hook 'nov-mode-hook #'my/nov-setup)
 
   ;; Fix: nov-save-place 中文路径 utf-8
@@ -2205,7 +2218,6 @@ Before 03:00 falls back to the previous day."
       (apply orig-fn args)))
   (advice-add 'nov-save-place :around #'my/nov-save-place-a))
 #+end_src
-
 ** org-noter
 #+begin_src emacs-lisp
 (use-package! org-noter
@@ -2708,10 +2720,7 @@ Before 03:00 falls back to the previous day."
        :desc "Fava · 打开报表"                       "f" #'my/beancount-fava-main
        :desc "Bank wealth redeem · 银行理财赎回"     "r" #'my/beancount-record-bank-redeem
        :desc "Pension fund buy · 养老金基金买入"     "y" #'my/beancount-record-pension-buy
-       :desc "Pension reinvest · 养老金红利再投"     "R" #'my/beancount-record-pension-reinvest
-       :desc "Pension reinvest · 养老金红利再投"     "Y" #'my/beancount-record-pension-reinvest
-       :desc "CMB cashflow · 招行现金流入流出"       "C" #'my/beancount-record-cmb-cashflow
-       :desc "CMB to broker · 招行转入股票账户"      "t" #'my/beancount-record-broker-transfer))
+       :desc "CMB cashflow · 招行转入转出"          "C" #'my/beancount-record-cmb-cashflow))
 #+end_src
 
 * Apps
