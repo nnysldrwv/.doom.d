@@ -2375,57 +2375,23 @@ Before 03:00 falls back to the previous day."
          (name (plist-get fund :name))
          (commodity (plist-get fund :commodity))
          (account (plist-get fund :account))
-         (amount (my/beancount--read-number-string "定投金额: "))
-         (shares (my/beancount--read-number-string "成交份额: "))
-         (price-input (read-string "成交净值(可空，自动=金额/份额): "))
-         (num-amount (my/beancount--number amount))
+         (shares (my/beancount--read-number-string "成交份数: "))
+         (price (my/beancount--read-number-string "成交净值: "))
+         (fee (read-string "手续费: " "0"))
          (num-shares (my/beancount--number shares))
-         (price (if (string-empty-p price-input)
-                    (my/beancount--normalize-number
-                     (format "%.4f" (/ num-amount num-shares)))
-                  price-input))
-         (fee (read-string "手续费: " "0")))
+         (num-price (my/beancount--number price))
+         (num-fee (string-to-number fee))
+         (amount (my/beancount--normalize-number
+                  (format "%.2f" (+ (* num-shares num-price) num-fee)))))
     (my/beancount--append-bank-wealth-entry
-     (format "%s * \"定投买入 %s (%s)\"\n  fund_code: \"%s\"\n  fund_name: \"%s\"\n  asset_category: \"个人养老金\"\n  trade_price: \"%s CNY\"\n  trade_value: \"%s CNY\"\n  %s  %s %s {{%s CNY}}\n%s  Assets:Bank:CMB:Cash\n"
+     (format "%s * \"定投买入 %s (%s)\"\n  fund_code: \"%s\"\n  fund_name: \"%s\"\n  asset_category: \"个人养老金\"\n  trade_price: \"%s CNY\"\n  trade_value: \"%s CNY\"\n  %s  %s %s {{%s CNY}}\n%s  Assets:Investment:Pension:Cash\n"
              date name code code name price amount
              account (my/beancount--normalize-number shares) commodity amount
-             (if (and (stringp fee) (> (string-to-number fee) 0))
+             (if (> num-fee 0)
                  (format "  Expenses:Investment:Fees  %s CNY\n" fee)
                ""))
      date code)))
 
-(defun my/beancount-record-pension-reinvest ()
-  "快速记录个人养老金基金红利再投。"
-  (interactive)
-  (let* ((date (my/beancount--read-date))
-         (code (let* ((candidates (my/beancount--pension-candidates))
-                     (choice (completing-read "养老金基金: " candidates nil t)))
-                 (cdr (assoc choice candidates))))
-         (fund (my/beancount--pension-fund code))
-         (name (plist-get fund :name))
-         (commodity (plist-get fund :commodity))
-         (account (plist-get fund :account))
-         (shares (my/beancount--read-number-string "红利再投份额: "))
-         (price-input (read-string "红利再投净值(可空): "))
-         (amount-input (read-string "红利金额(可空，自动=份额*净值): "))
-         (amount (cond
-                  ((not (string-empty-p amount-input))
-                   (my/beancount--normalize-number amount-input))
-                  ((not (string-empty-p price-input))
-                   (format "%.2f" (* (my/beancount--number shares)
-                                     (my/beancount--number price-input))))
-                  (t
-                   (user-error "红利再投需要填写红利金额，或填写净值用于自动计算"))))
-         (price-line (if (string-empty-p price-input)
-                         ""
-                       (format "  trade_price: \"%s CNY\"\n" price-input))))
-    (my/beancount--append-bank-wealth-entry
-     (format "%s * \"红利再投 %s (%s)\"\n  fund_code: \"%s\"\n  fund_name: \"%s\"\n  asset_category: \"个人养老金\"\n%s  trade_value: \"%s CNY\"\n  %s  %s %s {{%s CNY}}\n  Income:Investment:Pension:Dividends  -%s CNY\n"
-             date name code code name
-             price-line amount
-             account (my/beancount--normalize-number shares) commodity amount
-             amount)
-     date code)))
 
 (defun my/beancount-main-file ()
   "Return the main investment Beancount ledger path."
@@ -2561,45 +2527,48 @@ Before 03:00 falls back to the previous day."
      (lambda (_) "*bean-check main.beancount*"))))
 
 (defun my/beancount-record-cmb-cashflow ()
-  "快速记录招行现金账户的外部流入或流出。"
+  "快速记录招行现金账户的转入或转出。"
   (interactive)
   (let* ((date (my/beancount--read-date))
-         (direction (completing-read "方向: " '("流入" "流出") nil t))
+         (direction (completing-read "方向: " '("转入" "转出") nil t))
+         (out-target (when (string= direction "转出")
+                       (completing-read "转出到: " '("股票账户" "养老金账户" "消费" "还信用卡") nil t)))
+         (cashflow-type (if (string= direction "转入")
+                            "转入"
+                          (format "转出:%s" out-target)))
          (amount (my/beancount--read-number-string "金额: "))
          (summary (my/beancount--safe-string (read-string "摘要: ")))
          (note (my/beancount--safe-string (read-string "备注(可空): ")))
+         (action-label (if (string= direction "转入")
+                           "转入"
+                         (format "转出到%s" out-target)))
          (title (if (string-empty-p summary)
-                    (format "招行现金%s" direction)
-                  (format "招行现金%s %s" direction summary)))
-         (cash-posting (if (string= direction "流入")
+                    (format "招行现金%s" action-label)
+                  (format "招行现金%s %s" action-label summary)))
+         (cash-posting (if (string= direction "转入")
                            (format "  Assets:Bank:CMB:Cash  %s CNY\n" amount)
                          (format "  Assets:Bank:CMB:Cash  -%s CNY\n" amount)))
-         (counter-posting (if (string= direction "流入")
-                              "  Income:ExternalFunding\n"
-                            "  Expenses:ExternalOutflow\n"))
+         (counter-posting (cond
+                            ((string= direction "转入")
+                             "  Income:ExternalFunding\n")
+                            ((string= out-target "股票账户")
+                             (format "  Assets:Investment:Broker:Cash  %s CNY\n" amount))
+                            ((string= out-target "养老金账户")
+                             (format "  Assets:Investment:Pension:Cash  %s CNY\n" amount))
+                            ((string= out-target "消费")
+                             "  Expenses:ExternalOutflow\n")
+                            ((string= out-target "还信用卡")
+                             "  Expenses:ExternalOutflow\n")))
+         (target-line (if (and out-target (not (string-empty-p out-target)))
+                          (format "  out_target: \"%s\"\n" out-target)
+                        ""))
          (note-line (if (string-empty-p note)
                         ""
                       (format "  note: \"%s\"\n" note))))
     (my/beancount--append-entry
-     (format "%s * \"%s\"\n  cashflow_type: \"%s\"\n  trade_value: \"%s CNY\"\n%s%s%s"
-             date title direction amount note-line cash-posting counter-posting))))
+     (format "%s * \"%s\"\n  cashflow_type: \"%s\"\n%s  trade_value: \"%s CNY\"\n%s%s%s"
+             date title cashflow-type target-line amount note-line cash-posting counter-posting))))
 
-(defun my/beancount-record-broker-transfer ()
-  "快速记录招行现金转入股票账户。"
-  (interactive)
-  (let* ((date (my/beancount--read-date))
-         (amount (my/beancount--read-number-string "转入金额: "))
-         (summary (my/beancount--safe-string (read-string "摘要: ")))
-         (note (my/beancount--safe-string (read-string "备注(可空): ")))
-         (title (if (string-empty-p summary)
-                    "招行现金转入股票账户"
-                  (format "招行现金转入股票账户 %s" summary)))
-         (note-line (if (string-empty-p note)
-                        ""
-                      (format "  note: \"%s\"\n" note))))
-    (my/beancount--append-entry
-     (format "%s * \"%s\"\n  transfer_type: \"招行现金->股票账户\"\n  trade_value: \"%s CNY\"\n%s  Assets:Investment:Broker:Cash  %s CNY\n  Assets:Bank:CMB:Cash          -%s CNY\n"
-             date title amount note-line amount amount))))
 
 (defun my/beancount-record-buy ()
   "快速记录一笔 ETF/基金买入。"
