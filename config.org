@@ -151,6 +151,9 @@
   :recipe (:host github :repo "beancount/beancount-mode"))
 
 (package! org-fragtog)
+
+;; Emacs MCP server (HTTP, 供 Claude Code 等外部工具调用 Emacs)
+(package! emcp)
 #+end_src
 
 ** Speed (gcmh)
@@ -2756,8 +2759,10 @@ identical to what `doom.ps1' does on Windows."
   (require 'subr-x)
   (setq elfeed-db-directory (expand-file-name "~/org/.elfeed")
         elfeed-curl-max-connections 4)
-  (setq-default elfeed-search-filter "@1-month-ago +unread")
-  (add-hook 'elfeed-search-mode-hook #'elfeed-update)
+  (setq-default elfeed-search-filter "+unread")
+  ;; 避免每次进入 elfeed 都疯狂触发后台更新导致界面跳动。
+  ;; 建议手动按 r / gr 更新，或者使用定时器。
+  ;; (add-hook 'elfeed-search-mode-hook #'elfeed-update)
 
   (defun my/elfeed-show-buffer-setup ()
     "Apply local display settings for Elfeed article buffers."
@@ -2870,6 +2875,17 @@ identical to what `doom.ps1' does on Windows."
       (user-error "Not in an Elfeed buffer"))))
 
   (defun my/elfeed-feed-candidates ()
+    "获取订阅源列表。注意：在文章数极多（几万条以上）时，
+`with-elfeed-db-visit` 遍历全库可能会导致 C-c f 出现几秒卡顿。
+届时可换用纯列表极速版：
+  (let (candidates)
+    (elfeed-db-ensure)
+    (maphash
+     (lambda (url feed)
+       (push (cons (format \"%s\\t%s\" (my/elfeed-feed-display-title feed) url) url)
+             candidates))
+     elfeed-db-feeds)
+    (sort candidates (lambda (a b) (string-lessp (car a) (car b)))))"
     (let ((table (make-hash-table :test 'equal)))
       (with-elfeed-db-visit (entry feed)
         (let* ((url (elfeed-feed-url feed))
@@ -2980,6 +2996,9 @@ identical to what `doom.ps1' does on Windows."
         elfeed-tube-auto-save-p nil
         elfeed-tube-fields '(duration captions chapters description)
         elfeed-tube-backend 'yt-dlp))
+
+(use-package! elfeed-tube-mpv
+  :after elfeed-tube)
 #+end_src
 
 ** Agent-shell
@@ -3243,4 +3262,11 @@ identical to what `doom.ps1' does on Windows."
     (define-key evil-motion-state-map (kbd "C-\\") #'sis-switch)
     (define-key evil-visual-state-map (kbd "C-\\") #'sis-switch)
     (define-key evil-emacs-state-map  (kbd "C-\\") #'sis-switch)))
+#+end_src
+
+** Emacs MCP Server (emcp)
+#+begin_src emacs-lisp
+(use-package! emcp
+  :config
+  (setq emcp-http-port 8766))
 #+end_src
