@@ -305,7 +305,7 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
 * Appearance
 ** Theme & UI
 #+begin_src emacs-lisp
-(setq doom-theme 'ef-spring)
+(setq doom-theme 'ef-light)
 
 (use-package! doom-modeline
   :custom
@@ -2392,16 +2392,18 @@ Before 03:00 falls back to the previous day."
          (account (plist-get fund :account))
          (shares (my/beancount--read-number-string "成交份数: "))
          (price (my/beancount--read-number-string "成交净值: "))
-         (fee (read-string "手续费: " "0"))
+         (fee (my/beancount--read-number-string "手续费: " "0"))
          (num-shares (my/beancount--number shares))
          (num-price (my/beancount--number price))
-         (num-fee (string-to-number fee))
-         (amount (my/beancount--normalize-number
-                  (format "%.2f" (+ (* num-shares num-price) num-fee)))))
+         (num-fee (my/beancount--number fee))
+         (lot-cost (my/beancount--normalize-number
+                    (format "%.2f" (* num-shares num-price))))
+         (trade-value (my/beancount--normalize-number
+                       (format "%.2f" (+ (my/beancount--number lot-cost) num-fee)))))
     (my/beancount--append-bank-wealth-entry
      (format "%s * \"定投买入 %s (%s)\"\n  fund_code: \"%s\"\n  fund_name: \"%s\"\n  asset_category: \"个人养老金\"\n  trade_price: \"%s CNY\"\n  trade_value: \"%s CNY\"\n  %s  %s %s {{%s CNY}}\n%s  Assets:Investment:Pension:Cash\n"
-             date name code code name price amount
-             account (my/beancount--normalize-number shares) commodity amount
+             date name code code name price trade-value
+             account (my/beancount--normalize-number shares) commodity lot-cost
              (if (> num-fee 0)
                  (format "  Expenses:Investment:Fees  %s CNY\n" fee)
                ""))
@@ -2476,6 +2478,64 @@ Before 03:00 falls back to the previous day."
   "Read a decimal number as normalized string with PROMPT and optional DEFAULT."
   (my/beancount--normalize-number
    (read-string prompt nil nil default)))
+
+(defun my/beancount--holding-instrument (code)
+  "Return holding instrument plist for CODE across ETFs, pension funds, and wealth."
+  (or (cdr (assoc code my/beancount-funds))
+      (cdr (assoc code my/beancount-pension-funds))
+      (cdr (assoc code my/beancount-bank-wealth))
+      (user-error "Unknown holding code: %s" code)))
+
+(defun my/beancount--parse-balance-batch-line (line line-number)
+  "Parse LINE at LINE-NUMBER into a balance posting plist."
+  (let ((trimmed (string-trim line)))
+    (unless (or (string-empty-p trimmed)
+                (string-prefix-p "#" trimmed)
+                (string-prefix-p ";" trimmed))
+      (unless (string-match "\\`\\([^[:space:],，]+\\)[[:space:],，]+\\(.+\\)\\'" trimmed)
+        (user-error "Line %d should be: CODE SHARES" line-number))
+      (let* ((code (match-string 1 trimmed))
+             (shares (my/beancount--normalize-number (match-string 2 trimmed)))
+             (instrument (my/beancount--holding-instrument code))
+             (account (plist-get instrument :account))
+             (commodity (plist-get instrument :commodity)))
+        (unless (string-match-p "\\`[-+]?[0-9]+\\(?:\\.[0-9]+\\)?\\'" shares)
+          (user-error "Line %d has invalid shares/amount: %s" line-number shares))
+        (list :code code :shares shares :account account :commodity commodity)))))
+
+(defun my/beancount--balance-batch-build (date text)
+  "Build a Beancount balance snapshot for DATE from pasted TEXT."
+  (let (postings)
+    (cl-loop for line in (split-string text "\n")
+             for line-number from 1
+             for parsed = (my/beancount--parse-balance-batch-line line line-number)
+             when parsed
+             do (push (format "%s balance %s %s %s"
+                              date
+                              (plist-get parsed :account)
+                              (plist-get parsed :shares)
+                              (plist-get parsed :commodity))
+                      postings))
+    (unless postings
+      (user-error "No holdings found. Paste lines like: 513870 1234.56"))
+    (list :count (length postings)
+          :entry (mapconcat #'identity
+                            (cons (format "; ---- Holdings balance snapshot %s ----" date)
+                                  (nreverse postings))
+                            "\n"))))
+
+(defconst my/beancount-etf-commission-rate 0.00005
+  "ETF commission rate for the current broker: 0.5 per 10,000.")
+
+(defconst my/beancount-etf-min-commission 5.0
+  "Minimum ETF commission in CNY for the current broker.")
+
+(defun my/beancount--etf-commission (fund trade-value)
+  "Return ETF commission for FUND and TRADE-VALUE."
+  (if (plist-get fund :fee-free)
+      0
+    (max my/beancount-etf-min-commission
+         (* trade-value my/beancount-etf-commission-rate))))
 
 (defun my/beancount--read-date (&optional prompt)
   "Read a Beancount date string."
@@ -2598,7 +2658,7 @@ Before 03:00 falls back to the previous day."
          (price (my/beancount--read-number-string "成交价格: "))
          (shares (my/beancount--read-number-string "成交份额: "))
          (amount (* (my/beancount--number price) (my/beancount--number shares)))
-         (fee (if (plist-get fund :fee-free) 0 (* amount 0.00005))))
+         (fee (my/beancount--etf-commission fund amount)))
     (my/beancount--append-entry
      (format "%s * \"买入 %s (%s)\"\n  fund_code: \"%s\"\n  fund_name: \"%s\"\n  asset_category: \"%s\"\n  trade_price: \"%s CNY\"\n  trade_value: \"%.2f CNY\"\n  %s  %s %s {{%.2f CNY}}\n%s  Assets:Investment:Broker:Cash\n"
              date name code code name category price amount
@@ -2627,7 +2687,7 @@ Before 03:00 falls back to the previous day."
                        "{}"
                      (format "{%s CNY, %s}" cost-price cost-date)))
          (trade-value (* (my/beancount--number price) (my/beancount--number shares)))
-         (fee (if (plist-get fund :fee-free) 0 (* trade-value 0.00005)))
+         (fee (my/beancount--etf-commission fund trade-value))
          (cash-received (- trade-value fee)))
     (my/beancount--append-entry
      (format "%s * \"卖出 %s (%s)\"\n  fund_code: \"%s\"\n  fund_name: \"%s\"\n  asset_category: \"%s\"\n  trade_price: \"%s CNY\"\n  trade_value: \"%.2f CNY\"\n  %s  -%s %s %s @ %s CNY\n%s  Assets:Investment:Broker:Cash  %.2f CNY\n  Income:Investment:CapitalGains\n"
@@ -2666,6 +2726,54 @@ Before 03:00 falls back to the previous day."
     (my/beancount--append-entry
      (format "%s balance %s %s %s\n" date account shares commodity)
      date code)))
+
+(defvar-local my/beancount-balance-batch-date nil
+  "Balance date for the current Beancount batch balance buffer.")
+
+(defvar my/beancount-balance-batch-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "C-c C-c") #'my/beancount-balance-batch-submit)
+    (define-key map (kbd "C-c C-k") #'kill-current-buffer)
+    map)
+  "Keymap for `my/beancount-balance-batch-mode'.")
+
+(define-derived-mode my/beancount-balance-batch-mode text-mode "BeanBalanceBatch"
+  "Major mode for pasting Beancount holding balances.")
+
+(defun my/beancount-record-balance-batch ()
+  "Paste multiple ETF, pension, and bank-wealth balances into a buffer."
+  (interactive)
+  (let ((date (my/beancount--read-date "校验日期: "))
+        (buffer (get-buffer-create "*beancount holding balances*")))
+    (pop-to-buffer buffer)
+    (my/beancount-balance-batch-mode)
+    (setq-local my/beancount-balance-batch-date date)
+    (let ((inhibit-read-only t))
+      (erase-buffer)
+      (insert "# Paste holdings as CODE SHARES, one per line.\n")
+      (insert "# Supported: ETF codes, pension fund codes, DYB, DQB.\n")
+      (insert "# Submit with C-c C-c. Cancel with C-c C-k.\n")
+      (insert "# Examples:\n")
+      (insert "# 513870 1234\n")
+      (insert "# 022907 62.14\n")
+      (insert "# DYB 10000\n\n"))))
+
+(defun my/beancount-balance-batch-submit ()
+  "Append the current batch balance buffer to the main Beancount ledger."
+  (interactive)
+  (unless my/beancount-balance-batch-date
+    (user-error "This buffer was not created by my/beancount-record-balance-batch"))
+  (let* ((source-buffer (current-buffer))
+         (date my/beancount-balance-batch-date)
+         (built (my/beancount--balance-batch-build
+                 date
+                 (buffer-substring-no-properties (point-min) (point-max))))
+         (count (plist-get built :count))
+         (entry (plist-get built :entry)))
+    (my/beancount--append-entry entry)
+    (when (buffer-live-p source-buffer)
+      (kill-buffer source-buffer))
+    (message "Inserted %d balance checks for %s" count date)))
 
 (defun my/beancount-fava-main ()
   "Open main Beancount ledger and toggle/start Fava."
@@ -2716,6 +2824,7 @@ Before 03:00 falls back to the previous day."
        :desc "Beancount sell · 卖出"                 "s" #'my/beancount-record-sell
        :desc "Beancount price · 记录价格"            "p" #'my/beancount-record-price
        :desc "Beancount balance · 持仓校验"          "B" #'my/beancount-record-balance
+       :desc "Beancount balances · 批量持仓校验"     "V" #'my/beancount-record-balance-batch
        :desc "Update prices latest · 更新近期价格"   "u" #'my/beancount-update-prices-latest
        :desc "Rebuild price history · 重建历史价格"  "H" #'my/beancount-rebuild-prices-history
        :desc "Open ledger · 打开账本"                "o" #'my/open-beancount-main
@@ -3268,5 +3377,9 @@ identical to what `doom.ps1' does on Windows."
 #+begin_src emacs-lisp
 (use-package! emcp
   :config
-  (setq emcp-http-port 8766))
+  (setq emcp-http-port 8766)
+  ;; Auto-start the MCP server with the 'inspect' profile on Emacs load so
+  ;; Claude Code (and other MCP clients) can talk to this Emacs instance.
+  (unless (and (boundp 'emcp--servers) (alist-get 'inspect emcp--servers))
+    (emcp-start 'inspect)))
 #+end_src
