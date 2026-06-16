@@ -1051,6 +1051,7 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
           ;; 银行理财赎回：SPC n i r
           ;; 个人养老金定投买入：SPC n i y
           ;; 招行转入/转出：SPC n i C
+          ;; 担保品划转/融资买卖：SPC n i t/m/M
           ("I" "Investment · 快捷操作")
           ("Ir" "招行理财赎回" plain
            (function my/beancount-record-bank-redeem)
@@ -1060,6 +1061,15 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
            "" :immediate-finish t)
           ("Ic" "招行转入/转出" plain
            (function my/beancount-record-cmb-cashflow)
+           "" :immediate-finish t)
+          ("It" "担保品划转" plain
+           (function my/beancount-record-collateral-transfer)
+           "" :immediate-finish t)
+          ("Im" "融资买入" plain
+           (function my/beancount-record-margin-buy)
+           "" :immediate-finish t)
+          ("IM" "融资卖出" plain
+           (function my/beancount-record-margin-sell)
            "" :immediate-finish t))))
 #+end_src
 
@@ -2280,16 +2290,48 @@ Before 03:00 falls back to the previous day."
 
 (defconst my/beancount-funds
   '(("159501" :name "嘉实纳斯达克100ETF(QDII)" :commodity "ETF159501"
-     :account "Assets:Investment:Nasdaq100:ETF159501" :category "纳指100")
+     :account "Assets:Investment:Broker:Normal:Nasdaq100:ETF159501" :category "纳指100")
     ("159696" :name "易方达纳斯达克100ETF(QDII)" :commodity "ETF159696"
-     :account "Assets:Investment:Nasdaq100:ETF159696" :category "纳指100")
+     :account "Assets:Investment:Broker:Normal:Nasdaq100:ETF159696" :category "纳指100")
     ("513100" :name "国泰纳斯达克100ETF(QDII)" :commodity "ETF513100"
-     :account "Assets:Investment:Nasdaq100:ETF513100" :category "纳指100")
+     :account "Assets:Investment:Broker:Normal:Nasdaq100:ETF513100" :category "纳指100")
     ("513870" :name "富国纳斯达克100ETF(QDII)" :commodity "ETF513870"
-     :account "Assets:Investment:Nasdaq100:ETF513870" :category "纳指100")
+     :account "Assets:Investment:Broker:Normal:Nasdaq100:ETF513870" :category "纳指100")
     ("511880" :name "银华日利ETF" :commodity "ETF511880"
-     :account "Assets:Investment:MoneyMarket:ETF511880" :category "货币基金" :fee-free t))
+     :account "Assets:Investment:Broker:Normal:MoneyMarket:ETF511880" :category "货币基金" :fee-free t))
   "投资账本中的基金/ETF 映射。")
+
+(defconst my/beancount-broker-accounts '("普通账户" "信用账户")
+  "Broker account labels used by investment Beancount captures.")
+
+(defun my/beancount--read-broker-account (&optional prompt default)
+  "Read a broker account label with PROMPT and DEFAULT."
+  (completing-read (or prompt "账户: ")
+                   my/beancount-broker-accounts nil t nil nil
+                   (or default "普通账户")))
+
+(defun my/beancount--broker-account-alias (token)
+  "Return a broker account label when TOKEN names one, otherwise nil."
+  (pcase (downcase (string-trim token))
+    ((or "普通" "普通账户" "normal") "普通账户")
+    ((or "信用" "信用账户" "margin") "信用账户")
+    (_ nil)))
+
+(defun my/beancount--broker-cash-account (broker-account)
+  "Return the Beancount cash account for BROKER-ACCOUNT."
+  (pcase broker-account
+    ("普通账户" "Assets:Investment:Broker:Normal:Cash")
+    ("信用账户" "Assets:Investment:Broker:Margin:Cash")
+    (_ (user-error "Unknown broker account: %s" broker-account))))
+
+(defun my/beancount--broker-fund-account (fund broker-account)
+  "Return the Beancount holding account for FUND in BROKER-ACCOUNT."
+  (let ((normal-account (plist-get fund :account)))
+    (pcase broker-account
+      ("普通账户" normal-account)
+      ("信用账户"
+       (replace-regexp-in-string ":Broker:Normal:" ":Broker:Margin:" normal-account t t))
+      (_ (user-error "Unknown broker account: %s" broker-account)))))
 
 (defconst my/beancount-bank-wealth
   '(("DYB" :name "招行多月宝" :commodity "WMDYB"
@@ -2486,29 +2528,49 @@ Before 03:00 falls back to the previous day."
       (cdr (assoc code my/beancount-bank-wealth))
       (user-error "Unknown holding code: %s" code)))
 
-(defun my/beancount--parse-balance-batch-line (line line-number)
-  "Parse LINE at LINE-NUMBER into a balance posting plist."
+(defun my/beancount--parse-balance-batch-line (line line-number broker-account)
+  "Parse LINE at LINE-NUMBER into a balance posting plist.
+ETF lines use BROKER-ACCOUNT unless LINE starts with a broker account alias."
   (let ((trimmed (string-trim line)))
     (unless (or (string-empty-p trimmed)
                 (string-prefix-p "#" trimmed)
                 (string-prefix-p ";" trimmed))
-      (unless (string-match "\\`\\([^[:space:],，]+\\)[[:space:],，]+\\(.+\\)\\'" trimmed)
-        (user-error "Line %d should be: CODE SHARES" line-number))
-      (let* ((code (match-string 1 trimmed))
-             (shares (my/beancount--normalize-number (match-string 2 trimmed)))
-             (instrument (my/beancount--holding-instrument code))
-             (account (plist-get instrument :account))
-             (commodity (plist-get instrument :commodity)))
-        (unless (string-match-p "\\`[-+]?[0-9]+\\(?:\\.[0-9]+\\)?\\'" shares)
-          (user-error "Line %d has invalid shares/amount: %s" line-number shares))
-        (list :code code :shares shares :account account :commodity commodity)))))
+      (let (line-broker-account code shares)
+        (cond
+         ((and (string-match "\\`\\([^[:space:],，]+\\)[[:space:],，]+\\([^[:space:],，]+\\)[[:space:],，]+\\(.+\\)\\'" trimmed)
+               (setq line-broker-account
+                     (my/beancount--broker-account-alias (match-string 1 trimmed))))
+          (setq code (match-string 2 trimmed)
+                shares (match-string 3 trimmed)))
+         ((string-match "\\`\\([^[:space:],，]+\\)[[:space:],，]+\\(.+\\)\\'" trimmed)
+          (when (my/beancount--broker-account-alias (match-string 1 trimmed))
+            (user-error "Line %d should be: ACCOUNT CODE SHARES" line-number))
+          (setq code (match-string 1 trimmed)
+                shares (match-string 2 trimmed)))
+         (t
+          (user-error "Line %d should be: CODE SHARES or ACCOUNT CODE SHARES" line-number)))
+        (let* ((shares (my/beancount--normalize-number shares))
+               (instrument (my/beancount--holding-instrument code))
+               (is-etf (assoc code my/beancount-funds))
+               (account (if is-etf
+                            (my/beancount--broker-fund-account
+                             instrument (or line-broker-account broker-account))
+                          (plist-get instrument :account)))
+               (commodity (plist-get instrument :commodity)))
+          (when (and line-broker-account (not is-etf))
+            (user-error "Line %d has broker account prefix for non-ETF code: %s"
+                        line-number code))
+          (unless (string-match-p "\\`[-+]?[0-9]+\\(?:\\.[0-9]+\\)?\\'" shares)
+            (user-error "Line %d has invalid shares/amount: %s" line-number shares))
+          (list :code code :shares shares :account account :commodity commodity))))))
 
-(defun my/beancount--balance-batch-build (date text)
+(defun my/beancount--balance-batch-build (date text &optional broker-account)
   "Build a Beancount balance snapshot for DATE from pasted TEXT."
   (let (postings)
     (cl-loop for line in (split-string text "\n")
              for line-number from 1
-             for parsed = (my/beancount--parse-balance-batch-line line line-number)
+             for parsed = (my/beancount--parse-balance-batch-line
+                           line line-number (or broker-account "普通账户"))
              when parsed
              do (push (format "%s balance %s %s %s"
                               date
@@ -2556,12 +2618,13 @@ Before 03:00 falls back to the previous day."
     (unless (bolp) (insert "\n"))
     (insert text "\n")))
 
-(defun my/beancount--ensure-fund-open (date code)
-  "Ensure commodity and account directives for CODE exist, using DATE if inserted."
+(defun my/beancount--ensure-fund-open (date code &optional account)
+  "Ensure commodity and account directives for CODE exist, using DATE if inserted.
+When ACCOUNT is non-nil, ensure that account instead of the default normal account."
   (let* ((fund (my/beancount--fund code))
          (name (plist-get fund :name))
          (commodity (plist-get fund :commodity))
-         (account (plist-get fund :account))
+         (account (or account (plist-get fund :account)))
          (category (plist-get fund :category))
          directives)
     (save-excursion
@@ -2577,11 +2640,11 @@ Before 03:00 falls back to the previous day."
         (my/beancount--insert-before-first-entry
          (mapconcat #'identity (nreverse directives) "\n\n"))))))
 
-(defun my/beancount--append-entry (entry &optional date code)
+(defun my/beancount--append-entry (entry &optional date code account)
   "Append ENTRY to main ledger, optionally ensuring CODE is open at DATE."
   (find-file (my/beancount-main-file))
   (when (and date code)
-    (my/beancount--ensure-fund-open date code))
+    (my/beancount--ensure-fund-open date code account))
   (goto-char (point-max))
   (unless (bolp) (insert "\n"))
   (insert "\n" entry)
@@ -2627,7 +2690,7 @@ Before 03:00 falls back to the previous day."
                             ((string= direction "转入")
                              "  Income:ExternalFunding\n")
                             ((string= out-target "股票账户")
-                             (format "  Assets:Investment:Broker:Cash  %s CNY\n" amount))
+                             (format "  Assets:Investment:Broker:Normal:Cash  %s CNY\n" amount))
                             ((string= out-target "养老金账户")
                              (format "  Assets:Investment:Pension:Cash  %s CNY\n" amount))
                             ((string= out-target "消费")
@@ -2653,20 +2716,23 @@ Before 03:00 falls back to the previous day."
          (fund (my/beancount--fund code))
          (name (plist-get fund :name))
          (commodity (plist-get fund :commodity))
-         (account (plist-get fund :account))
+         (broker-account "普通账户")
+         (account (my/beancount--broker-fund-account fund broker-account))
+         (cash-account (my/beancount--broker-cash-account broker-account))
          (category (plist-get fund :category))
          (price (my/beancount--read-number-string "成交价格: "))
          (shares (my/beancount--read-number-string "成交份额: "))
          (amount (* (my/beancount--number price) (my/beancount--number shares)))
          (fee (my/beancount--etf-commission fund amount)))
     (my/beancount--append-entry
-     (format "%s * \"买入 %s (%s)\"\n  fund_code: \"%s\"\n  fund_name: \"%s\"\n  asset_category: \"%s\"\n  trade_price: \"%s CNY\"\n  trade_value: \"%.2f CNY\"\n  %s  %s %s {{%.2f CNY}}\n%s  Assets:Investment:Broker:Cash\n"
+     (format "%s * \"买入 %s (%s)\"\n  fund_code: \"%s\"\n  fund_name: \"%s\"\n  asset_category: \"%s\"\n  trade_price: \"%s CNY\"\n  trade_value: \"%.2f CNY\"\n  %s  %s %s {{%.2f CNY}}\n%s  %s\n"
              date name code code name category price amount
              account shares commodity amount
              (if (> fee 0)
                  (format "  Expenses:Investment:Fees  %.4f CNY\n" fee)
-               ""))
-     date code)))
+               "")
+             cash-account)
+     date code account)))
 
 (defun my/beancount-record-sell ()
   "快速记录一笔 ETF/基金卖出。"
@@ -2676,7 +2742,9 @@ Before 03:00 falls back to the previous day."
          (fund (my/beancount--fund code))
          (name (plist-get fund :name))
          (commodity (plist-get fund :commodity))
-         (account (plist-get fund :account))
+         (broker-account "普通账户")
+         (account (my/beancount--broker-fund-account fund broker-account))
+         (cash-account (my/beancount--broker-cash-account broker-account))
          (category (plist-get fund :category))
          (price (my/beancount--read-number-string "成交价格: "))
          (shares (my/beancount--read-number-string "成交份额: "))
@@ -2690,14 +2758,113 @@ Before 03:00 falls back to the previous day."
          (fee (my/beancount--etf-commission fund trade-value))
          (cash-received (- trade-value fee)))
     (my/beancount--append-entry
-     (format "%s * \"卖出 %s (%s)\"\n  fund_code: \"%s\"\n  fund_name: \"%s\"\n  asset_category: \"%s\"\n  trade_price: \"%s CNY\"\n  trade_value: \"%.2f CNY\"\n  %s  -%s %s %s @ %s CNY\n%s  Assets:Investment:Broker:Cash  %.2f CNY\n  Income:Investment:CapitalGains\n"
+     (format "%s * \"卖出 %s (%s)\"\n  fund_code: \"%s\"\n  fund_name: \"%s\"\n  asset_category: \"%s\"\n  trade_price: \"%s CNY\"\n  trade_value: \"%.2f CNY\"\n  %s  -%s %s %s @ %s CNY\n%s  %s  %.2f CNY\n  Income:Investment:CapitalGains\n"
              date name code code name category price trade-value
              account shares commodity cost-lot price
              (if (> fee 0)
                  (format "  Expenses:Investment:Fees  %.2f CNY\n" fee)
                "")
+             cash-account
              cash-received)
-     date code)))
+     date code account)))
+
+(defun my/beancount-record-collateral-transfer ()
+  "快速记录普通账户和信用账户之间的担保品划转。"
+  (interactive)
+  (let* ((date (my/beancount--read-date))
+         (direction (completing-read "划转方向: "
+                                     '("普通账户 -> 信用账户" "信用账户 -> 普通账户")
+                                     nil t))
+         (from-broker (if (string-prefix-p "普通账户" direction)
+                          "普通账户"
+                        "信用账户"))
+         (to-broker (if (string= from-broker "普通账户")
+                        "信用账户"
+                      "普通账户"))
+         (code (my/beancount--read-fund-code))
+         (fund (my/beancount--fund code))
+         (name (plist-get fund :name))
+         (commodity (plist-get fund :commodity))
+         (from-account (my/beancount--broker-fund-account fund from-broker))
+         (to-account (my/beancount--broker-fund-account fund to-broker))
+         (shares (my/beancount--read-number-string "划转份额: "))
+         (cost-price (my/beancount--read-number-string "成本价(用于匹配 lot): "))
+         (cost-date (my/beancount--read-date "成本日期: "))
+         (summary (my/beancount--safe-string (read-string "摘要(可空): ")))
+         (title (if (string-empty-p summary)
+                    (format "担保品划转 %s %s (%s)" direction name code)
+                  (format "担保品划转 %s %s" direction summary)))
+         (cost-lot (format "{%s CNY, %s}" cost-price cost-date)))
+    (my/beancount--append-entry
+     (format "%s * \"%s\"\n  transfer_type: \"担保品划转\"\n  broker_from: \"%s\"\n  broker_to: \"%s\"\n  fund_code: \"%s\"\n  fund_name: \"%s\"\n  %s  -%s %s %s\n  %s  %s %s %s\n"
+             date title from-broker to-broker code name
+             from-account shares commodity cost-lot
+             to-account shares commodity cost-lot)
+     date code to-account)))
+
+(defun my/beancount-record-margin-buy ()
+  "快速记录信用账户融资买入 ETF/基金。"
+  (interactive)
+  (let* ((date (my/beancount--read-date))
+         (code (my/beancount--read-fund-code))
+         (fund (my/beancount--fund code))
+         (name (plist-get fund :name))
+         (commodity (plist-get fund :commodity))
+         (account (my/beancount--broker-fund-account fund "信用账户"))
+         (category (plist-get fund :category))
+         (price (my/beancount--read-number-string "成交价格: "))
+         (shares (my/beancount--read-number-string "成交份额: "))
+         (amount (* (my/beancount--number price) (my/beancount--number shares)))
+         (fee (my/beancount--etf-commission fund amount))
+         (debt (+ amount fee)))
+    (my/beancount--append-entry
+     (format "%s * \"融资买入 %s (%s)\"\n  trade_type: \"融资买入\"\n  fund_code: \"%s\"\n  fund_name: \"%s\"\n  asset_category: \"%s\"\n  trade_price: \"%s CNY\"\n  trade_value: \"%.2f CNY\"\n  %s  %s %s {{%.2f CNY}}\n%s  Liabilities:Investment:Broker:Margin:Principal  -%.2f CNY\n"
+             date name code code name category price amount
+             account shares commodity amount
+             (if (> fee 0)
+                 (format "  Expenses:Investment:Fees  %.4f CNY\n" fee)
+               "")
+             debt)
+     date code account)))
+
+(defun my/beancount-record-margin-sell ()
+  "快速记录信用账户卖出 ETF/基金，可选择卖出所得偿还融资负债或留在信用现金。"
+  (interactive)
+  (let* ((date (my/beancount--read-date))
+         (code (my/beancount--read-fund-code))
+         (fund (my/beancount--fund code))
+         (name (plist-get fund :name))
+         (commodity (plist-get fund :commodity))
+         (account (my/beancount--broker-fund-account fund "信用账户"))
+         (category (plist-get fund :category))
+         (price (my/beancount--read-number-string "成交价格: "))
+         (shares (my/beancount--read-number-string "成交份额: "))
+         (cost-price (read-string "成本价(可空，例 100.427): "))
+         (cost-date (unless (string= cost-price "")
+                      (my/beancount--read-date "成本日期: ")))
+         (cost-lot (if (string= cost-price "")
+                       "{}"
+                     (format "{%s CNY, %s}" cost-price cost-date)))
+         (proceeds-target (completing-read "卖出资金去向: "
+                                           '("偿还融资负债" "留在信用现金")
+                                           nil t nil nil "偿还融资负债"))
+         (trade-value (* (my/beancount--number price) (my/beancount--number shares)))
+         (fee (my/beancount--etf-commission fund trade-value))
+         (cash-received (- trade-value fee))
+         (counter-posting (if (string= proceeds-target "偿还融资负债")
+                              (format "  Liabilities:Investment:Broker:Margin:Principal  %.2f CNY\n" cash-received)
+                            (format "  Assets:Investment:Broker:Margin:Cash  %.2f CNY\n" cash-received))))
+    (my/beancount--append-entry
+     (format "%s * \"信用账户卖出 %s (%s)\"\n  trade_type: \"%s\"\n  fund_code: \"%s\"\n  fund_name: \"%s\"\n  asset_category: \"%s\"\n  trade_price: \"%s CNY\"\n  trade_value: \"%.2f CNY\"\n  proceeds_target: \"%s\"\n  %s  -%s %s %s @ %s CNY\n%s%s  Income:Investment:CapitalGains\n"
+             date name code
+             (if (string= proceeds-target "偿还融资负债") "融资卖出还款" "信用账户卖出")
+             code name category price trade-value proceeds-target
+             account shares commodity cost-lot price
+             (if (> fee 0)
+                 (format "  Expenses:Investment:Fees  %.2f CNY\n" fee)
+               "")
+             counter-posting)
+     date code account)))
 
 (defun my/beancount-record-price ()
   "快速记录一条 ETF/基金/理财净值 price。"
@@ -2718,17 +2885,21 @@ Before 03:00 falls back to the previous day."
   (let* ((date (my/beancount--read-date "校验日期: "))
          (code (my/beancount--read-fund-code))
          (fund (my/beancount--fund code))
+         (broker-account (my/beancount--read-broker-account "校验账户: " "信用账户"))
          (commodity (plist-get fund :commodity))
-         (account (plist-get fund :account))
+         (account (my/beancount--broker-fund-account fund broker-account))
          (shares (my/beancount--read-number-string "持有份额/股数(不是基金代码): ")))
     (when (string= shares code)
       (user-error "这里要填持有份额/股数，不是基金代码；%s 当前应填实际剩余份额" code))
     (my/beancount--append-entry
      (format "%s balance %s %s %s\n" date account shares commodity)
-     date code)))
+     date code account)))
 
 (defvar-local my/beancount-balance-batch-date nil
   "Balance date for the current Beancount batch balance buffer.")
+
+(defvar-local my/beancount-balance-batch-broker-account nil
+  "Broker account for ETF lines in the current Beancount batch balance buffer.")
 
 (defvar my/beancount-balance-batch-mode-map
   (let ((map (make-sparse-keymap)))
@@ -2744,17 +2915,22 @@ Before 03:00 falls back to the previous day."
   "Paste multiple ETF, pension, and bank-wealth balances into a buffer."
   (interactive)
   (let ((date (my/beancount--read-date "校验日期: "))
+        (broker-account (my/beancount--read-broker-account "ETF 校验账户: " "信用账户"))
         (buffer (get-buffer-create "*beancount holding balances*")))
     (pop-to-buffer buffer)
     (my/beancount-balance-batch-mode)
     (setq-local my/beancount-balance-batch-date date)
+    (setq-local my/beancount-balance-batch-broker-account broker-account)
     (let ((inhibit-read-only t))
       (erase-buffer)
       (insert "# Paste holdings as CODE SHARES, one per line.\n")
+      (insert (format "# ETF default account: %s.\n" broker-account))
+      (insert "# ETF lines may override it with: 普通账户 CODE SHARES or 信用账户 CODE SHARES.\n")
       (insert "# Supported: ETF codes, pension fund codes, DYB, DQB.\n")
       (insert "# Submit with C-c C-c. Cancel with C-c C-k.\n")
       (insert "# Examples:\n")
-      (insert "# 513870 1234\n")
+      (insert "# 信用账户 513870 1234\n")
+      (insert "# 普通账户 511880 1000\n")
       (insert "# 022907 62.14\n")
       (insert "# DYB 10000\n\n"))))
 
@@ -2765,9 +2941,11 @@ Before 03:00 falls back to the previous day."
     (user-error "This buffer was not created by my/beancount-record-balance-batch"))
   (let* ((source-buffer (current-buffer))
          (date my/beancount-balance-batch-date)
+         (broker-account (or my/beancount-balance-batch-broker-account "普通账户"))
          (built (my/beancount--balance-batch-build
                  date
-                 (buffer-substring-no-properties (point-min) (point-max))))
+                 (buffer-substring-no-properties (point-min) (point-max))
+                 broker-account))
          (count (plist-get built :count))
          (entry (plist-get built :entry)))
     (my/beancount--append-entry entry)
@@ -2832,7 +3010,10 @@ Before 03:00 falls back to the previous day."
        :desc "Fava · 打开报表"                       "f" #'my/beancount-fava-main
        :desc "Bank wealth redeem · 银行理财赎回"     "r" #'my/beancount-record-bank-redeem
        :desc "Pension fund buy · 养老金基金买入"     "y" #'my/beancount-record-pension-buy
-       :desc "CMB cashflow · 招行转入转出"          "C" #'my/beancount-record-cmb-cashflow))
+       :desc "CMB cashflow · 招行转入转出"          "C" #'my/beancount-record-cmb-cashflow
+       :desc "Collateral transfer · 担保品划转"      "t" #'my/beancount-record-collateral-transfer
+       :desc "Margin buy · 融资买入"                "m" #'my/beancount-record-margin-buy
+       :desc "Margin sell · 融资卖出"               "M" #'my/beancount-record-margin-sell))
 #+end_src
 
 * Apps
