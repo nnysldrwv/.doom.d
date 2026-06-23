@@ -146,7 +146,7 @@
 ;; Elfeed Tube live transcript integration with mpv.
 (package! elfeed-tube-mpv :pin "2d7251d8363661f7bae3fd6b27ef88edc65d25ed")
 
-;; 复式记账 / 投资记录 (配套 CLI: pip install beancount fava)
+;; 复式记账 / 投资记录 (配套 CLI: beancount/fava + fava_investor + fava_portfolio_summary)
 (package! beancount
   :recipe (:host github :repo "beancount/beancount-mode"))
 
@@ -2275,7 +2275,9 @@ Before 03:00 falls back to the previous day."
 ** beancount
 #+begin_src emacs-lisp
 ;; beancount: 复式记账 / 投资记录
-;; - 安装 CLI:  pip install beancount fava
+;; - 安装 CLI:
+;;   pip install beancount fava fava_investor
+;;   pip install git+https://github.com/PhracturedBlue/fava-portfolio-summary@7d3301619025d735830c389948e5527456050d44
 ;; - 主账本放在 ~/org/investment/main.beancount
 ;; - 正式交易/现金流用下面的 `my/beancount-record-*` 命令直接入账；org-capture 只做信息不完整时的暂存。
 ;; - 通过 fava (浏览器 UI) 查看报表: fava ~/org/investment/main.beancount
@@ -2291,6 +2293,8 @@ Before 03:00 falls back to the previous day."
 (defconst my/beancount-funds
   '(("159501" :name "嘉实纳斯达克100ETF(QDII)" :commodity "ETF159501"
      :account "Assets:Investment:Broker:Normal:Nasdaq100:ETF159501" :category "纳指100")
+    ("159659" :name "招商纳斯达克100ETF(QDII)" :commodity "ETF159659"
+     :account "Assets:Investment:Broker:Normal:Nasdaq100:ETF159659" :category "纳指100")
     ("159696" :name "易方达纳斯达克100ETF(QDII)" :commodity "ETF159696"
      :account "Assets:Investment:Broker:Normal:Nasdaq100:ETF159696" :category "纳指100")
     ("513100" :name "国泰纳斯达克100ETF(QDII)" :commodity "ETF513100"
