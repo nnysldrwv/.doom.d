@@ -690,7 +690,7 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
   (setq org-agenda-inhibit-startup t
         org-agenda-tags-column 'auto
         org-agenda-files '("~/org/inbox.org"
-                           "~/org/notes/20260101T000010--habits-hub__habit_index.org"
+                           "~/org/notes/20260101T000018--habits-hub__habit_index.org"
                            "~/org/append-note.org"
                            "~/org/.calendar")
         org-default-notes-file "~/org/inbox.org")
@@ -998,42 +998,42 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
            "* TODO [[%^{URL}][%^{Title}]]\n:PROPERTIES:\n:CREATED: %U\n:END:\n%?" :empty-lines 1)
           ("m" "Media")
           ("mm" "电影 · 想看" entry
-           (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "电影" "想看")
+           (file+olp "~/org/notes/20260101T000020--media-collection__index.org" "影视动漫" "电影" "想看")
            "**** TODO %^{片名}\n:PROPERTIES:\n:添加时间: %U\n:END:\n%?"
            :empty-lines 1 :jump-to-captured t)
           ("mM" "电影 · 看完" entry
-           (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "电影" "看完")
+           (file+olp "~/org/notes/20260101T000020--media-collection__index.org" "影视动漫" "电影" "看完")
            "**** DONE %^{片名}\n:PROPERTIES:\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
            :empty-lines 1 :jump-to-captured t)
           ("mt" "电视剧 · 想看" entry
-           (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "电视剧" "想看")
+           (file+olp "~/org/notes/20260101T000020--media-collection__index.org" "影视动漫" "电视剧" "想看")
            "**** TODO %^{片名}\n:PROPERTIES:\n:添加时间: %U\n:END:\n%?"
            :empty-lines 1 :jump-to-captured t)
           ("mT" "电视剧 · 看完" entry
-           (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "电视剧" "看完")
+           (file+olp "~/org/notes/20260101T000020--media-collection__index.org" "影视动漫" "电视剧" "看完")
            "**** DONE %^{片名}\n:PROPERTIES:\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
            :empty-lines 1 :jump-to-captured t)
           ("ma" "动漫 · 想看" entry
-           (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "动漫" "想看")
+           (file+olp "~/org/notes/20260101T000020--media-collection__index.org" "影视动漫" "动漫" "想看")
            "**** TODO %^{片名}\n:PROPERTIES:\n:添加时间: %U\n:END:\n%?"
            :empty-lines 1 :jump-to-captured t)
           ("mA" "动漫 · 看完" entry
-           (file+olp "~/org/notes/20260101T000010--media-collection__index.org" "影视动漫" "动漫" "看完")
+           (file+olp "~/org/notes/20260101T000020--media-collection__index.org" "影视动漫" "动漫" "看完")
            "**** DONE %^{片名}\n:PROPERTIES:\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
            :empty-lines 1 :jump-to-captured t)
           ("b" "Books")
           ("bb" "书 · 待阅读" entry
-           (file+olp "~/org/notes/20260101T000010--reading-list__read_index.org" "待阅读")
+           (file+olp "~/org/notes/20260101T000024--reading-list__read_index.org" "待阅读")
            "*** TODO %^{书名}\n:PROPERTIES:\n:作者: %^{作者}\n:类型: %^{类型|小说|非虚构|理财|网文|漫画|其他}\n:来源: %^{来源|微信读书|豆瓣|Z-Library|实体书|其他}\n:添加时间: %U\n:END:\n%?"
            :empty-lines 1 :jump-to-captured t)
           ("bB" "书 · 阅读中" entry
-           (file+olp "~/org/notes/20260101T000010--reading-list__read_index.org" "阅读中")
+           (file+olp "~/org/notes/20260101T000024--reading-list__read_index.org" "阅读中")
            "*** READING %^{书名}\n:PROPERTIES:\n:作者: %^{作者}\n:类型: %^{类型|小说|非虚构|理财|网文|漫画|其他}\n:来源: %^{来源|微信读书|豆瓣|Z-Library|实体书|其他}\n:添加时间: %U\n:END:\n%?"
            :empty-lines 1 :jump-to-captured t)
           ("w" "w · 精读笔记 [ref/]" plain (function my/capture-web-article-target)
            "%?"
            :empty-lines 1 :jump-to-captured t)
-          ("h" "Habit" entry (file "~/org/notes/20260101T000010--habits-hub__habit_index.org")
+          ("h" "Habit" entry (file "~/org/notes/20260101T000018--habits-hub__habit_index.org")
            (function my/org-capture-habit)
            :empty-lines 1)
           ("pl" "Protocol: Read later" entry (file "~/org/inbox.org")
@@ -1149,7 +1149,7 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
   (defun my/media-org-file-p ()
     "Return non-nil when visiting the media library file."
     (and (buffer-file-name)
-         (file-equal-p (expand-file-name "~/org/notes/20260101T000010--media-collection__index.org")
+         (file-equal-p (expand-file-name "~/org/notes/20260101T000020--media-collection__index.org")
                        (expand-file-name (buffer-file-name)))))
 
   (defun my/media-org-target-section-for-state (state)
@@ -1217,7 +1217,7 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
   (defun my/books-org-file-p ()
     "Return non-nil when visiting the books collection file."
     (and (buffer-file-name)
-         (file-equal-p (expand-file-name "~/org/notes/20260101T000010--reading-list__read_index.org")
+         (file-equal-p (expand-file-name "~/org/notes/20260101T000024--reading-list__read_index.org")
                        (expand-file-name (buffer-file-name)))))
 
   (defun my/books-org-target-section-for-state (state)
@@ -2344,6 +2344,11 @@ Before 03:00 falls back to the previous day."
      :account "Assets:Investment:BankWealth:DQB" :category "银行理财" :fee-free t))
   "银行理财映射。")
 
+(defconst my/beancount-cash-accounts
+  '(("CMB" :name "招行活期现金" :commodity "CNY"
+     :account "Assets:Bank:CMB:Cash" :category "银行现金" :fee-free t))
+  "银行现金账户映射。")
+
 (defconst my/beancount-pension-funds
   '(("022907" :name "易方达创业板ETF联接Y" :commodity "P022907"
      :account "Assets:Investment:Pension:Fund022907" :category "个人养老金" :fee-free t)
@@ -2530,6 +2535,7 @@ Before 03:00 falls back to the previous day."
   (or (cdr (assoc code my/beancount-funds))
       (cdr (assoc code my/beancount-pension-funds))
       (cdr (assoc code my/beancount-bank-wealth))
+      (cdr (assoc code my/beancount-cash-accounts))
       (user-error "Unknown holding code: %s" code)))
 
 (defun my/beancount--parse-balance-batch-line (line line-number broker-account)
@@ -2930,13 +2936,14 @@ When ACCOUNT is non-nil, ensure that account instead of the default normal accou
       (insert "# Paste holdings as CODE SHARES, one per line.\n")
       (insert (format "# ETF default account: %s.\n" broker-account))
       (insert "# ETF lines may override it with: 普通账户 CODE SHARES or 信用账户 CODE SHARES.\n")
-      (insert "# Supported: ETF codes, pension fund codes, DYB, DQB.\n")
+      (insert "# Supported: ETF codes, pension fund codes, DYB, DQB, CMB (招行活期现金).\n")
       (insert "# Submit with C-c C-c. Cancel with C-c C-k.\n")
       (insert "# Examples:\n")
       (insert "# 信用账户 513870 1234\n")
       (insert "# 普通账户 511880 1000\n")
       (insert "# 022907 62.14\n")
-      (insert "# DYB 10000\n\n"))))
+      (insert "# DYB 10000\n")
+      (insert "# CMB 1283.38\n\n"))))
 
 (defun my/beancount-balance-batch-submit ()
   "Append the current batch balance buffer to the main Beancount ledger."
@@ -3276,7 +3283,7 @@ identical to what `doom.ps1' does on Windows."
   :after elfeed
   :config
   (elfeed-org)
-  (setq rmh-elfeed-org-files (list (expand-file-name "~/org/notes/20260101T000010--elfeed__emacs_index.org"))))
+  (setq rmh-elfeed-org-files (list (expand-file-name "~/org/notes/20260101T000013--elfeed__emacs_index.org"))))
 
 (after! elfeed-goodies
   (setq elfeed-goodies/entry-pane-position 'right
