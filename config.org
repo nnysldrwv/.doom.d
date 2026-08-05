@@ -1208,7 +1208,9 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
               (insert "\n"))
             (org-paste-subtree level))))))
 
-  (add-hook 'org-after-todo-state-change-hook #'my/media-org-rebucket-current-entry))
+  ;; Disabled: keep media entries in place when TODO state changes.
+  ;; (add-hook 'org-after-todo-state-change-hook #'my/media-org-rebucket-current-entry)
+  )
 #+end_src
 
 ** Books library auto-rebucket
@@ -1266,7 +1268,9 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
               (insert "\n"))
             (org-paste-subtree level))))))
 
-  (add-hook 'org-after-todo-state-change-hook #'my/books-org-rebucket-current-entry))
+  ;; Disabled: keep book entries in place when TODO state changes.
+  ;; (add-hook 'org-after-todo-state-change-hook #'my/books-org-rebucket-current-entry)
+  )
 #+end_src
 
 ** Archive done tasks
