@@ -445,6 +445,17 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
   (require 'org-protocol)
   (require 'org-habit)
 
+  ;; ---- Fix habit-graph wrapping in agenda ----
+  ;; global-visual-line-mode + word-wrap-by-category 让超出窗口宽度的
+  ;; habit 行(21+7=28 天图谱 + 前缀)被折到下一行;refresh (r/g/R) 后
+  ;; agenda buffer 重新生成时这两个全局模式重新在 agenda 局部占主导。
+  ;; org-agenda-finalize-hook 每次 refresh 都会触发,在这里强制关闭
+  ;; 视觉行并启用行截断,habit 图谱就会保持单逻辑行(右侧溢出可 C-x </> 查看)。
+  (add-hook 'org-agenda-finalize-hook
+    (lambda ()
+      (setq-local truncate-lines t)
+      (visual-line-mode -1)))
+
   (setq org-habit-graph-column 50
         org-habit-preceding-days 21
         org-habit-following-days 7
