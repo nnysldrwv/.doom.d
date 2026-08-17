@@ -995,8 +995,6 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
            "- %?"
            :empty-lines 1 :jump-to-captured t)
           ("i" "Inbox" entry (file "~/org/inbox.org")
-           "* %?\n:PROPERTIES:\n:CREATED: %U\n:END:\n" :empty-lines 1)
-          ("n" "Note" entry (file "~/org/inbox.org")
            "* %^{标题}  %^g\n:PROPERTIES:\n:CREATED: %U\n:END:\n\n%?"
            :empty-lines 1 :jump-to-captured t)
           ("t" "Task" entry (file "~/org/inbox.org")
@@ -1005,8 +1003,6 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
            (file my/journal-capture-target)
            "* %<%H:%M>\n%?"
            :empty-lines 1 :jump-to-captured t)
-          ("r" "r · 稍后读 [inbox]" entry (file "~/org/inbox.org")
-           "* TODO [[%^{URL}][%^{Title}]]\n:PROPERTIES:\n:CREATED: %U\n:END:\n%?" :empty-lines 1)
           ("m" "Media")
           ("mm" "电影 · 想看" entry
            (file+olp "~/org/notes/20260101T000020--media-collection__index.org" "影视动漫" "电影" "想看")
@@ -1041,12 +1037,6 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
            (file+olp "~/org/notes/20260101T000024--reading-list__read_index.org" "阅读中")
            "*** READING %^{书名}\n:PROPERTIES:\n:作者: %^{作者}\n:类型: %^{类型|小说|非虚构|理财|网文|漫画|其他}\n:来源: %^{来源|微信读书|豆瓣|Z-Library|实体书|其他}\n:添加时间: %U\n:END:\n%?"
            :empty-lines 1 :jump-to-captured t)
-          ("w" "w · 精读笔记 [ref/]" plain (function my/capture-web-article-target)
-           "%?"
-           :empty-lines 1 :jump-to-captured t)
-          ("h" "Habit" entry (file "~/org/notes/20260101T000018--habits-hub__habit_index.org")
-           (function my/org-capture-habit)
-           :empty-lines 1)
           ("pl" "Protocol: Read later" entry (file "~/org/inbox.org")
            "* TODO %:annotation\n:PROPERTIES:\n:CREATED: %U\n:END:\n%i\n"
            :immediate-finish t :jump-to-captured t)
@@ -1054,34 +1044,7 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
            (function my/protocol-note-target)
            "#+begin_quote\n%i\n#+end_quote\n%?"
            :jump-to-captured t)
-          ;; 投资交易暂存：信息不完整时先进 inbox；正式入账用 `SPC n i b/s/p/B` 写入 Beancount。
-          ("$" "Investment · 待补 Beancount 交易" entry
-           (file+olp+datetree "~/org/inbox.org" "Investment")
-           "* TODO 补 Beancount 交易：%^{动作|买入|卖出|分红|手续费} %^{标的/代码}\n:PROPERTIES:\n:CREATED: %U\n:交易日期: %^{交易日期}\n:成交价格: %^{成交价格}\n:成交份额: %^{成交份额}\n:成交金额: %^{成交金额}\n:手续费: %^{手续费|0}\n:END:\n%?"
-           :empty-lines 1)
-          ;; 银行理财赎回：SPC n i r
-          ;; 个人养老金定投买入：SPC n i y
-          ;; 招行转入/转出：SPC n i C
-          ;; 担保品划转/融资买卖：SPC n i t/m/M
-          ("I" "Investment · 快捷操作")
-          ("Ir" "招行理财赎回" plain
-           (function my/beancount-record-bank-redeem)
-           "" :immediate-finish t)
-          ("Iy" "养老金基金定投" plain
-           (function my/beancount-record-pension-buy)
-           "" :immediate-finish t)
-          ("Ic" "招行转入/转出" plain
-           (function my/beancount-record-cmb-cashflow)
-           "" :immediate-finish t)
-          ("It" "担保品划转" plain
-           (function my/beancount-record-collateral-transfer)
-           "" :immediate-finish t)
-          ("Im" "融资买入" plain
-           (function my/beancount-record-margin-buy)
-           "" :immediate-finish t)
-          ("IM" "融资卖出" plain
-           (function my/beancount-record-margin-sell)
-           "" :immediate-finish t))))
+          )))
 #+end_src
 
 ** Refile & Tags
