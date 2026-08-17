@@ -2024,6 +2024,21 @@ denote-dired directory, matching case-insensitively."
 #+end_src
 
 * Journal
+** Journal encryption
+#+begin_src emacs-lisp
+(use-package! epa-file
+  :demand t
+  :config
+  ;; Keep Denote Journal filenames as .org so denote-journal and its calendar
+  ;; commands continue to work; encrypt only the file contents on disk.
+  (setq epa-file-name-regexp
+        ".*[\\\\/]journal[\\\\/].*__journal\\.org\\'"
+        epa-file-encrypt-to "CE8EA11D470516F3220E9BA11EE5F16F26111AD1"
+        epa-file-select-keys 'silent)
+  (epa-file-name-regexp-update)
+  (epa-file-enable))
+#+end_src
+
 ** denote-journal
 #+begin_src emacs-lisp
 (use-package! denote-journal
