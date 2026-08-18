@@ -201,6 +201,12 @@ Loaded early so downstream config (org-gcal, agent-shell …) sees the credentia
 (setq initial-major-mode 'org-mode)
 (setq initial-scratch-message nil)
 
+;; 让普通 GUI 启动的 Emacs 也接受 emacsclientw 连接。
+;; 这不是 daemon：主窗口照常存在，但后续窗口可复用同一 Emacs 进程。
+(after! server
+  (unless (server-running-p)
+    (server-start)))
+
 ;; Smooth mouse scrolling
 (setq mouse-wheel-scroll-amount '(2 ((shift) . 1))
       mouse-wheel-progressive-speed nil
