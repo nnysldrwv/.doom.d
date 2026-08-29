@@ -3006,8 +3006,6 @@ When ACCOUNT is non-nil, ensure that account instead of the default normal accou
 (defun my/beancount-python-executable ()
   "Return a Python executable with the investment script dependencies."
   (let ((candidates (list (expand-file-name "scoop/apps/python311/current/python.exe" "~")
-                          (expand-file-name "scoop/apps/python314/current/python.exe" "~")
-                          (expand-file-name "scoop/apps/python/current/python.exe" "~")
                           (executable-find "python3")
                           (executable-find "python"))))
     (catch 'found
