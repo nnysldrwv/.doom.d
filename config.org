@@ -266,6 +266,27 @@ Returns 'deleted, 'link-only, or nil."
    (t nil)))
 #+end_src
 
+** Portable tool locations (Windows)
+Git for Windows 可能装在 =C:\Program Files\Git=，也可能由 scoop 装在
+=~\scoop\apps\git\current=。配置里多处需要它的 GNU 用户态工具
+(=find.exe= / =unzip.exe= / =bash.exe=)，这里统一探测，避免硬编码路径或用户名。
+#+begin_src emacs-lisp
+(defvar my/git-usr-bin
+  (catch 'found
+    (dolist (candidate (list (expand-file-name "scoop/apps/git/current/usr/bin" "~")
+                             "C:/Program Files/Git/usr/bin"
+                             "C:/PROGRA~1/Git/usr/bin"))
+      (when (file-directory-p candidate)
+        (throw 'found candidate))))
+  "Directory holding Git for Windows' GNU userland (find/unzip/bash).")
+
+(defun my/git-tool (name)
+  "Return the full path to Git for Windows' GNU tool NAME, or nil."
+  (when my/git-usr-bin
+    (let ((file (expand-file-name name my/git-usr-bin)))
+      (when (file-executable-p file) file))))
+#+end_src
+
 ** Windows-specific Performance
 VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode 处理。
 #+begin_src emacs-lisp
@@ -298,13 +319,18 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
   ;; (so-long-mode 已经更智能地处理长行问题)
 
   ;; pdf-tools: MSYS2 epdfinfo
-  (setenv "PATH" (concat "C:\\Users\\fengxing.chen\\scoop\\apps\\msys2\\current\\mingw64\\bin" ";" (getenv "PATH")))
-  (setq pdf-info-epdfinfo-program "C:\\Users\\fengxing.chen\\scoop\\apps\\msys2\\current\\mingw64\\bin\\epdfinfo.exe")
+  ;; 动态定位，换机器/换用户名无需改动；前提是目标 msys2 内装了
+  ;; mingw-w64-x86_64-pkg-config + mingw-w64-x86_64-poppler 并跑过
+  ;; M-x pdf-tools-install 生成 epdfinfo.exe
+  (let ((msys2-bin (expand-file-name "scoop/apps/msys2/current/mingw64/bin" "~")))
+    (when (file-directory-p msys2-bin)
+      (setenv "PATH" (concat msys2-bin ";" (getenv "PATH")))
+      (setq pdf-info-epdfinfo-program (expand-file-name "epdfinfo.exe" msys2-bin))))
 
   ;; project.el / grep / locate all call bare `find`, which on Windows PATH
   ;; resolves to C:\Windows\System32\FIND.EXE — a completely different tool.
-  (let ((gnu-find "C:/Program Files/Git/usr/bin/find.exe"))
-    (when (file-executable-p gnu-find)
+  (let ((gnu-find (my/git-tool "find.exe")))
+    (when gnu-find
       (setq find-program gnu-find))))
 #+end_src
 
@@ -1101,7 +1127,7 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
 
 ;; ---- Force org-babel shell blocks to use Git bash on Windows ----
 (defvar my/org-babel-bash nil)
-(setq my/org-babel-bash "C:/PROGRA~1/Git/usr/bin/bash.exe")
+(setq my/org-babel-bash (or (my/git-tool "bash.exe") "bash"))
 (after! ob-shell
   (define-advice org-babel-execute:shell
       (:around (orig body params) use-bash-on-windows)
@@ -1595,8 +1621,9 @@ This physically modifies the file, so rotation survives cache/reboot."
     (unless (and file (file-exists-p file) (file-regular-p file))
       (user-error "No image file at point"))
     (let* ((magick (or (executable-find "magick")
-                        (let ((candidates '("C:/ProgramData/scoop/apps/imagemagick/current/magick.exe"
-                                            "C:/PROGRA~3/scoop/apps/imagemagick/current/magick.exe")))
+                        (let ((candidates (list (expand-file-name "scoop/apps/imagemagick/current/magick.exe" "~")
+                                                "C:/ProgramData/scoop/apps/imagemagick/current/magick.exe"
+                                                "C:/PROGRA~3/scoop/apps/imagemagick/current/magick.exe")))
                           (catch 'found
                             (dolist (c candidates)
                               (when (file-executable-p c) (throw 'found c)))))))
@@ -2188,7 +2215,9 @@ Before 03:00 falls back to the previous day."
   :mode ("\\.epub\\'" . nov-mode)
   :config
   (when (featurep :system 'windows)
-    (setq nov-unzip-program "C:/Program Files/Git/usr/bin/unzip.exe"))
+    (let ((unzip (my/git-tool "unzip.exe")))
+      (when unzip
+        (setq nov-unzip-program unzip))))
   (setq nov-variable-pitch nil)
 
   ;; (defun my/nov-setup ()
@@ -2205,8 +2234,11 @@ Before 03:00 falls back to the previous day."
   ;;   (setq nov-text-width 80))
   (defun my/nov-setup ()
     (let* ((font (or (my/first-available-font
-                      "霞鹜文楷 屏幕阅读版"
+                      "霞鹜文楷 屏幕阅读版"  ; 旧版 LXGW 的屏幕阅读版
+                      "霞鹜文楷"             ; v1.5xx 起去掉了后缀
+                      "LXGW WenKai"
                       "霞鹜文楷等宽"
+                      "LXGW WenKai Mono"
                       "Noto Sans SC"
                       "Noto Serif SC"
                       "Microsoft YaHei UI"
@@ -2975,6 +3007,8 @@ When ACCOUNT is non-nil, ensure that account instead of the default normal accou
   "Return a Python executable with the investment script dependencies."
   (let ((candidates (list (expand-file-name "scoop/apps/python311/current/python.exe" "~")
                           (expand-file-name "scoop/apps/python314/current/python.exe" "~")
+                          (expand-file-name "scoop/apps/python/current/python.exe" "~")
+                          (executable-find "python3")
                           (executable-find "python"))))
     (catch 'found
       (dolist (candidate candidates)
