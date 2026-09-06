@@ -1,0 +1,18 @@
+# -*- mode: snippet -*-
+# name: 券商信用账户融资买入 ETF
+# key: mbuy
+# group: beancount
+# 用法：mbuy TAB → 日期(今天) → 基金代码(默认 513870) → 份额 → 成交单价
+#       融资负债 = -(成交额 + 佣金)，自动算。其余同 buy。
+# --
+${1:`(format-time-string "%Y-%m-%d")`} * "融资买入 ${5:$(bc-etf (yas-field-value 2) 'name)} (${2:513870})"
+  trade_type: "融资买入"
+  fund_code: "$2"
+  fund_name: "${5:$(bc-etf (yas-field-value 2) 'name)}"
+  asset_category: "${2:$(bc-etf yas-text 'cat)}"
+  trade_price: "${4:0.000} CNY"
+  trade_value: "${4:$(bc-value (yas-field-value 3) yas-text)} CNY"
+  Assets:Investment:Broker:Margin:${2:$(bc-etf yas-text 'cls)}:ETF$2  ${3:0} ETF$2 {{${4:$(bc-value (yas-field-value 3) yas-text)} CNY}}
+  Expenses:Investment:Fees  ${4:$(bc-fee (bc-value (yas-field-value 3) yas-text))} CNY
+  Liabilities:Investment:Broker:Margin:Principal  -${4:$(bc-add (bc-value (yas-field-value 3) yas-text) (bc-fee (bc-value (yas-field-value 3) yas-text)))} CNY
+$0

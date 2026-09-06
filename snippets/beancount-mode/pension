@@ -1,0 +1,40 @@
+# -*- mode: snippet -*-
+# name: 养老金定投（022907 / 022918 / 022945 三笔一次出）
+# key: pension
+# group: beancount
+# 用法：pension TAB → 日期(今天) → 022907 净值 → 022907 金额(默认 250) → 022918 净值
+#       → 022918 金额(默认 500) → 022945 净值 → 022945 金额(默认 250)
+#       份额 = (申购金额 - 申购费) ÷ 净值，成本 = 申购金额 - 申购费，均自动算。
+#       申购费固定：022907 0.30 / 022918 0.50 / 022945 0.30。
+#       注意：先要有「招行现金转出到养老金账户」把钱转进 Pension:Cash，用 zout 记。
+# --
+${1:`(format-time-string "%Y-%m-%d")`} * "定投买入 易方达创业板 ETF 联接 Y (022907)"
+  fund_code: "022907"
+  fund_name: "易方达创业板 ETF 联接 Y"
+  asset_category: "个人养老金"
+  trade_price: "${2:0.0000} CNY"
+  trade_value: "${3:250.00} CNY"
+  Assets:Investment:Pension:Fund022907  ${2:$(bc-shares (yas-field-value 3) yas-text "0.30")} P022907 {{${2:$(bc-sub (yas-field-value 3) "0.30")} CNY}}
+  Expenses:Investment:Fees  0.30 CNY
+  Assets:Investment:Pension:Cash
+
+$1 * "定投买入 南方中证 A500ETF 联接 Y (022918)"
+  fund_code: "022918"
+  fund_name: "南方中证 A500ETF 联接 Y"
+  asset_category: "个人养老金"
+  trade_price: "${4:0.0000} CNY"
+  trade_value: "${5:500.00} CNY"
+  Assets:Investment:Pension:Fund022918  ${4:$(bc-shares (yas-field-value 5) yas-text "0.50")} P022918 {{${4:$(bc-sub (yas-field-value 5) "0.50")} CNY}}
+  Expenses:Investment:Fees  0.50 CNY
+  Assets:Investment:Pension:Cash
+
+$1 * "定投买入 华夏上证科创板 50 成分 ETF 联接 Y (022945)"
+  fund_code: "022945"
+  fund_name: "华夏上证科创板 50 成分 ETF 联接 Y"
+  asset_category: "个人养老金"
+  trade_price: "${6:0.0000} CNY"
+  trade_value: "${7:250.00} CNY"
+  Assets:Investment:Pension:Fund022945  ${6:$(bc-shares (yas-field-value 7) yas-text "0.30")} P022945 {{${6:$(bc-sub (yas-field-value 7) "0.30")} CNY}}
+  Expenses:Investment:Fees  0.30 CNY
+  Assets:Investment:Pension:Cash
+$0

@@ -1,0 +1,13 @@
+# -*- mode: snippet -*-
+# name: 招行现金转入
+# key: zin
+# group: beancount
+# 用法：zin TAB → 日期(今天) → narration 后缀(如 " 9 月工资"、" 公积金") → 金额
+#       对端固定 Income:ExternalFunding。若是借款/个贷放款，展开后手动改这一行。
+# --
+${1:`(format-time-string "%Y-%m-%d")`} * "招行现金转入${2:}"
+  cashflow_type: "转入"
+  trade_value: "${3:0} CNY"
+  Assets:Bank:CMB:Cash  $3 CNY
+  Income:ExternalFunding
+$0

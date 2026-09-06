@@ -1,0 +1,13 @@
+# -*- mode: snippet -*-
+# name: 借呗还款
+# key: jiebei
+# group: beancount
+# --
+${1:`(format-time-string "%Y-%m-%d")`} * "借呗还款 第${2:1}期/12"
+  cashflow_type: "流出"
+  trade_value: "${4:$(let ((p (string-to-number (or (yas-field-value 3) "0"))) (i (string-to-number (or yas-text "0")))) (format "%.2f" (+ p i)))} CNY"
+  note: "本金 $3 + 利息 $4"
+  Assets:Bank:CMB:Cash  -${4:$(let ((p (string-to-number (or (yas-field-value 3) "0"))) (i (string-to-number (or yas-text "0")))) (format "%.2f" (+ p i)))} CNY
+  Liabilities:Alipay:Jiebei  ${3:0.00} CNY
+  Expenses:Investment:LoanInterest  ${4:0.00} CNY
+$0

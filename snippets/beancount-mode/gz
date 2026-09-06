@@ -1,0 +1,14 @@
+# -*- mode: snippet -*-
+# name: 招行现金转入工资
+# key: gz
+# group: beancount
+# 用法：gz TAB → 日期(今天) → 月份(默认当月，可直接 TAB 跳过) → 金额。
+#       zin 的工资特化版：narration 固定 "{N} 月工资"，对端固定 Income:ExternalFunding。
+#       若是年终奖/公积金等非工资转入，用 zin 手写后缀。
+# --
+${1:`(format-time-string "%Y-%m-%d")`} * "招行现金转入 ${2:`(format-time-string "%-m")`} 月工资"
+  cashflow_type: "转入"
+  trade_value: "${3:0} CNY"
+  Assets:Bank:CMB:Cash  $3 CNY
+  Income:ExternalFunding
+$0

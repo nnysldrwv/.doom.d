@@ -1,0 +1,11 @@
+# -*- mode: snippet -*-
+# name: price 指令（通用）
+# key: price
+# group: beancount
+# 用法：price TAB → 日期自动填今天 → 改商品代码 → TAB 改价格
+# 常用商品：WMDQB 招行定期宝 / WMDYB 招行多月宝 / BYTEDANCEOPTION 字节期权
+#           P022907 P022918 P022945 P022951 P022980 养老金
+# 每月补定存净值请用 dqb（会自动带出上次净值），这个通用版价格需手填。
+# 注意：手工 price 加在 main.beancount，不要加 prices.beancount（那文件被脚本全量重写）。
+# --
+${1:`(format-time-string "%Y-%m-%d")`} price ${2:WMDQB} ${3:0.0000} CNY$0

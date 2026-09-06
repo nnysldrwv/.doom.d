@@ -1,0 +1,15 @@
+# -*- mode: snippet -*-
+# name: 计提融资利息
+# key: interest
+# group: beancount
+# 用法：interest TAB → 日期(今天) → 本期累计计提额(券商对账单口径) → 上期累计(自动)
+#       → 已结未付(自动) → 融资总负债(自动 = 利息负债 + 融资本金，可手改)
+#       上期累计 / 已结未付 / 融资本金 都从账本最近一条 balance 断言读，见 .yas-setup.el。
+#       增计 = 本期累计 - 上期累计；利息负债 = 本期累计 + 已结未付。
+#       注意：改了「上期累计」后要再动一下「本期累计」字段，增计才会刷新。
+# --
+${1:`(format-time-string "%Y-%m-%d")`} * "计提融资利息"
+  note: "券商融资计提利息 ${2:0.00}（较上期 ${3:`(bc-last-balance "Liabilities:Investment:Broker:Margin:InterestAccrued")`} 增计 ${2:$(bc-sub yas-text (yas-field-value 3))}）；已结未付利息维持 ${4:`(bc-last-balance "Liabilities:Investment:Broker:Margin:InterestSettled")`}"
+  Expenses:Investment:MarginInterest  ${2:$(bc-sub yas-text (yas-field-value 3))} CNY
+  Liabilities:Investment:Broker:Margin:InterestAccrued  -${2:$(bc-sub yas-text (yas-field-value 3))} CNY
+$1 event "margin-interest-accrued" "融资计提利息 $2 + 已结未付利息 $4 = 利息负债 ${4:$(bc-add (yas-field-value 2) yas-text)}，融资总负债 ${5:$(bc-add (yas-field-value 2) (yas-field-value 4) (bc-last-balance "Liabilities:Investment:Broker:Margin:Principal"))}"

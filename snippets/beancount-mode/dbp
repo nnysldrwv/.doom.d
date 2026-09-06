@@ -1,0 +1,17 @@
+# -*- mode: snippet -*-
+# name: 担保品划转（普通账户 -> 信用账户）
+# key: dbp
+# group: beancount
+# 用法：紧跟在 buy / mbuy 之后展开，代码/份额/成本价/成本日期全部自动抓上一笔买入，
+#       展开后连按 TAB 确认即可。划转记的是买入价，不是当日市价。
+#       补记历史时也可手动改字段；向上找不到买入则字段为空，需手填。
+# --
+${1:`(bc-last-buy 'date)`} * "担保品划转 普通账户 -> 信用账户 ${6:$(bc-etf (yas-field-value 2) 'name)} (${2:`(bc-last-buy 'code)`})"
+  transfer_type: "担保品划转"
+  broker_from: "普通账户"
+  broker_to: "信用账户"
+  fund_code: "$2"
+  fund_name: "${6:$(bc-etf (yas-field-value 2) 'name)}"
+  Assets:Investment:Broker:Normal:${2:$(bc-etf yas-text 'cls)}:ETF$2  -${3:`(bc-last-buy 'shares)`} ETF$2 {${4:`(bc-last-buy 'price)`} CNY, ${5:`(bc-last-buy 'date)`}}
+  Assets:Investment:Broker:Margin:${2:$(bc-etf yas-text 'cls)}:ETF$2  $3 ETF$2 {$4 CNY, $5}
+$0

@@ -83,6 +83,7 @@
 (package! cal-china-x)
 (package! nov)
 (package! powershell)
+(package! ob-powershell)
 (package! sis)
 
 ;; denote
@@ -154,6 +155,16 @@
 
 ;; Emacs MCP server (HTTP, 供 Claude Code 等外部工具调用 Emacs)
 (package! emcp)
+
+;; EPUB reader (yibie): MELPA 没收录, 直装 GitHub 仓库。
+;; - 仓库: github.com/yibie/epub-reader (作者 chenyibin, v0.3.0)
+;; - 强依赖 textui, Package-Requires 触发 straight 自动拉, 显式声明便于锁版本
+;; - 需要 Emacs 29.1+ + libxml2 + 系统 unzip 或 bsdtar
+;; - 入口: M-x epub-reader-open
+(package! textui
+  :recipe (:host github :repo "yibie/textui"))
+(package! epub-reader
+  :recipe (:host github :repo "yibie/epub-reader"))
 #+end_src
 
 ** Speed (gcmh)
@@ -223,6 +234,10 @@ Loaded early so downstream config (org-gcal, agent-shell …) sees the credentia
 (prefer-coding-system 'utf-8)
 (set-default-coding-systems 'utf-8)
 (setq default-buffer-file-coding-system 'utf-8)
+;; 中文 Windows 上，org-babel 跑 python 子进程时 Python 默认按系统 locale
+;; (cp936/GBK) 编码 stdout，而 Emacs 按 utf-8 解码 -> 中文乱码。
+;; 强制子进程用 utf-8 输出，与 Emacs 解码一致。
+(setenv "PYTHONIOENCODING" "utf-8")
 #+end_src
 
 ** Quiet
@@ -287,6 +302,52 @@ Git for Windows 可能装在 =C:\Program Files\Git=，也可能由 scoop 装在
       (when (file-executable-p file) file))))
 #+end_src
 
+** Windows: 子进程参数的编码（ANSI 代码页）
+在 Windows 上，Emacs 用「进程的输入编码系统」——也就是
+=default-process-coding-system= 的 =car=——来编码 =call-process= 的参数，然后把
+命令行交给 =CreateProcessA=；Windows 侧再按 ANSI 代码页（=w32-ansi-code-page=，
+简中系统是 936/GBK）解码回 Unicode。
+
+本文件上方执行了 =(prefer-coding-system 'utf-8)=，它把
+=default-process-coding-system= 变成了 =(utf-8-dos . utf-8-unix)=。于是含中文的
+路径被编成 UTF-8 字节、又被 Windows 当 GBK 解码，子进程拿到的是乱码路径。
+典型症状：=unzip= 报 =cannot find or open <乱码>.epub= 并以退出码 9 失败，而
+同样的文件换成 ASCII 文件名就正常。
+
+修法：调用这类外部程序时，把「写向进程的编码」临时切回 ANSI 代码页对应的编码，
+用 =my/with-ansi-process-coding= 包一层即可；非 Windows 上是 no-op。
+
+注意：Emacs 编码 =call-process= 参数时用的是「写向进程」的那套编码——也就是
+=default-process-coding-system= 的 **=cdr=**（不是 =car=！实测：=(gbk . utf-8)=
+传参仍是 UTF-8 会失败，=(utf-8 . gbk)= 则成功），或者被绑定的
+=coding-system-for-write=。所以这里绑定 =coding-system-for-write=，只动写侧，
+读侧（进程输出怎么解码）继续沿用全局的 utf-8 设置。
+#+begin_src emacs-lisp
+(defun my/w32-ansi-coding-system ()
+  "Return the coding system matching `w32-ansi-code-page'."
+  (let ((cs (pcase (and (boundp 'w32-ansi-code-page) w32-ansi-code-page)
+              ((or 936 54936) 'gbk)
+              (950 'big5)
+              (932 'cp932)
+              (949 'cp949)
+              (_ 'utf-8))))          ; 含 65001（系统开了 UTF-8 全局 beta）
+    (if (coding-system-p cs) cs 'utf-8)))
+
+(defmacro my/with-ansi-process-coding (&rest body)
+  "Run BODY with `coding-system-for-write' bound to the Windows ANSI code page.
+Wrap `call-process' calls that pass non-ASCII (e.g. Chinese) file names as
+arguments: Emacs encodes those arguments with the coding system used to write
+to the process, and Windows then decodes the command line with CP_ACP.
+
+Binding only the write side keeps the read side (how process output is
+decoded) at the global setting.  No-op on non-Windows systems."
+  (declare (indent 0))
+  (if (featurep :system 'windows)
+      `(let ((coding-system-for-write (my/w32-ansi-coding-system)))
+         ,@body)
+    `(progn ,@body)))
+#+end_src
+
 ** Windows-specific Performance
 VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode 处理。
 #+begin_src emacs-lisp
@@ -331,7 +392,13 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
   ;; resolves to C:\Windows\System32\FIND.EXE — a completely different tool.
   (let ((gnu-find (my/git-tool "find.exe")))
     (when gnu-find
-      (setq find-program gnu-find))))
+      (setq find-program gnu-find)))
+
+  ;; 任务栏单图标: Emacs 窗口声明固定 AppUserModelID。
+  ;; 必须与任务栏固定快捷方式上设置的 ID 一致(桌面 Emacs.lnk 亦设为此值);
+  ;; 否则 emacsclientw.exe(快捷方式 target) 与 emacs.exe(frame 的真正属主)
+  ;; 会被 Windows 当成两个不同应用, 各占一个任务栏图标。
+  (setq w32-apps-user-model-id "GNU.Emacs"))
 #+end_src
 
 * Appearance
@@ -395,8 +462,8 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
 #+begin_src emacs-lisp
 ;; Doom 自带的字体变量配置
 ;; (setq doom-font (font-spec :family "Ubuntu Mono" :size 18)
-(setq doom-font (font-spec :family "Jetbrains Mono" :size 18)
-      doom-big-font (font-spec :family "Jetbrains Mono" :size 36)
+(setq doom-font (font-spec :family "Jetbrains Mono" :size 22)
+      doom-big-font (font-spec :family "Jetbrains Mono" :size 40)
       doom-serif-font doom-font
       doom-symbol-font (font-spec :family "Sarasa Mono SC")
       ;; doom-variable-pitch-font (font-spec :family "Ubuntu Mono" :weight 'bold))
@@ -421,7 +488,7 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
 #+begin_src emacs-lisp
 (use-package! ace-window
   :config
-  (setq aw-keys '(?a ?s ?d ?f ?g ?h ?j ?k ?l)
+  (setq aw-keys '(?1 ?2 ?3 ?4 ?5 ?6 ?7 ?8 ?9)
         aw-scope 'frame
         aw-background t)
 
@@ -1149,6 +1216,24 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
       (funcall orig body params))))
 #+end_src
 
+** PowerShell org-babel backend
+#+begin_src emacs-lisp
+;; Enable `powershell' as an org-babel execution backend via `ob-powershell'.
+;; NOTE: the `powershell' package declared above is only the editing major-mode;
+;; it does NOT provide the babel executor. `ob-powershell' is the separate package
+;; that defines `org-babel-execute:powershell'.
+(after! org
+  (add-to-list 'org-babel-load-languages '(powershell . t)))
+
+;; ob-powershell defaults to the legacy `powershell' command; use `pwsh' (PS 7)
+;; on Windows. The variable name differs across versions, so set all known names.
+(with-eval-after-load 'ob-powershell
+  (dolist (sym '(org-babel-powershell-os-command
+                 org-babel-powershell-command
+                 ob-powershell-powershell-command))
+    (when (boundp sym) (set sym "pwsh"))))
+#+end_src
+
 ** Media library auto-rebucket
 #+begin_src emacs-lisp
 (after! org
@@ -1201,7 +1286,7 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
     (interactive)
     (when-let* ((context (and (my/media-org-file-p)
                               (my/media-org-current-entry-context)))
-                (target-section (my/media-org-target-section-for-state org-state))
+                (target-section (my/media-org-target-section-for-state (org-get-todo-state)))
                 (category (plist-get context :category))
                 (current-section (plist-get context :section)))
       (unless (equal current-section target-section)
@@ -1214,8 +1299,6 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
               (insert "\n"))
             (org-paste-subtree level))))))
 
-  ;; Disabled: keep media entries in place when TODO state changes.
-  ;; (add-hook 'org-after-todo-state-change-hook #'my/media-org-rebucket-current-entry)
   )
 #+end_src
 
@@ -1262,7 +1345,7 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
     (interactive)
     (when-let* ((context (and (my/books-org-file-p)
                               (my/books-org-current-entry-context)))
-                (target-section (my/books-org-target-section-for-state org-state))
+                (target-section (my/books-org-target-section-for-state (org-get-todo-state)))
                 (current-section (plist-get context :section)))
       (unless (equal current-section target-section)
         (let ((level (org-outline-level)))
@@ -1274,8 +1357,14 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
               (insert "\n"))
             (org-paste-subtree level))))))
 
-  ;; Disabled: keep book entries in place when TODO state changes.
-  ;; (add-hook 'org-after-todo-state-change-hook #'my/books-org-rebucket-current-entry)
+  (defun my/org-rebucket-current-entry ()
+    "Rebucket current entry in either the books or media org file."
+    (interactive)
+    (cond
+     ((my/books-org-file-p) (my/books-org-rebucket-current-entry))
+     ((my/media-org-file-p) (my/media-org-rebucket-current-entry))
+     (t (user-error "当前不是 books/media org 文件"))))
+
   )
 #+end_src
 
@@ -1438,7 +1527,12 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
           :latex-compiler ("xelatex -interaction nonstopmode -no-pdf -output-directory %o %f")
           :image-converter ("dvisvgm %f --no-fonts --exact-bbox --scale=%S -o %O")))
   ;; 打开 org 文件时自动渲染所有 LaTeX 公式
-  (setq org-startup-with-latex-preview t))
+  ;; 2026-08-29 改为 nil: 本机没装 TeX (xelatex/dvisvgm), 自动预览会在打开 org
+  ;; 文件时直接抛 "Can't find 'xelatex'", 还会打断 org-mode 的初始化
+  ;; (M-x org-mode-restart 会被它中断, 导致 hook 后半段不执行)。
+  ;; 需要看公式时用 C-c C-x C-l (org-latex-preview) 手动渲染当前片段,
+  ;; 或 C-u C-u C-c C-x C-l 渲染整个 buffer。装好 TeX 后把这里改回 t。
+  (setq org-startup-with-latex-preview nil))
 #+end_src
 
 * Org Clipboard & DnD
@@ -1638,12 +1732,41 @@ This physically modifies the file, so rotation survives cache/reboot."
 
 ** DnD: flat copy to data/ (Org)
 #+begin_src emacs-lisp
-(defun my/org-dnd-copy-to-data (uri _action)
+(defun my/dnd--local-path (uri)
+  "Return the local file path for a dropped URI, or nil.
+
+`dnd-get-local-file-name' turns the XDND form \"file:///C:/foo\" into
+\"/C:/foo\", which is NOT a valid path on MS-Windows.  Emacs 30+ rewrote
+the w32 drag-and-drop backend and now emits that form, so drops silently
+did nothing.  Strip the spurious leading slash(es) so both \"/C:/foo\" and
+\"//C:/foo\" become \"C:/foo\".  UNC paths (//server/share/...) are left
+alone because they have no drive letter."
+  (let ((f (ignore-errors (dnd-get-local-file-name uri nil))))
+    (when (and f (eq system-type 'windows-nt))
+      (when (string-match "\\`//?\\([A-Za-z]:\\)" f)
+        (setq f (replace-match "\\1" nil nil f))))
+    f))
+
+(defun my/dnd-fallback (uri action skip)
+  "Hand URI back to the normal dnd dispatch, ignoring handler SKIP.
+
+A dnd handler consumes its URI the moment it is called, even when it
+returns nil -- so a handler that declines to act MUST re-dispatch, or the
+drop silently does nothing.  SKIP is our own handler, excluded to avoid
+re-entering ourselves."
+  (let ((alist nil))
+    (dolist (cell dnd-protocol-alist)
+      (unless (eq (cdr cell) skip)
+        (push cell alist)))
+    (let ((dnd-protocol-alist (nreverse alist)))
+      (dnd-handle-multiple-urls (selected-window) (list uri) action))))
+
+(defun my/org-dnd-copy-to-data (uri action)
   "Copy locally-dropped file URI into ~/org/data/ with a denote-style name.
-Prompts for denote keywords interactively."
-  (when (derived-mode-p 'org-mode)
-    (let ((src (ignore-errors (dnd-get-local-file-name uri t))))
-      (when (and src (file-regular-p src))
+Prompts for denote keywords interactively.  Outside org-mode, or when the
+URI is not a real local file, hand the drop back to the normal dispatch."
+  (let ((src (and (derived-mode-p 'org-mode) (my/dnd--local-path uri))))
+    (if (and src (file-regular-p src))
         (let* ((keywords (denote-keywords-prompt))
                (dest-dir  (expand-file-name "data/" org-directory))
                (dest-name (my/org-download-denote-file-format
@@ -1656,7 +1779,8 @@ Prompts for denote keywords interactively."
             (insert (format "#+attr_org: :width %dpx\n" width)))
           (insert (format "[[file:%s]]"
                           (file-relative-name dest default-directory)))
-          'copy)))))
+          'copy)
+      (my/dnd-fallback uri action #'my/org-dnd-copy-to-data))))
 
 (defun my/org-prepend-flat-dnd-handler ()
   "Make our flat-data DnD handler win over Org's builtin file: handlers."
@@ -1691,12 +1815,12 @@ Prompts for denote keywords interactively."
   '("png" "jpg" "jpeg" "gif" "svg" "webp" "bmp" "avif")
   "Extensions treated as images for markdown DnD insertion.")
 
-(defun my/markdown-dnd-copy-to-data (uri _action)
+(defun my/markdown-dnd-copy-to-data (uri action)
   "Copy locally-dropped file URI into ~/org/data/ with denote-style name.
-Prompts for denote keywords interactively."
-  (when (derived-mode-p 'markdown-mode)
-    (let ((src (ignore-errors (dnd-get-local-file-name uri t))))
-      (when (and src (file-regular-p src))
+Prompts for denote keywords interactively.  Outside markdown-mode, or when
+the URI is not a real local file, hand the drop back to normal dispatch."
+  (let ((src (and (derived-mode-p 'markdown-mode) (my/dnd--local-path uri))))
+    (if (and src (file-regular-p src))
         (let* ((keywords   (denote-keywords-prompt))
                (dest-dir   (expand-file-name "data/" org-directory))
                (orig-name  (file-name-nondirectory src))
@@ -1710,7 +1834,8 @@ Prompts for denote keywords interactively."
           (insert (if (member ext my/markdown-image-extensions)
                       (format "![%s](%s)" label rel)
                     (format "[%s](%s)" label rel)))
-          'copy)))))
+          'copy)
+      (my/dnd-fallback uri action #'my/markdown-dnd-copy-to-data))))
 
 (defun my/markdown-prepend-flat-dnd-handler ()
   "Prepend our flat-data DnD handler buffer-locally in markdown-mode."
@@ -1718,6 +1843,18 @@ Prompts for denote keywords interactively."
               (cons '("^file:" . my/markdown-dnd-copy-to-data)
                     dnd-protocol-alist)))
 (add-hook 'markdown-mode-hook #'my/markdown-prepend-flat-dnd-handler)
+
+;; Fallback registration on the DEFAULT value, not just per-buffer.
+;; Some buffers (e.g. session-restored ones) never ran their mode hook, so
+;; they never got the buffer-local handler above and fell through to
+;; org-download-dnd -- which only handles images and, for anything else,
+;; bails out to `dnd-open-local-file'.  That is why dropping an .epub opened
+;; it in nov-mode instead of attaching it.  Both handlers decline cleanly via
+;; `my/dnd-fallback' when the buffer is not theirs, so other modes are safe.
+(setq-default dnd-protocol-alist
+              (append (list (cons "^file:" #'my/org-dnd-copy-to-data)
+                            (cons "^file:" #'my/markdown-dnd-copy-to-data))
+                      (default-value 'dnd-protocol-alist)))
 #+end_src
 
 * Org-gcal
@@ -2062,6 +2199,14 @@ denote-dired directory, matching case-insensitively."
 (use-package! epa-file
   :demand t
   :config
+  ;; PortableGit's bundled gnupg has no keyboxd/gpg-preset-passphrase, so point
+  ;; EPG at the full Git-for-Windows gnupg instead (same ~/.gnupg homedir).
+  (when (file-executable-p "c:/Users/yuan_/scoop/apps/git/current/usr/bin/gpg.exe")
+    (setq epg-gpg-program "c:/Users/yuan_/scoop/apps/git/current/usr/bin/gpg.exe"))
+  ;; Remember the passphrase for the whole Emacs session, so opening/saving a
+  ;; journal entry does not prompt every single time.  Cleared on restart.
+  (setq epa-file-cache-passphrase-for-symmetric-encryption t
+        password-cache-expiry nil)
   ;; Keep Denote Journal filenames as .org so denote-journal and its calendar
   ;; commands continue to work; encrypt only the file contents on disk.
   (setq epa-file-name-regexp
@@ -2172,6 +2317,14 @@ Before 03:00 falls back to the previous day."
 #+end_src
 
 * Reading
+** Shared helpers
+#+begin_src emacs-lisp
+;; nov / epub-reader 共用: 在候选字体里挑第一个装好的; 全没装则返回 nil,
+;; 调用方用 `or` 自行 fallback 到系统字体。
+(defun my/first-available-font (&rest candidates)
+  "Return the first font family in CANDIDATES available on this system, or nil."
+  (seq-find (lambda (f) (member f (font-family-list))) candidates))
+#+end_src
 ** PDF/EPUB org-file-apps
 #+begin_src emacs-lisp
 (after! org
@@ -2217,7 +2370,14 @@ Before 03:00 falls back to the previous day."
   (when (featurep :system 'windows)
     (let ((unzip (my/git-tool "unzip.exe")))
       (when unzip
-        (setq nov-unzip-program unzip))))
+        (setq nov-unzip-program unzip)))
+    ;; unzip 带中文路径时必须按 ANSI 代码页编码参数，否则 unzip 收到乱码路径、
+    ;; 报 "cannot find or open ..." 并以退出码 9 失败。
+    ;; 原理见 "Windows: 子进程参数的编码（ANSI 代码页）"。
+    (defun my/nov-unzip-ansi-coding (orig-fn &rest args)
+      (my/with-ansi-process-coding
+        (apply orig-fn args)))
+    (advice-add 'nov-unzip-epub :around #'my/nov-unzip-ansi-coding))
   (setq nov-variable-pitch nil)
 
   ;; (defun my/nov-setup ()
@@ -2255,6 +2415,26 @@ Before 03:00 falls back to the previous day."
     (setq nov-text-width 80))
 
   (add-hook 'nov-mode-hook #'my/nov-setup)
+
+  ;; Fix: 部分国产生成器（epubBuilder 等）产出的 OPF 里，<package> 的
+  ;; unique-identifier 指向一个既没有 id 属性、内容也为空的 <identifier>。
+  ;; nov 会抛 "Unique identifier not found by its name: ..."，而这个错误发生在
+  ;; nov-mode 的初始化过程中、被 Emacs 降级吞掉，表现为：书解压成功但 buffer 空白
+  ;; （nov-documents 为 0），没有任何报错提示。
+  ;; identifier 只当阅读进度的键用，取不到就退回文件名——同一本书每次结果一致。
+  (defun my/nov-content-unique-identifier-a (orig-fn content)
+    (condition-case nil
+        (funcall orig-fn content)
+      (error
+       (or (let ((id (ignore-errors
+                       (car (dom-children
+                             (esxml-query "package>metadata>identifier" content))))))
+             (and (stringp id) (> (length id) 0) (intern id)))
+           (let ((file (buffer-file-name)))
+             (and file (intern (file-name-base file))))
+           'nov-unknown-identifier))))
+  (advice-add 'nov-content-unique-identifier :around
+              #'my/nov-content-unique-identifier-a)
 
   ;; Fix: nov-save-place 中文路径 utf-8
   (defun my/nov-save-place-a (orig-fn &rest args)
@@ -2300,6 +2480,103 @@ Before 03:00 falls back to the previous day."
 
   (setq org-noter-create-session-from-document-hook
         '(my/org-noter-create-session-in-references)))
+#+end_src
+
+** epub-reader (yibie)
+#+begin_src emacs-lisp
+;; epub-reader: 走 TextUI 框架的原生 EPUB 阅读器
+;; - 仓库: github.com/yibie/epub-reader (作者 chenyibin)
+;; - 卖点: CJK 友好的 reflow、按章节首屏渲染、内置书签/高亮/笔记、可折叠 TOC
+;; - 入口: M-x epub-reader-open (命令式, 不挂 auto-mode-alist; 默认 .epub 仍归 nov)
+;; - 不在 MELPA, packages.el 已通过 straight 直装 GitHub
+;; - 系统依赖: unzip 或 bsdtar (Emacs 用 executable-find 找)
+;;   Windows 上 git 内置 unzip.exe 在 Git for Windows 的 usr/bin,
+;;   Emacs 默认 exec-path 找不到, 下面用 advice 把 git usr/bin 兜底进去。
+(use-package! epub-reader
+  :commands (epub-reader-open epub-reader-quit)
+  :config
+  ;; ---- 阅读观感 ----
+  ;; 字号微调: text-scale=0 用 base font; 改大嫌小改小嫌大时调这里
+  (setq epub-reader-text-scale 1
+        ;; 默认段落间 1 个空行; 中文阅读更舒服可调到 2
+        epub-reader-paragraph-spacing 1
+        epub-reader-line-spacing 0.15
+        ;; 打开书籍时独占当前 frame; 想要和 org 并列就 nil
+        epub-reader-open-full-frame t
+        ;; 进度/书签/高亮存 sidecar, 默认放 EPUB 同目录
+        ;; 想集中管理: (setq epub-reader-store-directory "~/org/notes/books/.epub-reader/")
+        epub-reader-enable-progress t
+        ;; 列宽: 默认 76; Windows 上 22pt JetBrains Mono + CJK 混排 70-80 都行
+        epub-reader-reading-width 76)
+
+  ;; ---- Windows: 把 git 内置 unzip 暴露给 container adapter finder ----
+  ;; epub-reader-container--find-program 只查 executable-find,
+  ;; 默认只搜 "unzip" / "bsdtar", Git for Windows 的 unzip.exe 不在 PATH
+  ;; 上, Emacs exec-path 也找不到. advice 后找不到时 fallback 到 git usr/bin.
+  (when (featurep :system 'windows)
+    (defun my/epub-reader--find-program-a (orig-fn adapter)
+      (or (funcall orig-fn adapter)
+          (and my/git-usr-bin
+               (executable-find
+                (expand-file-name (concat (symbol-name adapter) ".exe")
+                                  my/git-usr-bin)))))
+    (advice-add 'epub-reader-container--find-program
+                :around #'my/epub-reader--find-program-a)
+
+    ;; ---- Windows: 中文路径走 ANSI 代码页 ----
+    ;; 同 nov 的坑: zip 流式解压用 `unzip -p ARCHIVE MEMBER`, ARCHIVE 是中文
+    ;; 路径时会被 Windows 按 ANSI 代码页解码, 跟我们的 UTF-8 偏好冲突。
+    ;; 包 epub-reader-container-open 整个调用, 让里面的 call-process 都走 ANSI。
+    (defun my/epub-reader-container-open-ansi-a (orig-fn &rest args)
+      (my/with-ansi-process-coding
+        (apply orig-fn args)))
+    (advice-add 'epub-reader-container-open
+                :around #'my/epub-reader-container-open-ansi-a))
+
+  ;; ---- CJK 字体设置 (复用 nov 的字体优先级) ----
+  (defun my/epub-reader-setup ()
+    (let* ((font (or (my/first-available-font
+                      "霞鹜文楷 屏幕阅读版"  ; 旧版 LXGW
+                      "霞鹜文楷"             ; v1.5xx 起去后缀
+                      "LXGW WenKai"
+                      "霞鹜文楷等宽"
+                      "LXGW WenKai Mono"
+                      "Sarasa Mono SC"
+                      "Noto Sans SC"
+                      "Noto Serif SC"
+                      "Microsoft YaHei UI"
+                      "Microsoft YaHei")
+                     "Microsoft YaHei")))
+      (face-remap-add-relative 'default :family font :height 140)
+      (face-remap-add-relative 'variable-pitch :family font :height 140)
+      (set-fontset-font t 'han (font-spec :family font) nil 'prepend)
+      (message "epub-reader: using font \"%s\"" font)))
+  ;; 模式启用后立刻调; 模式没有专门的 hook 公开,
+  ;; 用 minor-mode 的 after-change-major-mode-hook 兜底也行, 但更稳的是
+  ;; advice epub-reader-open, 保证打开即生效。
+  (defun my/epub-reader-open-font-a (orig-fn &rest args)
+    (prog1 (apply orig-fn args)
+      (when (derived-mode-p 'textui-mode)  ; epub-reader-ui-mode 基于 textui
+        (my/epub-reader-setup))))
+  (advice-add 'epub-reader-open :around #'my/epub-reader-open-font-a)
+
+  ;; ---- DWIM: 当前 buffer 是 EPUB / dired 中选中 / 提示输入 ----
+  (defun my/epub-reader-open-dwim (&optional file)
+    "Open EPUB file with epub-reader.
+Use FILE arg, current buffer's file (if .epub), or prompt."
+    (interactive)
+    (let ((target (or file
+                      (and (derived-mode-p 'nov-mode) buffer-file-name)
+                      (and (derived-mode-p 'textui-mode) buffer-file-name)
+                      (and (eq major-mode 'dired-mode)
+                           (or (dired-get-file-for-visit)
+                               (car (dired-get-marked-files
+                                     nil (lambda (f)
+                                           (string-suffix-p ".epub" f))))))
+                      (read-file-name "Open EPUB: " nil nil t
+                                      nil (lambda (f) (string-suffix-p ".epub" f))))))
+      (unless target (user-error "No EPUB file selected"))
+      (epub-reader-open (expand-file-name target)))))
 #+end_src
 
 * Investment
@@ -2379,6 +2656,23 @@ Before 03:00 falls back to the previous day."
   '(("CMB" :name "招行活期现金" :commodity "CNY"
      :account "Assets:Bank:CMB:Cash" :category "银行现金" :fee-free t))
   "银行现金账户映射。")
+
+(defconst my/beancount-other-balances
+  '(("MRGPRIN"  :name "融资负债本金"   :commodity "CNY"
+     :account "Liabilities:Investment:Broker:Margin:Principal" :category "融资负债" :fee-free t)
+    ("MRGIACC"  :name "融资计提利息"   :commodity "CNY"
+     :account "Liabilities:Investment:Broker:Margin:InterestAccrued" :category "融资负债" :fee-free t)
+    ("MRGISET"  :name "已结未付利息"   :commodity "CNY"
+     :account "Liabilities:Investment:Broker:Margin:InterestSettled" :category "融资负债" :fee-free t)
+    ("MRGCASH"  :name "信用账户现金"   :commodity "CNY"
+     :account "Assets:Investment:Broker:Margin:Cash" :category "融资现金" :fee-free t)
+    ("NORMCASH" :name "普通账户现金"   :commodity "CNY"
+     :account "Assets:Investment:Broker:Normal:Cash" :category "融资现金" :fee-free t)
+    ("CHENFAN"  :name "个人借款(陈凡)" :commodity "CNY"
+     :account "Liabilities:Personal:ChenFan" :category "私人借款" :fee-free t)
+    ("JIEBEI"   :name "借呗借款"       :commodity "CNY"
+     :account "Liabilities:Alipay:Jiebei" :category "消费借款" :fee-free t))
+  "融资负债与现金等非 ETF 持仓的 balance 校验账户映射（供 SPC n i V 批量断言）。")
 
 (defconst my/beancount-pension-funds
   '(("022907" :name "易方达创业板ETF联接Y" :commodity "P022907"
@@ -2567,6 +2861,7 @@ Before 03:00 falls back to the previous day."
       (cdr (assoc code my/beancount-pension-funds))
       (cdr (assoc code my/beancount-bank-wealth))
       (cdr (assoc code my/beancount-cash-accounts))
+      (cdr (assoc code my/beancount-other-balances))
       (user-error "Unknown holding code: %s" code)))
 
 (defun my/beancount--parse-balance-batch-line (line line-number broker-account)
@@ -2696,7 +2991,7 @@ When ACCOUNT is non-nil, ensure that account instead of the default normal accou
   "Run bean-check against the main Beancount ledger."
   (interactive)
   (let ((file (my/beancount-main-file))
-        (program (or (executable-find "bean-check") "bean-check")))
+        (program (my/beancount-script "bean-check")))
     (save-some-buffers t (lambda ()
                            (and buffer-file-name
                                 (file-equal-p buffer-file-name file))))
@@ -3001,7 +3296,7 @@ When ACCOUNT is non-nil, ensure that account instead of the default normal accou
   (my/open-beancount-main)
   (if (fboundp 'beancount-fava)
       (beancount-fava)
-    (start-process "fava" "*fava*" "fava" (my/beancount-main-file))))
+    (start-process "fava" "*fava*" (my/beancount-script "fava") (my/beancount-main-file))))
 
 (defun my/beancount-python-executable ()
   "Return a Python executable with the investment script dependencies."
@@ -3013,6 +3308,24 @@ When ACCOUNT is non-nil, ensure that account instead of the default normal accou
         (when (and candidate (file-executable-p candidate))
           (throw 'found candidate)))
       "python")))
+
+(defun my/beancount-script (name)
+  "Resolve the absolute path of a Beancount console script NAME (e.g. \"bean-check\", \"fava\").
+The scoop Python that installs beancount/fava puts its Scripts directory
+(scoop/persist/python311/Scripts) outside PATH, so `executable-find' alone fails.
+Fall back to the script sitting next to `my/beancount-python-executable'."
+  (or (executable-find name)
+      (let* ((py (my/beancount-python-executable))
+             (py-dir (and (file-name-absolute-p py)
+                          (file-name-directory (expand-file-name py))))
+             (cands (when py-dir
+                      (list (expand-file-name (concat "Scripts/" name ".exe") py-dir)
+                            (expand-file-name (concat "Scripts/" name) py-dir)
+                            (expand-file-name name py-dir)))))
+        (catch 'found
+          (dolist (cand cands)
+            (when (file-exists-p cand) (throw 'found cand)))
+          name))))
 
 (defun my/beancount-update-prices-latest ()
   "抓取最近两周 ETF 收盘价，更新 prices.beancount。"
@@ -3038,24 +3351,6 @@ When ACCOUNT is non-nil, ensure that account instead of the default normal accou
      nil
      (lambda (_) "*beancount rebuild prices history*"))))
 
-(map! :leader
-      (:prefix ("n i" . "investment · 投资")
-       :desc "Beancount buy · 买入"                  "b" #'my/beancount-record-buy
-       :desc "Beancount sell · 卖出"                 "s" #'my/beancount-record-sell
-       :desc "Beancount price · 记录价格"            "p" #'my/beancount-record-price
-       :desc "Beancount balance · 持仓校验"          "B" #'my/beancount-record-balance
-       :desc "Beancount balances · 批量持仓校验"     "V" #'my/beancount-record-balance-batch
-       :desc "Update prices latest · 更新近期价格"   "u" #'my/beancount-update-prices-latest
-       :desc "Rebuild price history · 重建历史价格"  "H" #'my/beancount-rebuild-prices-history
-       :desc "Open ledger · 打开账本"                "o" #'my/open-beancount-main
-       :desc "Check ledger · 检查账本"               "c" #'my/beancount-check-main
-       :desc "Fava · 打开报表"                       "f" #'my/beancount-fava-main
-       :desc "Bank wealth redeem · 银行理财赎回"     "r" #'my/beancount-record-bank-redeem
-       :desc "Pension fund buy · 养老金基金买入"     "y" #'my/beancount-record-pension-buy
-       :desc "CMB cashflow · 招行转入转出"          "C" #'my/beancount-record-cmb-cashflow
-       :desc "Collateral transfer · 担保品划转"      "t" #'my/beancount-record-collateral-transfer
-       :desc "Margin buy · 融资买入"                "m" #'my/beancount-record-margin-buy
-       :desc "Margin sell · 融资卖出"               "M" #'my/beancount-record-margin-sell))
 #+end_src
 
 * Apps
@@ -3430,6 +3725,40 @@ identical to what `doom.ps1' does on Windows."
         "C-c C-z" #'powershell))
 #+end_src
 
+* Session persistence (desktop)
+#+begin_src emacs-lisp
+;; 会话持久化：记住上次的窗口布局 / 打开的文件 / 光标位置，下次启动自动恢复。
+;; 配合 Windows 登录自启（HKCU Run → runemacs.exe）使用。
+;; 想临时不恢复：runemacs.exe --no-desktop
+(let ((dir (expand-file-name "desktop/" doom-cache-dir)))
+  (unless (file-directory-p dir)
+    (make-directory dir t))
+  (setq desktop-dirname        dir
+        desktop-path           (list dir)
+        desktop-base-file-name ".emacs.desktop"
+        desktop-base-lock-name ".emacs.desktop.lock"))
+
+(setq desktop-save                       t   ; 退出时无条件保存，不弹问询
+      desktop-load-locked-desktop        t   ; 上次异常退出留下的 lock 也直接加载
+      desktop-auto-save-timeout          300 ; 空闲 5 分钟自动存一次（防强杀 / 断电）
+      desktop-restore-frames             t   ; 恢复 frame 位置、大小、分屏
+      desktop-restore-reuses-frames      t
+      desktop-restore-forces-onscreen    t
+      desktop-restore-in-current-display nil
+      desktop-lazy-idle-delay            3   ; 后台分批把剩余 buffer 加载完
+      desktop-lazy-verbose               nil)
+
+;; 内部 / 临时 buffer 不写进 desktop（保留默认值，再追加）
+(setq desktop-buffers-not-to-save
+      (concat "\\` "
+              "\\|\\*\\(straight-process\\|straight-byte-compile\\|doom\\|doom:\\|"
+              "Messages\\|Async.*\\|ielm\\|e?shell.*\\|vterm.*\\|PowerShell\\|"
+              "compilation\\|Org .*\\)\\*"
+              "\\|\\.log\\'"))
+
+(desktop-save-mode 1)
+#+end_src
+
 * Keybindings
 ** Leader
 #+begin_src emacs-lisp
@@ -3450,7 +3779,8 @@ identical to what `doom.ps1' does on Windows."
        :desc "Daily agenda"     "d" (cmd! (org-agenda nil "d"))
        :desc "Weekly agenda"    "w" (cmd! (org-agenda nil "w"))
        :desc "GTD review"       "g" (cmd! (org-agenda nil "g"))
-       :desc "Beancount ledger" "$" #'my/open-beancount-main)
+       :desc "Beancount ledger" "$" #'my/open-beancount-main
+       :desc "EPUB reader"      "R" #'my/epub-reader-open-dwim)
 
       ;; Notes / Denote
       (:prefix ("n" . "notes")
@@ -3470,7 +3800,39 @@ identical to what `doom.ps1' does on Windows."
         :desc "Add keywords"                   "k" #'denote-keywords-add
         :desc "Remove keywords"                "K" #'denote-keywords-remove
         :desc "Dired in denote dir"            "d" #'denote-dired
-        :desc "Today's journal"                "j" #'denote-journal-new-or-existing-entry))
+        :desc "Today's journal"                "j" #'denote-journal-new-or-existing-entry)
+       (:prefix ("i" . "investment · 投资")
+        :desc "Beancount buy · 买入"                  "b" #'my/beancount-record-buy
+        :desc "Beancount sell · 卖出"                 "s" #'my/beancount-record-sell
+        :desc "Beancount price · 记录价格"            "p" #'my/beancount-record-price
+        :desc "Beancount balance · 持仓校验"          "B" #'my/beancount-record-balance
+        :desc "Beancount balances · 批量持仓校验"     "V" #'my/beancount-record-balance-batch
+        :desc "Update prices latest · 更新近期价格"   "u" #'my/beancount-update-prices-latest
+        :desc "Rebuild price history · 重建历史价格"  "H" #'my/beancount-rebuild-prices-history
+        :desc "Open ledger · 打开账本"                "o" #'my/open-beancount-main
+        :desc "Check ledger · 检查账本"               "c" #'my/beancount-check-main
+        :desc "Fava · 打开报表"                       "f" #'my/beancount-fava-main
+        :desc "Bank wealth redeem · 银行理财赎回"     "r" #'my/beancount-record-bank-redeem
+        :desc "Pension fund buy · 养老金基金买入"     "y" #'my/beancount-record-pension-buy
+        :desc "CMB cashflow · 招行转入转出"          "C" #'my/beancount-record-cmb-cashflow
+        :desc "Collateral transfer · 担保品划转"      "t" #'my/beancount-record-collateral-transfer
+        :desc "Margin buy · 融资买入"                "m" #'my/beancount-record-margin-buy
+        :desc "Margin sell · 融资卖出"               "M" #'my/beancount-record-margin-sell)
+       (:prefix ("n" . "capture · 速记")
+        :desc "Task · 任务"        "t" (cmd! (org-capture nil "t"))
+        :desc "Inbox · 收件箱"     "i" (cmd! (org-capture nil "i"))
+        :desc "Journal · 日志"     "j" (cmd! (org-capture nil "j"))
+        :desc "Append · 追加"      "a" (cmd! (org-capture nil "a"))
+        (:prefix ("m" . "media · 影音")
+         :desc "电影·想看"  "m" (cmd! (org-capture nil "mm"))
+         :desc "电影·看完"  "M" (cmd! (org-capture nil "mM"))
+         :desc "剧·想看"    "t" (cmd! (org-capture nil "mt"))
+         :desc "剧·看完"    "T" (cmd! (org-capture nil "mT"))
+         :desc "动漫·想看"  "a" (cmd! (org-capture nil "ma"))
+         :desc "动漫·看完"  "A" (cmd! (org-capture nil "mA")))
+        (:prefix ("b" . "books · 书")
+         :desc "书·待读"    "b" (cmd! (org-capture nil "bb"))
+         :desc "书·阅读中"  "B" (cmd! (org-capture nil "bB")))))
 
       ;; Toggle / utilities
       (:prefix ("t" . "toggle")
@@ -3493,7 +3855,15 @@ identical to what `doom.ps1' does on Windows."
        :desc "Yank"           "y" #'org-download-yank
        :desc "Delete file"   "d" #'my/org-delete-file-link-at-point
        :desc "Rotate file"  "r" #'my/org-rotate-image-file)
-      (:prefix ("d" . "denote")
+      ;; NOTE: Doom 自带 (:prefix ("d" . "date/deadline"))，带描述的 :prefix 会
+      ;; 清空该前缀原有键，所以 date 那几个键必须在这里显式补回来。
+      (:prefix ("d" . "date/denote")
+       ;; org date/deadline（原 Doom 默认，勿删）
+       :desc "Schedule"               "s" #'org-schedule
+       :desc "Deadline"               "d" #'org-deadline
+       :desc "Timestamp"              "t" #'org-time-stamp
+       :desc "Inactive timestamp"     "T" #'org-time-stamp-inactive
+       ;; denote
        :desc "Insert link"            "i" #'denote-link-or-create
        :desc "Backlinks"              "b" #'denote-backlinks
        :desc "Add keywords"           "k" #'denote-keywords-add
@@ -3515,6 +3885,7 @@ identical to what `doom.ps1' does on Windows."
        :desc "Toggle mode"     "t" #'org-transclusion-mode)
       :desc "TODO state"         "t" #'org-todo
       :desc "Paste rich text"    "V" #'my/org-paste-rich
+      :desc "Rebucket entry"     "R" #'my/org-rebucket-current-entry
       :desc "Archive done tasks" "A" #'my/org-archive-done-tasks)
 #+end_src
 

@@ -1,0 +1,16 @@
+# -*- mode: snippet -*-
+# name: 招行现金转出
+# key: zout
+# group: beancount
+# 用法：zout TAB 展开即弹出「去向」四选项菜单（回车用默认股票账户），选完继续 TAB
+#       → 日期(今天) → narration 后缀(可空，如 " 9 月定投") → 金额。
+#       去向可选项（与 .yas-setup.el 的 bc-out-table 一致）：股票账户 / 信用账户 / 养老金账户 / 消费。
+#       对方账户与 cashflow_type 按去向自动匹配，填表外词则账户行会废。
+# --
+${1:`(format-time-string "%Y-%m-%d")`} * "招行现金转出到${2:$$(completing-read "招行转出去向: " '("股票账户" "信用账户" "养老金账户" "消费") nil t nil nil "股票账户")}${3:}"
+  cashflow_type: "${2:$(bc-out yas-text 'type)}"
+  out_target: "$2"
+  trade_value: "${4:0} CNY"
+  Assets:Bank:CMB:Cash  -$4 CNY
+  ${2:$(bc-out yas-text 'acct)}
+$0

@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: 招行定期宝 DQB 净值
+# key: dqb
+# group: beancount
+# --
+${1:`(format-time-string "%Y-%m-%d")`} price WMDQB ${2:`(or (ignore-errors (with-temp-buffer (insert-file-contents "~/org/investment/main.beancount") (goto-char (point-max)) (when (re-search-backward "price WMDQB" nil t) (nth 3 (split-string (buffer-substring (line-beginning-position) (line-end-position))))))) "0.0000")`} CNY$0

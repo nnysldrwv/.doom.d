@@ -5,3 +5,7 @@
 !.gitignore
 !config.org
 !README.md
+
+# Snippets（yasnippet 模板，不属于 config.org 生成物，需纳入版本管理）
+!snippets/
+!snippets/**
