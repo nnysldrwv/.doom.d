@@ -127,7 +127,8 @@
 
 ;; Org 视觉现代化: 标题/TODO/tag/checkbox/timestamp 美化
 ;; 与 valign 协同: 禁用 org-modern 的表格渲染, 交给 valign
-;; (package! org-modern)
+;; 注意: 本块 tangle 生成 packages.el, 改这里而不是改 packages.el
+(package! org-modern)
 
 ;; 可视化 undo 树, 比 Doom 默认 undo-fu 更直观
 (package! vundo)
@@ -151,10 +152,7 @@
 (package! beancount
   :recipe (:host github :repo "beancount/beancount-mode"))
 
-(package! org-fragtog)
-
-;; Emacs MCP server (HTTP, 供 Claude Code 等外部工具调用 Emacs)
-(package! emcp)
+;; 已移除 2026-09-24: org-fragtog (LaTeX 公式自动渲染, 用不上且开 org 文件就加载它)
 
 ;; EPUB reader (yibie): MELPA 没收录, 直装 GitHub 仓库。
 ;; - 仓库: github.com/yibie/epub-reader (作者 chenyibin, v0.3.0)
@@ -401,6 +399,83 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
   (setq w32-apps-user-model-id "GNU.Emacs"))
 #+end_src
 
+** Performance: 滚动与图片 (2026-09-22)
+#+begin_src emacs-lisp
+;; 实测诊断: 本机 Emacs 29.3 编译未带 --with-imagemagick
+;;   (image-type-available-p 'imagemagick) => nil
+;;   (image-transforms-p) 在真实 GUI frame 里 => (scale rotate90)
+;;     —— 注意别在 `emacs -Q --batch` 里测这个, batch 没有图形 frame, 必然返回 nil。
+;; 所以缩放是**能用**的(Emacs 27+ 原生 transform, 不依赖 ImageMagick),
+;; 但它是「先整图解码成位图, 再由 Emacs 缩放」:
+;; data/ 里近半图片是 4000px 宽, 每张先解成 ~48MB 位图再缩小,
+;; 滚动时反复解码 + 反复缩放 —— 这才是卡顿的物理根源。
+;;
+;; 治本两条路: ① 把图预缩到 <=1600px  ② 重编 Emacs 加 --with-imagemagick
+;; 下面是「不动图、不重编」前提下的缓解项, 全部可逆。
+
+(setq fast-but-imprecise-scrolling t    ; Emacs 29: 滚动时跳过精确 window-start 定位
+      image-cache-eviction-delay 3600   ; 默认 300s -> 1h, 避免来回滚动反复解码
+      ;; ⚠️ max-image-size 的单位很坑(docstring 说得清楚):
+      ;;   整数 = 最大「宽/高」的**像素数**, 浮点 = 相对 frame 宽高的**倍数**。
+      ;;   Emacs 默认是 10.0(浮点, 约等于不限制)。写错成整数 50 会让所有 >50px 的图
+      ;;   全部拒载, 显示成 30x30 的占位块 —— 2026-09-23 踩过一次, 别再写小整数。
+      max-image-size 10.0)
+
+;; 中英混排文档不需要 Unicode 双向算法与括号配对分析, 关掉省下可观 redisplay 开销
+(setq-default bidi-paragraph-direction 'left-to-right
+              bidi-inhibit-bpa t)
+
+(define-minor-mode my/org-image-perf-mode
+  "读大图很多的 org 文档时打开: 卸掉拖慢 redisplay 的装饰层。
+- 关 ultra-scroll + scroll-conservatively 0: 整屏跳而不是逐行滚,
+  一次滚动只触发一次 redisplay, 而不是每滚几行就把路过的大图重画一遍
+- 关 pangu-spacing: 少掉成千上万个 overlay
+- line-spacing nil: 行高计算走快路径"
+  :global nil
+  :lighter " ImgPerf"
+  (if my/org-image-perf-mode
+      (progn
+        (when (fboundp 'ultra-scroll-mode) (ultra-scroll-mode -1))
+        (when (fboundp 'pangu-spacing-mode) (pangu-spacing-mode -1))
+        (setq-local line-spacing nil
+                    scroll-conservatively 0)
+        (message "ImgPerf: 省电滚动已开 (逐行->整屏, pangu / line-spacing off)"))
+    (when (fboundp 'ultra-scroll-mode) (ultra-scroll-mode 1))
+    (when (fboundp 'pangu-spacing-mode) (pangu-spacing-mode 1))
+    (kill-local-variable 'line-spacing)
+    (kill-local-variable 'scroll-conservatively)
+    (message "ImgPerf: 已恢复")))
+
+(defun my/org-preview-images-near-point ()
+  "清掉全 buffer 的图片预览, 只加载当前窗口上下各约 2 屏范围。
+适合几百张图的长文档: 不滚动时不去扛整份 buffer 的解码量。"
+  (interactive)
+  (when (fboundp 'org-link-preview-clear) (org-link-preview-clear))
+  (when (fboundp 'org-link-preview-region)
+    (org-link-preview-region
+     nil nil
+     (save-excursion (goto-char (window-start)) (forward-line -60) (point))
+     (save-excursion (goto-char (window-end)) (forward-line 60) (point)))))
+
+;;; --- iscroll: 让大图像素级滚过, 而不是整块跳进跳出窗口 ---
+;; 它治的是「滚动行为」(用 set-window-vscroll 把一张图当多行来滚),
+;; **不治解码开销** —— 4000px 的图照样要解成 ~48MB 位图再交给 cairo 缩小。
+;; 所以这是手感优化, 不是性能根因的解药; 想让解码变便宜只有两条路:
+;; 重编 Emacs 加 --with-imagemagick, 或者缩图。
+;; 本地托管不走 straight: 文件在 ~/.config/doom/lisp/iscroll.el (拉 git 太慢)。
+(when (file-exists-p (expand-file-name "lisp/iscroll.el" doom-user-dir))
+  (add-to-list 'load-path (expand-file-name "lisp" doom-user-dir))
+  (require 'iscroll nil t)
+
+  (defun my/org-iscroll-on ()
+    "org 里启用 iscroll。
+iscroll 与 ultra-scroll 争夺滚动控制权, 必须二选一, 否则两套逻辑互相打架。"
+    (when (fboundp 'ultra-scroll-mode) (ultra-scroll-mode -1))
+    (iscroll-mode 1))
+
+  (add-hook 'org-mode-hook #'my/org-iscroll-on))
+#+end_src
+
 * Appearance
 ** Theme & UI
 #+begin_src emacs-lisp
@@ -415,17 +490,25 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
 (global-visual-line-mode)
 
 ;; j/k 按视觉行移动 —— evil-define-motion 确保 visual state (v/V/C-v) 都正常
+;; iscroll 只 remap 了 next-line / previous-line, 而 j/k 走的是这里的自定义
+;; motion (evil 不经过 next-line), 所以必须手动分支, 否则 iscroll 对 j/k 完全无效。
 (evil-define-motion my/evil-next-visual-line (count)
-  "Move COUNT lines down, respecting `visual-line-mode' when active."
+  "Move COUNT lines down, respecting `visual-line-mode' when active.
+`iscroll-mode' 开启时改走 iscroll, 让大图像素级滚过而不是整块跳。"
   :type line
-  (let ((line-move-visual (and visual-line-mode t)))
-    (evil-line-move (or count 1))))
+  (if (and (bound-and-true-p iscroll-mode) (fboundp 'iscroll-next-line))
+      (iscroll-next-line (or count 1))
+    (let ((line-move-visual (and visual-line-mode t)))
+      (evil-line-move (or count 1)))))
 
 (evil-define-motion my/evil-previous-visual-line (count)
-  "Move COUNT lines up, respecting `visual-line-mode' when active."
+  "Move COUNT lines up, respecting `visual-line-mode' when active.
+`iscroll-mode' 开启时改走 iscroll, 让大图像素级滚过而不是整块跳。"
   :type line
-  (let ((line-move-visual (and visual-line-mode t)))
-    (evil-line-move (- (or count 1)))))
+  (if (and (bound-and-true-p iscroll-mode) (fboundp 'iscroll-previous-line))
+      (iscroll-previous-line (or count 1))
+    (let ((line-move-visual (and visual-line-mode t)))
+      (evil-line-move (- (or count 1))))))
 
 (after! evil
   (define-key evil-motion-state-map "j" #'my/evil-next-visual-line)
@@ -462,7 +545,7 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
 #+begin_src emacs-lisp
 ;; Doom 自带的字体变量配置
 ;; (setq doom-font (font-spec :family "Ubuntu Mono" :size 18)
-(setq doom-font (font-spec :family "Jetbrains Mono" :size 22)
+(setq doom-font (font-spec :family "Jetbrains Mono" :size 26)
       doom-big-font (font-spec :family "Jetbrains Mono" :size 40)
       doom-serif-font doom-font
       doom-symbol-font (font-spec :family "Sarasa Mono SC")
@@ -566,7 +649,7 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
   (setq org-todo-keyword-faces
         '(("TODO" :foreground "#2952a3" :weight bold)
           ("NEXT" :foreground "#e67e22" :weight bold)
-          ("PROG" :foreground "#c0392b" :weight bold)
+          ("PROG" :foreground "#5f8f7c" :weight bold)
           ("WAIT" :foreground "#8b6914" :weight bold)
           ("DONE" :foreground "#2e7d32" :weight bold)
           ("FAIL" :foreground "#9e9e9e" :weight bold)))
@@ -582,8 +665,14 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
         org-ellipsis " ▾")
 
   ;; Inline images
+  ;; 宽度策略改用 org 9.8 的新变量 (定义在 ol.el: org-image-max-width / org-image-align):
+  ;; - actual-width nil => 优先听 #+ATTR_ORG :width (支�� 0.8 / 80% 这类相对值), 没有就用原图尺寸
+  ;; - max-width 0.85   => 上限为窗口宽度的 85%, 只会缩小、不会把小图放大
+  ;; - align 'center    => 图片居中; 单张想靠左用 #+ATTR_ORG: :align left 覆盖
   (setq image-use-external-converter t
-        org-image-actual-width '(600))
+        org-image-actual-width nil
+        org-image-max-width 0.85
+        org-image-align 'center)
 
   (custom-set-variables '(org-startup-indented nil))
 
@@ -594,7 +683,7 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
   (setq org-latex-default-table-environment "tabular"))
 #+end_src
 
-** Display: org-modern / spacious-padding / olivetti / ultra-scroll / pangu-spacing / org-appear
+** Display: spacious-padding / ultra-scroll / pangu-spacing / org-appear / valign
 #+begin_src emacs-lisp
 (after! org
   (use-package! spacious-padding
@@ -606,10 +695,7 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
     (global-pangu-spacing-mode 1)
     (setq pangu-spacing-real-insert-separtor t))
 
-  ;; (use-package! olivetti
-  ;;   :hook (org-mode . olivetti-mode)
-  ;;   :config (setq olivetti-body-width 98))
-
+  ;; 居中栏宽改由 writeroom-mode 负责 (init.el 的 :ui zen 自带), 不再用 olivetti
   (use-package! ultra-scroll
     :init
     (setq scroll-conservatively 101
@@ -632,21 +718,165 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
   (use-package! ace-pinyin
     :config
     (ace-pinyin-global-mode +1)))
+#+end_src
 
-  ;; org-modern: 现代化的 org 视觉
-  ;; - 标题前缀、TODO 胶囊、tag、checkbox、timestamp 全部美化
-  ;; - 表格让给 valign 处理 (org-modern 的表格渲染与 valign 冲突)
-  ;; (use-package! org-modern
-  ;;   :hook (org-mode . org-modern-mode)
-  ;;   :hook (org-agenda-finalize . org-modern-agenda)
-  ;;   :config
-  ;;   (setq org-modern-table nil          ; 表格交给 valign
-  ;;         org-modern-hide-stars nil
-  ;;         org-modern-todo t
-  ;;         org-modern-tag t
-  ;;         org-modern-timestamp t
-  ;;         org-modern-priority t
-  ;;         org-modern-list '((?+ . "•") (?- . "–") (?* . "▸")))))
+** Display: org-modern 视觉美化
+标题星号 / TODO 胶囊 / tag / 时间戳 / checkbox / 代码块全部做视觉替换。
+
+几个必须知道的约束（都在 org-modern 20260722 源码里核过）：
+
+- =org-modern-table= 必须为 nil。它自己会把表格渲染掉，和 valign 的像素对齐直接打架，
+  表格统一交给 valign。
+- =org-modern-block-fringe= 与 =org-modern-hide-stars= 只在 ~org-indent-mode~ 关闭时
+  生效。本文件顶部已有 ~(custom-set-variables '(org-startup-indented nil))~，所以两者可用。
+- =org-modern-checkbox= / =list= / =fold-stars= 是 **alist 不是 boolean**。写成 t 会直接报
+  ~wrong-type-argument sequencep t~（我在 batch 里踩过）。默认值就够好，不要覆盖。
+
+#+begin_src emacs-lisp
+(use-package! org-modern
+  :hook (org-mode . org-modern-mode)
+  :hook (org-agenda-finalize . org-modern-agenda)
+  :config
+  (setq org-modern-table nil          ; 表格交给 valign
+        org-modern-table-vertical 3
+        org-modern-block-fringe 2     ; 代码块左侧 fringe 竖线
+        org-modern-hide-stars 'leading
+        org-modern-todo t
+        ;; org-modern 不读 org-todo-keyword-faces, 这里直接给每个关键字的胶囊配色。
+        ;; 低饱和柔和色, 避免默认 org-todo 亮红(经 :inverse-video 反相)太刺眼。
+        org-modern-todo-faces
+        '(("TODO" :background "#6b8cce" :foreground "#ffffff" :weight semibold)
+          ("NEXT" :background "#d6a05a" :foreground "#ffffff" :weight semibold)
+          ("PROG" :background "#7fae9b" :foreground "#ffffff" :weight semibold)
+          ("WAIT" :background "#bca45f" :foreground "#ffffff" :weight semibold)
+          ("DONE" :background "#9aa0a6" :foreground "#ffffff" :weight semibold)
+          ("FAIL" :background "#c79a9a" :foreground "#ffffff" :weight semibold))
+        org-modern-tag t
+        org-modern-timestamp t
+        org-modern-priority t
+        org-modern-keyword t
+        org-modern-block-name t
+        org-modern-horizontal-rule t))
+#+end_src
+
+** Writeroom: 居中栏宽 (替代 olivetti)
+=:ui zen= 模块自带的 writeroom-mode 已经装好了，不用再加包。
+Doom 默认键位：=SPC t z= 开关 zen，=SPC t Z= zen + 全屏独占。
+
+#+begin_src emacs-lisp
+(after! writeroom-mode
+  ;; 中英混排: 汉字宽度约为英文两倍, Doom 默认的 80 列只剩 ~40 个汉字, 太窄
+  (setq writeroom-width 100
+        ;; 正文居中而不是贴左边缘
+        visual-fill-column-center-text t
+        ;; 只影响当前 buffer, 不留全局副作用(Doom 已把 global-effects 置 nil)
+        writeroom-maximize-window nil
+        writeroom-mode-line t)
+  ;; 中文写作放大一档; 改 0 就是原尺寸
+  (setq +zen-text-scale 1.0))
+
+;; 自动进去太打扰, 但要有个顺手的入口: 见 [[#my-focus-toggle][Focus mode toggle]]
+#+end_src
+
+** Figure: 图片模板与图注编号
+#+begin_src emacs-lisp
+(defvar my/org-caption-number-format "图 %d: "
+  "Display string prepended to each #+CAPTION by `my/org-caption-number-mode'.")
+
+(defvar my/org-caption-number--timer nil
+  "Idle timer used to throttle caption renumbering.")
+
+(defun my/org-caption-number--clear (&optional buf)
+  "Remove caption-number overlays from BUF (default: current buffer)."
+  (with-current-buffer (or buf (current-buffer))
+    (dolist (ov (overlays-in (point-min) (point-max)))
+      (when (eq (overlay-get ov 'category) 'my/org-caption-number)
+        (delete-overlay ov)))))
+
+(defun my/org-caption-number-refresh (&optional buf)
+  "Number every #+CAPTION in BUF with a temporary overlay.
+File contents are NOT modified; numbering is display-only, so it never
+collides with what Org itself generates on export."
+  (interactive)
+  (with-current-buffer (or buf (current-buffer))
+    (unless (derived-mode-p 'org-mode)
+      (user-error "Not in an Org buffer"))
+    (my/org-caption-number--clear (current-buffer))
+    (let ((n 0))
+      (save-excursion
+        (goto-char (point-min))
+        (while (re-search-forward "^\\(#\\+CAPTION:\\)" nil t)
+          ;; 跳过代码块里用于示范的 org 片段
+          (unless (org-between-regexps-p "^#\\+begin_src" "^#\\+end_src")
+            (setq n (1+ n))
+            (let ((ov (make-overlay (match-beginning 1) (match-end 1))))
+              (overlay-put ov 'category 'my/org-caption-number)
+              (overlay-put ov 'display (format my/org-caption-number-format n))
+              (overlay-put ov 'face 'bold)
+              (overlay-put ov 'evaporate t)
+              (overlay-put ov 'modification-hooks
+                           (list (lambda (ov _after _b _e &optional _len)
+                                   ;; 用户真的动这一行时撤掉伪装, 露出原始文本
+                                   (delete-overlay ov))))))))
+      n)))
+
+(defun my/org-caption-number--schedule (&rest _)
+  "Renumber captions shortly after editing stops (avoids per-keystroke cost)."
+  (when (and (bound-and-true-p my/org-caption-number-mode)
+             (derived-mode-p 'org-mode))
+    (when (timerp my/org-caption-number--timer)
+      (cancel-timer my/org-caption-number--timer))
+    (setq my/org-caption-number--timer
+          (run-at-time 0.4 nil
+                       (lambda (b) (when (buffer-live-p b)
+                                     (my/org-caption-number-refresh b)))
+                       (current-buffer)))))
+
+;;;###autoload
+(define-minor-mode my/org-caption-number-mode
+  "Show 图 N: in front of every #+CAPTION via temporary overlays.
+The buffer text is untouched, so Org's own export numbering still works."
+  :init-value nil
+  :lighter " 图N"
+  (if my/org-caption-number-mode
+      (progn (my/org-caption-number-refresh)
+             (add-hook 'after-change-functions #'my/org-caption-number--schedule nil t))
+    (my/org-caption-number--clear)
+    (remove-hook 'after-change-functions #'my/org-caption-number--schedule t)))
+
+(defun my/org-insert-image-figure (file &optional width)
+  "Insert FILE as a captioned figure and leave point on the caption line.
+FILE is stored relative to the current buffer's directory.
+If point is already on an image link, caption that one instead.
+With a numeric prefix WIDTH, also emit an #+ATTR_ORG :width line."
+  (interactive
+   (list (unless (my/org-image-file-at-point)
+           (read-file-name "Image file: " nil nil t nil
+                           (lambda (f)
+                             (or (file-directory-p f)
+                                 (string-match-p
+                                  "\\.\\(png\\|jpe?g\\|gif\\|webp\\|svg\\|bmp\\|tiff?\\)$"
+                                  (downcase f))))))
+         (and current-prefix-arg (prefix-numeric-value current-prefix-arg))))
+  (let ((existing (my/org-image-file-at-point)))
+    (if existing
+        ;; 就地给已有图片加 figure 骨架
+        (progn
+          (my/org-image-caption)
+          (message "Caption inserted for %s" (file-name-nondirectory existing)))
+      ;; 插入新图: caption + 可选宽度 + 链接
+      (unless (and file (file-exists-p file))
+        (user-error "No such image file"))
+      (let ((rel (file-relative-name (expand-file-name file)
+                                     (file-name-directory buffer-file-name))))
+        (insert "#+CAPTION: \n")
+        (when (and width (numberp width) (> width 0))
+          (insert (format "#+ATTR_ORG: :width %d\n" width)))
+        (insert (format "[[file:%s]]\n" rel))
+        (forward-line (if width -3 -2))
+        (end-of-line)
+        (my/org-display-images)
+        (message "Figure inserted: %s" rel)))))
 #+end_src
 
 ** org-attach
@@ -1489,50 +1719,15 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
               (oref-default (eieio-object-class cache) version-constant))
         (eieio-persistent-save cache)))))
 #+end_src
-** latex
+** latex (停用)
 #+begin_src emacs-lisp
-;; LaTeX previews
-(use-package! org-fragtog
-  :after org
-  :hook
-  (org-mode . org-fragtog-mode)
-  :config
-  (setq org-format-latex-header "\\documentclass{article}
-  \\usepackage[usenames]{color}
-  \\usepackage{xeCJK}
-  \\setCJKmainfont{KingHwa_OldSong}
-  \\usepackage{amsmath,amssymb}
-  \\usepackage{unicode-math}
-  \\setmathfont{Latin Modern Math}
-  [PACKAGES]
-  [DEFAULT-PACKAGES]
-  \\pagestyle{empty}")
-  (setq org-format-latex-options
-        (plist-put org-format-latex-options :scale 2))
-  (setq org-format-latex-options
-        (plist-put org-format-latex-options :foreground 'default))
-  (setq org-format-latex-options
-        (plist-put org-format-latex-options :background 'default))
-  ;; 用 xelatex + dvisvgm 生成 SVG，暗色主题下显示更好
-  (setq org-preview-latex-default-process 'dvisvgm)
-  ;; 覆盖 dvisvgm 流程：xelatex -no-pdf 生成 xdv，dvisvgm 转 svg
-  (setf (alist-get 'dvisvgm org-preview-latex-process-alist)
-        '(:programs ("xelatex" "dvisvgm")
-          :description "xelatex > xdv > svg"
-          :message "you need to install xelatex and dvisvgm."
-          :image-input-type "xdv"
-          :image-output-type "svg"
-          ;; :image-size-adjust (1.7 . 1.5)
-          :image-size-adjust (0.7 . 0.7)
-          :latex-compiler ("xelatex -interaction nonstopmode -no-pdf -output-directory %o %f")
-          :image-converter ("dvisvgm %f --no-fonts --exact-bbox --scale=%S -o %O")))
-  ;; 打开 org 文件时自动渲染所有 LaTeX 公式
-  ;; 2026-08-29 改为 nil: 本机没装 TeX (xelatex/dvisvgm), 自动预览会在打开 org
-  ;; 文件时直接抛 "Can't find 'xelatex'", 还会打断 org-mode 的初始化
-  ;; (M-x org-mode-restart 会被它中断, 导致 hook 后半段不执行)。
-  ;; 需要看公式时用 C-c C-x C-l (org-latex-preview) 手动渲染当前片段,
-  ;; 或 C-u C-u C-c C-x C-l 渲染整个 buffer。装好 TeX 后把这里改回 t。
-  (setq org-startup-with-latex-preview nil))
+;; 2026-09-24: 彻底停用 LaTeX 公式渲染。
+;; - org-fragtog 已从 packages.el 移除 (跑一次 doom sync 生效)。
+;;   它挂在 org-mode hook 上, 每开一个 org 文件就加载一次, 而且本机没装
+;;   TeX (xelatex/dvisvgm), 光标进出公式会抛 "Can't find 'xelatex'"。
+;; - 下面这行是保险: 确保打开 org 文件时不自动渲染公式 (org 默认本就是 nil,
+;;   Doom/文件内 #+STARTUP: latexpreview 都有可能把它打开)。
+(setq org-startup-with-latex-preview nil)
 #+end_src
 
 * Org Clipboard & DnD
@@ -1546,7 +1741,9 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
    ((featurep :system 'macos)
     "sh -c 'if command -v pngpaste >/dev/null 2>&1 && pngpaste \"$1\" >/dev/null 2>&1; then exit 0; else screencapture -i \"$1\"; fi' _ %s")
    (t
-    "sh -c 'if command -v xclip >/dev/null 2>&1; then xclip -selection clipboard -t image/png -o > \"$1\" 2>/dev/null || true; fi; if [ ! -s \"$1\" ]; then if command -v wl-paste >/dev/null 2>&1; then wl-paste --no-newline --type image/png > \"$1\" 2>/dev/null || true; fi; fi; if [ ! -s \"$1\" ]; then if command -v maim >/dev/null 2>&1; then maim -s \"$1\"; elif command -v grim >/dev/null 2>&1 && command -v slurp >/dev/null 2>&1; then grim -g \"$(slurp)\" \"$1\"; fi; fi' _ %s")))
+    ;; 链条: 剪贴板里的图 -> flameshot 选区 -> gnome-screenshot 选区 -> maim/grim(Wayland 老机型)
+    ;; 注意: 每一步都要求上一步产出的文件为空才继续, 避免覆盖已有截图。
+    "sh -c 'if command -v xclip >/dev/null 2>&1; then xclip -selection clipboard -t image/png -o > \"$1\" 2>/dev/null || true; fi; if [ ! -s \"$1\" ]; then if command -v wl-paste >/dev/null 2>&1; then wl-paste --no-newline --type image/png > \"$1\" 2>/dev/null || true; fi; fi; if [ ! -s \"$1\" ]; then if command -v flameshot >/dev/null 2>&1; then flameshot gui -r > \"$1\" 2>/dev/null || true; fi; fi; if [ ! -s \"$1\" ]; then if command -v gnome-screenshot >/dev/null 2>&1; then gnome-screenshot -a -f \"$1\"; fi; fi; if [ ! -s \"$1\" ]; then if command -v maim >/dev/null 2>&1; then maim -s \"$1\"; elif command -v grim >/dev/null 2>&1 && command -v slurp >/dev/null 2>&1; then grim -g \"$(slurp)\" \"$1\"; fi; fi' _ %s")))
 
 (defun my/org-download-denote-file-format (filename &optional keywords)
   "Rewrite FILENAME to denote style: <id>--<slug>__<keywords><ext>.
@@ -1599,7 +1796,71 @@ When KEYWORDS is non-nil, include them in the denote-style name."
              (insert text)
              (message "OK: plain text pasted (macOS fallback)"))))
         (t (message "WARN: pbpaste not found")))))
+    ('gnu/linux (my/org-paste-rich-linux))
     (_ (message "WARN: rich text clipboard not implemented for this platform"))))
+
+(defun my/org-clipboard-html ()
+  "Return HTML from the clipboard (X11/Wayland), or nil."
+  (cond
+   ((executable-find "xclip")
+    (let ((s (shell-command-to-string "xclip -selection clipboard -t text/html -o 2>/dev/null")))
+      (unless (string-blank-p s) s)))
+   ((executable-find "wl-paste")
+    (let ((s (shell-command-to-string "wl-paste --no-newline --type text/html 2>/dev/null")))
+      (unless (string-blank-p s) s)))))
+
+(defun my/org-clipboard-text ()
+  "Return plain text from the clipboard (Linux), or nil."
+  (let ((s (cond ((executable-find "xclip")
+                  (shell-command-to-string "xclip -selection clipboard -o 2>/dev/null"))
+                 ((executable-find "wl-paste")
+                  (shell-command-to-string "wl-paste --no-newline 2>/dev/null")))))
+    (unless (string-blank-p s) s)))
+
+(defun my/org-html-to-org (html img-dir)
+  "Convert HTML string to Org with pandoc, extracting images into IMG-DIR.
+Returns the Org text, or nil on failure."
+  (unless (executable-find "pandoc")
+    (user-error "pandoc not found (sudo apt install pandoc)"))
+  (make-directory img-dir t)
+  (let* ((tmp (make-temp-file "org-clip" nil ".html"))
+         (out (concat (file-name-sans-extension tmp) ".org")))
+    (unwind-protect
+        (progn
+          (let ((coding-system-for-write 'utf-8))
+            (write-region html nil tmp nil 'silent))
+          (and (zerop (call-process "pandoc" nil nil nil
+                                    ;; auto_identifiers 会给每个标题加 :PROPERTIES: 抽屉, 关掉更干净
+                                    "-f" "html-auto_identifiers" "-t" "org"
+                                    "--wrap=none" (concat "--extract-media=" img-dir)
+                                    tmp "-o" out))
+               (with-temp-buffer
+                 (let ((coding-system-for-read 'utf-8))
+                   (insert-file-contents out))
+                 ;; pandoc 抽出媒体时写的是绝对路径, 改成相对路径免得换机器就断链
+                 (let ((text (string-trim (buffer-string))))
+                   (replace-regexp-in-string
+                    (regexp-quote (file-name-unquote img-dir))
+                    (file-relative-name img-dir default-directory)
+                    text t t)))))
+      (ignore-errors (delete-file tmp))
+      (ignore-errors (delete-file out)))))
+
+(defun my/org-paste-rich-linux ()
+  "Paste clipboard HTML as Org content (Linux / X11 + Wayland).
+Embedded images land in .images/ next to this file; remote http images stay
+links — materialize them with `my/org-image-download-link-at-point'."
+  (let* ((img-dir (expand-file-name ".images" (file-name-directory buffer-file-name)))
+         (html (my/org-clipboard-html)))
+    (if (or (null html) (string-blank-p html))
+        (insert (or (my/org-clipboard-text) ""))
+      (let ((org-text (my/org-html-to-org html img-dir)))
+        (unless org-text
+          (user-error "pandoc conversion failed"))
+        (insert org-text)
+        (my/org-display-images)
+        (message "OK: rich text pasted (images -> %s)"
+                 (file-relative-name img-dir default-directory))))))
 #+end_src
 
 ** org-download
@@ -1613,7 +1874,9 @@ When KEYWORDS is non-nil, include them in the denote-style name."
           org-download-image-dir (expand-file-name "data/" org-directory)
           org-download-heading-lvl nil
           org-download-timestamp ""
-          org-download-image-org-width 800
+          ;; 0 = 不写 #+attr_org: :width (org-download 内部是 (= width 0) 判断,
+          ;; 写 nil 会 wrong-type-argument)。宽度交给 org-image-max-width 统一管。
+          org-download-image-org-width 0
           org-download-annotate-function (lambda (_link) "")
           org-download-screenshot-method (my/org-download-screenshot-command)
           org-download-file-format-function #'my/org-download-denote-file-format
@@ -1693,12 +1956,329 @@ When KEYWORDS is non-nil, include them in the denote-style name."
                    "Removed link (file was already missing"))))))
 #+end_src
 
+** Image helpers: external open / inline resize / caption
+#+begin_src emacs-lisp
+;;; my/org-image-file-at-point
+(defun my/org-image-file-at-point ()
+  "Return the absolute path of the image file linked at point, or nil."
+  (let* ((ctx  (org-element-context))
+         (type (org-element-property :type ctx))
+         (path (when (member type '("file" "attachment"))
+                 (org-element-property :path ctx))))
+    (when path
+      (let ((file (expand-file-name (org-link-unescape path)
+                                    (if (equal type "attachment")
+                                        (and (boundp 'org-attach-id-dir) org-attach-id-dir)
+                                      default-directory))))
+        (when (and (file-regular-p file)
+                   (member (downcase (or (file-name-extension file) ""))
+                           '("png" "jpg" "jpeg" "gif" "webp" "svg" "tiff" "bmp")))
+          file)))))
+
+;;; my/org-image-open-external
+;; Windows-only API, Linux 下不存在, 声明一下避免 byte-compile 警告
+(declare-function w32-shell-execute "w32fns" (operation &optional parameters directory show-flag))
+(defun my/org-image-open-external ()
+  "Open the image at point with the OS default viewer."
+  (interactive)
+  (if-let ((file (my/org-image-file-at-point)))
+      (progn
+        (if (eq system-type 'windows-nt)
+            (w32-shell-execute "open" file)
+          (call-process "xdg-open" nil 0 nil file))
+        (message "Opened %s" (file-name-nondirectory file)))
+    (user-error "No image file at point")))
+
+;;; my/org-image-resize-at-point
+(defun my/org-image--overlay-at-point ()
+  "Return the inline-image overlay covering point, or nil."
+  (let ((ovs (or (and (boundp 'org-link-preview-overlays) org-link-preview-overlays)
+                 (cl-remove-if-not (lambda (ov) (imagep (overlay-get ov 'display)))
+                                   (overlays-in (point-min) (point-max))))))
+    (cl-find-if (lambda (ov)
+                  (and (<= (overlay-start ov) (point))
+                       (< (point) (overlay-end ov))))
+                ovs)))
+
+(defun my/org-image-resize-at-point (&optional delta)
+  "Resize the inline image at point by DELTA percent (default +10).
+Only changes the display width; the file on disk is untouched.  A redisplay
+\(e.g. toggling `org-toggle-inline-images' twice) restores the default width."
+  (interactive "P")
+  (let* ((ov  (my/org-image--overlay-at-point))
+         (img (and ov (overlay-get ov 'display)))
+         (cur (and img (or (plist-get (cdr img) :width)
+                           (ignore-errors (car (image-size img t))))))
+         (pct (cond ((null delta) 0.1)
+                    ((numberp delta) (/ (float delta) 100.0))
+                    (t (/ (float (read-number "Zoom by % (negative = shrink): " 10)) 100.0)))))
+    (unless cur
+      (user-error "No inline image at point — turn it on with SPC m i t first"))
+    (let* ((new  (max 40 (round (* (+ 1.0 pct) cur))))
+           (spec (cons 'image (plist-put (copy-sequence (cdr img)) :width new))))
+      (overlay-put ov 'display spec)
+      (message "Inline image width: %dpx" new))))
+
+(defun my/org-image-resize-up () (interactive) (my/org-image-resize-at-point 10))
+(defun my/org-image-resize-down () (interactive) (my/org-image-resize-at-point -10))
+
+;;; my/org-image-caption
+(defun my/org-image-caption ()
+  "Add a #+CAPTION line above the image at point, leaving point at its end.
+Re-run on an already-captioned image to append to the existing caption.
+Implemented with plain buffer scanning instead of `org-element-context',
+whose  :begin  points to the wrong line right after the buffer was edited."
+  (interactive)
+  (unless (my/org-image-file-at-point)
+    (user-error "No image file at point"))
+  (let ((beg (line-beginning-position))
+        ;; 坑: '#+' 里的 + 是字面字符, 必须转义成 #\\+, 否则被当成量词永远匹配不上
+        (re  "#\\+\\(CAPTION\\|ATTR_\\|NAME\\|HEADER\\)"))
+    ;; 向上吞掉连续的 affiliated 关键字行, 得到整个块的起始行。
+    ;; 坑: forward-line 会试图保留列位置, 每次之后都要显式 beginning-of-line。
+    (save-excursion
+      (goto-char beg)
+      (forward-line -1)
+      (beginning-of-line)
+      (while (and (not (bobp)) (looking-at-p re))
+        (setq beg (point))
+        (forward-line -1)
+        (beginning-of-line)))
+    (goto-char beg)
+    (unless (looking-at-p "#\\+CAPTION:")
+      (insert "#+CAPTION: \n")
+      (forward-line -1))
+    (end-of-line)
+    (message "Caption ready")))
+#+end_src
+
+** Image backends: ImageMagick / Pillow
+#+begin_src emacs-lisp
+(require 'cl-lib)
+
+;; org 9.8 把这两个函数标成废弃, 新名分别是 org-link-preview-region / -refresh。
+;; 包一层 fboundp 判断, 免得哪天切回内置 org 9.6 就炸。
+(defun my/org-display-images ()
+  "Display inline images (org 9.8+ name: `org-link-preview-region')."
+  (if (fboundp 'org-link-preview-region)
+      (org-link-preview-region)
+    ;; 只在没有新 API 的老 org 上才会走到这里
+    (with-no-warnings (org-display-inline-images))))
+
+(defun my/org-redisplay-images ()
+  "Refresh inline images (org 9.8+ name: `org-link-preview-refresh')."
+  (if (fboundp 'org-link-preview-refresh)
+      (org-link-preview-refresh)
+    (with-no-warnings (org-redisplay-inline-images))))
+
+(declare-function org--create-inline-image "ol" (file width))
+(defvar org-link-preview-overlays)         ; org 9.8: defvar-local in ol.el
+(defvar my/org-image-auto-refresh t
+  "When non-nil, re-render shown inline images after the window width changes.")
+(defvar my/org-image-auto-refresh-delay 0.8
+  "Idle seconds to wait before re-rendering images after a resize.")
+(defvar my/org-image-auto-refresh-max 40
+  "Do not auto refresh a buffer holding more than this many image overlays.")
+(defvar my/org-image--resize-timer nil)
+(defvar my/org-image--resize-frame nil)
+(defvar my/org-image--resize-sig nil)
+
+(defun my/org-image-refresh-displayed ()
+  "Re-render the inline images already displayed in the current buffer.
+Only existing previews are rebuilt: the old :file and :width are fed back
+into org so `org-image-max-width' is recomputed for the current window
+width.  No new preview is ever added, which is what makes this safe to run
+on a big buffer -- unlike `org-link-preview-refresh', which calls
+`org-link-preview-region' over the whole buffer and would decode every
+linked image again."
+  (interactive)
+  (unless (derived-mode-p 'org-mode)
+    (user-error "Not in an org buffer"))
+  (let ((ovs (bound-and-true-p org-link-preview-overlays))
+        (count 0))
+    (if (> (length ovs) my/org-image-auto-refresh-max)
+        (message "Auto refresh skipped: %d image overlays (> %d)"
+                 (length ovs) my/org-image-auto-refresh-max)
+      (dolist (ov ovs)
+        (let* ((spec  (overlay-get ov 'display))
+               (props (and (consp spec) (cdr spec)))
+               (file  (plist-get props :file))
+               ;; 保留手动缩放过的 :width; 没有则交给 org-image-max-width 重算
+               (width (plist-get props :width)))
+          (when (and (stringp file) (file-exists-p file))
+            (let ((new (and (fboundp 'org--create-inline-image)
+                            (ignore-errors (org--create-inline-image file width)))))
+              (when new
+                (overlay-put ov 'display new)
+                (setq count (1+ count)))))))
+      (when (> count 0)
+        (message "Re-rendered %d inline image(s) for the new width" count)))))
+
+(defun my/org-image--resize-refresh-do ()
+  (setq my/org-image--resize-timer nil)
+  (let ((frame my/org-image--resize-frame))
+    (when (frame-live-p frame)
+      (dolist (win (window-list frame 'no-minibuf))
+        ;; with-selected-window 是关键: org--create-inline-image 算 :max-width 时用的是
+        ;; (window-width nil t), 也就是「当时 selected 的那个 window」。不切过去的话,
+        ;; 并排窗口里刷新另一侧的 buffer 会拿错宽度(实测差了一倍)。
+        (with-selected-window win
+          (when (and (derived-mode-p 'org-mode)
+                     (bound-and-true-p org-link-preview-overlays))
+            (my/org-image-refresh-displayed)))))))
+
+(defun my/org-image-refresh-after-window-resize (&optional frame)
+  "Re-render shown inline images once FRAME's windows stop changing size."
+  (let* ((frame (or frame (selected-frame)))
+         ;; 只关心宽度: 单纯上下拖动窗口不该触发重解码
+         (sig (when (frame-live-p frame)
+                (cons (frame-pixel-width frame)
+                      (window-width (frame-selected-window frame) t)))))
+    (when (and my/org-image-auto-refresh sig
+               (not (equal sig my/org-image--resize-sig)))
+      (setq my/org-image--resize-sig sig
+            my/org-image--resize-frame frame)
+      (when (timerp my/org-image--resize-timer)
+        (cancel-timer my/org-image--resize-timer))
+      (setq my/org-image--resize-timer
+            (run-with-idle-timer my/org-image-auto-refresh-delay nil
+                                 #'my/org-image--resize-refresh-do)))))
+
+(add-hook 'window-size-change-functions #'my/org-image-refresh-after-window-resize)
+
+(defvar my/org-image--python nil "Cached Python executable that has Pillow.")
+(defun my/org-image-python (&optional refresh)
+  "Return a Python interpreter with Pillow installed, or nil.
+Order: Windows scoop python311 (beancount env) -> python3 -> python.
+Result is cached; call with REFRESH to probe again."
+  (if (and my/org-image--python (not refresh))
+      my/org-image--python
+    (setq my/org-image--python
+          (cl-find-if (lambda (p)
+                        (and (stringp p) (file-executable-p p)
+                             (zerop (call-process p nil nil nil "-c" "import PIL"))))
+                      (list (expand-file-name "scoop/apps/python311/current/python.exe" "~")
+                            "/usr/bin/python3"
+                            (executable-find "python3")
+                            (executable-find "python"))))))
+
+(defun my/org-image-magick ()
+  "Return an ImageMagick executable, or nil."
+  (or (executable-find "magick")
+      (cl-find-if (lambda (p) (file-executable-p p))
+                  (list (expand-file-name "scoop/apps/imagemagick/current/magick.exe" "~")
+                        "C:/ProgramData/scoop/apps/imagemagick/current/magick.exe"
+                        "C:/PROGRA~3/scoop/apps/imagemagick/current/magick.exe"))))
+
+(defconst my/org-image-pil-rotate
+  "import sys
+from PIL import Image, ImageOps
+f, a = sys.argv[1], int(sys.argv[2])
+im = ImageOps.exif_transpose(Image.open(f))
+im.rotate(-a, expand=True).save(f)
+"
+  "Pillow rotation script. -a because PIL rotates counter-clockwise
+while `mogrify -rotate N` goes clockwise — keeps both backends identical.")
+
+(defconst my/org-image-pil-optimize
+  "import sys
+from PIL import Image, ImageOps
+f, out, ms, q = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+im = ImageOps.exif_transpose(Image.open(f))
+w, h = im.size
+if max(w, h) > ms:
+    im.thumbnail((ms, ms), Image.LANCZOS)
+if out.lower().endswith(('.jpg', '.jpeg')):
+    im = im.convert('RGB')
+im.save(out, optimize=True, quality=q)
+"
+  "Pillow downscale + re-encode script.")
+
+(defun my/org-image-file-size (file)
+  "Return size of FILE in KB as a float."
+  (/ (file-attribute-size (file-attributes file)) 1024.0))
+
+(defun my/org-image--repoint-file-link (new-path)
+  "Replace the [[file:...]] link at point with one pointing at NEW-PATH."
+  (let ((ctx (org-element-context)))
+    (unless (eq (org-element-type ctx) 'link)
+      (user-error "Point is not on a link"))
+    (let ((beg (org-element-property :begin ctx))
+          (end (org-element-property :end ctx)))
+      (delete-region beg end)
+      (goto-char beg)
+      (insert (format "[[file:%s]]" (org-link-escape new-path))))))
+
+(defun my/org-image-optimize (&optional max-side quality update-link)
+  "Re-encode the image at point to WebP (JPEG if the build lacks WebP).
+MAX-SIDE caps the long edge (default 1920), QUALITY defaults to 80.  Writes a
+NEW file next to the original and leaves the original untouched; repoints the
+link if UPDATE-LINK is non-nil (interactively you get a y/n prompt).
+With \\[universal-argument], prompt for MAX-SIDE and QUALITY."
+  (interactive "P")
+  (let* ((file (or (my/org-image-file-at-point) (user-error "No image file at point")))
+         (max-side (or max-side (if current-prefix-arg
+                                    (read-number "Max long edge (px): " 1920) 1920)))
+         (quality (or quality (if current-prefix-arg
+                                  (read-number "Quality (1-100): " 80) 80)))
+         (ext (if (and (fboundp 'image-type-available-p) (image-type-available-p 'webp))
+                  "webp" "jpg"))
+         (new (expand-file-name (concat (file-name-sans-extension (file-name-nondirectory file)) "." ext)
+                                (file-name-directory file)))
+         (py (or (my/org-image-python)
+                 (user-error "Need Python with Pillow: python3 -m pip install --user pillow")))
+         (before (my/org-image-file-size file)))
+    (unless (zerop (call-process py nil nil nil "-c" my/org-image-pil-optimize
+                                 file new (number-to-string max-side) (number-to-string quality)))
+      (user-error "Pillow failed on %s" file))
+    (let ((after (my/org-image-file-size new)))
+      (when (or update-link
+                (y-or-n-p (format "%s -> %s (%.0fKB -> %.0fKB, -%.0f%%)  Repoint link?"
+                                  (file-name-nondirectory file) (file-name-nondirectory new)
+                                  before after
+                                  (* 100 (/ (- before after) before)))))
+        (my/org-image--repoint-file-link (file-relative-name new default-directory))
+        (my/org-redisplay-images))
+      (message "%s -> %s: %.0fKB -> %.0fKB (-%.0f%%)"
+               (file-name-nondirectory file) (file-name-nondirectory new)
+               before after (* 100 (/ (- before after) before))))))
+
+(defun my/org-image-download-link-at-point ()
+  "Materialize the remote http(s) image link at point into .images/ .
+Downloads the image, rewrites the link to the local relative path and
+redisplays inline images.  Failure leaves the original link untouched.
+Deliberately a separate command rather than part of pasting: downloading is
+synchronous and would block Emacs on every rich paste."
+  (interactive)
+  (require 'url-handlers)
+  (let* ((ctx (org-element-context))
+         (type (org-element-property :type ctx))
+         (path (and ctx (org-element-property :path ctx))))
+    (unless (member type '("http" "https"))
+      (user-error "Point is not on an http(s) image link"))
+    (let* ((base (car (split-string path "[?#]")))
+           (ext  (downcase (or (file-name-extension base) "")))
+           (img-dir (expand-file-name ".images" (file-name-directory buffer-file-name)))
+           (dest (expand-file-name (file-name-nondirectory base) img-dir)))
+      (unless (member ext '("png" "jpg" "jpeg" "gif" "webp" "svg" "bmp" "tiff"))
+        (user-error "%s is not an image URL (extension %s)" base ext))
+      (make-directory img-dir t)
+      (condition-case nil
+          (progn (url-copy-file (concat type ":" path) dest t)
+                 (my/org-image--repoint-file-link (file-relative-name dest default-directory))
+                 (my/org-redisplay-images)
+                 (message "Downloaded %s" (file-name-nondirectory dest)))
+        (error (user-error "Download failed — link left untouched"))))))
+#+end_src
+
 ** Rotate image file permanently
 #+begin_src emacs-lisp
+;; 后端优先级: ImageMagick mogrify -> Python Pillow (见下个 block)
 (defun my/org-rotate-image-file (&optional angle)
-  "Rotate the image ATTACHMENT/FILE at point by ANGLE (default 90°) using ImageMagick.
-With universal prefix (\\[universal-argument]), prompt for angle.
-This physically modifies the file, so rotation survives cache/reboot."
+  "Rotate the image at point by ANGLE (default 90°) and redisplay.
+Prefers ImageMagick `mogrify'; falls back to Python Pillow.  The file itself
+is modified, so the rotation survives cache and reboot.
+With \\[universal-argument], prompt for the angle."
   (interactive "P")
   (let* ((context (org-element-context))
          (type (org-element-property :type context))
@@ -1714,20 +2294,19 @@ This physically modifies the file, so rotation survives cache/reboot."
                       (t (read-number "Rotation angle: " 90)))))
     (unless (and file (file-exists-p file) (file-regular-p file))
       (user-error "No image file at point"))
-    (let* ((magick (or (executable-find "magick")
-                        (let ((candidates (list (expand-file-name "scoop/apps/imagemagick/current/magick.exe" "~")
-                                                "C:/ProgramData/scoop/apps/imagemagick/current/magick.exe"
-                                                "C:/PROGRA~3/scoop/apps/imagemagick/current/magick.exe")))
-                          (catch 'found
-                            (dolist (c candidates)
-                              (when (file-executable-p c) (throw 'found c)))))))
-           (cmd (format "\"%s\" mogrify -rotate %d \"%s\"" magick angle file)))
-      (unless magick (user-error "ImageMagick not found"))
-      (if (zerop (shell-command cmd))
-          (progn
-            (message "Rotated %s by %d°" (file-name-nondirectory file) angle)
-            (org-redisplay-inline-images))
-        (user-error "ImageMagick `mogrify` failed — check: magick mogrify -rotate 90 \"some.png\"")))))
+    (let* ((magick (my/org-image-magick))
+           (py (unless magick (my/org-image-python)))
+           (ok (cond
+                (magick (zerop (shell-command
+                                (format "\"%s\" mogrify -rotate %d \"%s\"" magick angle file))))
+                (py (zerop (call-process py nil nil nil "-c" my/org-image-pil-rotate
+                                         file (number-to-string angle)))))))
+      (cond
+       (ok (message "Rotated %s by %d°" (file-name-nondirectory file) angle)
+           (my/org-redisplay-images))
+       (magick (user-error "ImageMagick `mogrify` failed — check: magick mogrify -rotate 90 \"some.png\""))
+       (py (user-error "Pillow rotation failed: %s" file))
+       (t (user-error "No ImageMagick and no Python+Pillow — try: sudo apt install imagemagick"))))))
 #+end_src
 
 ** DnD: flat copy to data/ (Org)
@@ -2102,12 +2681,19 @@ denote-dired directory, matching case-insensitively."
 
 ** consult-notes
 #+begin_src emacs-lisp
+(defun my/consult-notes-files-newest-first ()
+  "Return denote files sorted newest-first by their filename timestamp (denote ID)."
+  (sort (denote-directory-files)
+        (lambda (a b)
+          (string> (file-name-nondirectory a)
+                   (file-name-nondirectory b)))))
+
 (use-package! consult-notes
   :after (consult denote)
   :commands (consult-notes consult-notes-search-in-all-notes)
   :config
-  (setq consult-notes-file-dir-sources
-        `(("Notes"   ?n ,(expand-file-name "notes/"   org-directory))))
+  ;; 只保留 Denote 源覆盖 ~/org/notes/，删掉 "Notes" 目录源，避免同一篇笔记出现两次
+  (setq consult-notes-file-dir-sources nil)
 
 
   (setq consult-notes-org-headings-files
@@ -2118,18 +2704,13 @@ denote-dired directory, matching case-insensitively."
   (when (locate-library "denote")
     (consult-notes-denote-mode))
 
-  (setq consult-notes-denote-files-function
-        (lambda () (denote-directory-files nil t t))))
+  ;; 笔记列表顺序：按文件名时间戳（denote ID）排序，新的在最上面
+  (setq consult-notes-denote-files-function #'my/consult-notes-files-newest-first))
 
 (after! consult-notes
   (consult-customize consult-notes :sort nil)
-  (setq consult-notes-denote-files-function
-        (lambda ()
-          (sort (denote-directory-files)
-                (lambda (a b)
-                  (time-less-p
-                   (file-attribute-modification-time (file-attributes b))
-                   (file-attribute-modification-time (file-attributes a)))))))
+  ;; 确保 denote 源也是新在前（与 :config 一致，避免 eval 顺序问题）
+  (setq consult-notes-denote-files-function #'my/consult-notes-files-newest-first)
   ;; 文件名筛选不区分大小写
   (setq completion-ignore-case t)
   ;; 全文搜索不区分大小写 (ripgrep)
@@ -2170,27 +2751,33 @@ denote-dired directory, matching case-insensitively."
 #+end_src
 
 ** Focus mode toggle
-#+begin_src emacs-lisp
-;; 一键切换"专注写作"模式: 隐藏 modeline, 加宽 olivetti
-;; (defvar my/focus-writing-active nil)
+一键进入专注写作：居中宽栏 + 隐藏 modeline + 图注自动编号。再按一次还原。
 
-;; (defun my/focus-writing-toggle ()
-;;   "Toggle distraction-free writing layout."
-;;   (interactive)
-;;   (if my/focus-writing-active
-;;       (progn
-;;         (when (fboundp 'hide-mode-line-mode) (hide-mode-line-mode -1))
-;;         (when (bound-and-true-p olivetti-mode)
-;;           (setq olivetti-body-width 92)
-;;           (olivetti--set-margins))
-;;         (setq my/focus-writing-active nil)
-;;         (message "Focus mode: OFF"))
-;;     (unless (bound-and-true-p olivetti-mode) (olivetti-mode 1))
-;;     (setq olivetti-body-width 110)
-;;     (when (fboundp 'olivetti--set-margins) (olivetti--set-margins))
-;;     (when (fboundp 'hide-mode-line-mode) (hide-mode-line-mode 1))
-;;     (setq my/focus-writing-active t)
-;;     (message "Focus mode: ON")))
+和 ~SPC t z~（纯 writeroom）不冲突：这里额外隐藏 modeline 并把栏宽临时调到 110，
+适合写 journal / 长文时用。
+
+#+begin_src emacs-lisp
+(defvar my/focus-writing-active nil)
+(defvar my/focus-writing--saved-width nil)
+
+(defun my/focus-writing-toggle ()
+  "Toggle distraction-free writing layout (writeroom + no modeline)."
+  (interactive)
+  (require 'writeroom-mode)
+  (if my/focus-writing-active
+      (progn
+        (when (fboundp 'hide-mode-line-mode) (hide-mode-line-mode -1))
+        (when writeroom-mode (writeroom-mode -1))
+        (when my/focus-writing--saved-width
+          (setq writeroom-width my/focus-writing--saved-width))
+        (setq my/focus-writing-active nil)
+        (message "Focus mode: OFF"))
+    (setq my/focus-writing--saved-width writeroom-width
+          writeroom-width 110)
+    (writeroom-mode 1)
+    (when (fboundp 'hide-mode-line-mode) (hide-mode-line-mode 1))
+    (setq my/focus-writing-active t)
+    (message "Focus mode: ON (writeroom 110, modeline hidden)")))
 #+end_src
 
 * Journal
@@ -2215,6 +2802,42 @@ denote-dired directory, matching case-insensitively."
         epa-file-select-keys 'silent)
   (epa-file-name-regexp-update)
   (epa-file-enable))
+#+end_src
+
+** 明文兜底：非 PGP 数据的日记文件也能打开
+~epa-file-name-regexp~ 把 journal/ 下所有 ~__journal.org~ 一律当成加密文件，
+只要文件名匹配就无条件走 ~epg-decrypt-file~。于是任何在 Emacs 之外写出来的
+明文文件（Trilium 同步、git pull、备份还原、新建未保存）一打开就报
+~Can't decrypt, No data (no armored data)~，连内容都看不到，更没法修。
+这里在读取前先看一眼文件头：确认不是 OpenPGP 数据就退回普通插入。
+明文打开后正常保存，写盘时仍会按名字加密，文件自动回到加密态。
+#+begin_src emacs-lisp
+(defun my/file-pgp-data-p (file)
+  "Return non-nil if FILE starts with OpenPGP data (armored or binary)."
+  (and (file-readable-p file)
+       (> (file-attribute-size (file-attributes file)) 0)
+       (with-temp-buffer
+         (set-buffer-multibyte nil)
+         (insert-file-contents-literally file nil 0 300)
+         (let ((head (buffer-string)))
+           (or (string-match-p "-----BEGIN PGP" head)
+               ;; 二进制 OpenPGP 旧格式 CTB：bit7 置位、bit6 清零。
+               ;; UTF-8 文本首字节不会落在 0x80-0xBF，判断是安全的。
+               (= (logand (aref head 0) #xC0) #x80))))))
+
+(defun my/epa-file-insert-file-contents-advice (orig file &optional visit beg end replace)
+  "Insert FILE as plain text when it holds no OpenPGP data.
+Otherwise defer to `epa-file-insert-file-contents'."
+  (if (and (file-exists-p file)
+           (not (my/file-pgp-data-p file)))
+      (epa-file-run-real-handler #'insert-file-contents
+                                 (list file visit beg end replace))
+    (funcall orig file visit beg end replace)))
+
+(with-eval-after-load 'epa-file
+  ;; `epa-file-run-real-handler' 是宏，必须在本文件加载后才展开。
+  (advice-add 'epa-file-insert-file-contents :around
+              #'my/epa-file-insert-file-contents-advice))
 #+end_src
 
 ** denote-journal
@@ -2252,55 +2875,168 @@ Before 03:00 falls back to the previous day."
 (defvar my/weather-location "上海"
   "wttr.in 查询地点。")
 
+(defvar my/weather--cache nil
+  "(日期 . 天气字符串) 缓存, 同一天不再重复请求 wttr.in。")
+
+(defun my/weather--url ()
+  "返回 wttr.in 单行天气的 URL。"
+  (format "https://wttr.in/%s?format=3"
+          (url-hexify-string my/weather-location)))
+
 (defun my/get-weather ()
-  "同步从 wttr.in 获取天气 (手动调用 my/insert-weather 时用)。"
+  "同步获取天气 (手动调用 `my/insert-weather' 时用)。"
   (let ((coding-system-for-read 'utf-8))
     (string-trim
      (shell-command-to-string
-      (format "curl -s --max-time 3 \"https://wttr.in/%s?format=3\""
-              (url-hexify-string my/weather-location))))))
+      (format "curl -s --connect-timeout 5 --max-time 10 \"%s\""
+              (my/weather--url))))))
 
 (defun my/insert-weather ()
-  "在光标处插入当前天气 (同步, 可能卡 ≤3s)。"
+  "在光标处插入当前天气 (同步, 可能卡 ≤10s)。"
   (interactive)
   (insert (my/get-weather)))
 
-(defun my/denote-journal--insert-weather-async (target-file)
-  "异步获取天气并写入 TARGET-FILE 顶部, 避免新建 journal 时卡顿。"
-  (let ((buf (generate-new-buffer " *weather*")))
+(defun my/weather--fetch (callback &optional attempt)
+  "异步取天气, 非空结果交给 CALLBACK。空结果或 curl 报错时重试一次。
+
+超时放宽到 10s: wttr.in 在国内经常 3s 拿不到, 旧版 --max-time 3
+是大部分日记没有天气的直接原因。"
+  (let* ((attempt (or attempt 1))
+         (buf (generate-new-buffer " *weather*")))
     (make-process
      :name "weather-fetch"
      :buffer buf
-     :command (list "curl" "-s" "--max-time" "3"
-                    (format "https://wttr.in/%s?format=3"
-                            (url-hexify-string my/weather-location)))
+     :command (list "curl" "-sS" "--connect-timeout" "5" "--max-time" "10"
+                    (my/weather--url))
      :sentinel
      (lambda (proc _event)
        (when (memq (process-status proc) '(exit signal))
          (let ((output (with-current-buffer buf
                          (string-trim (buffer-string)))))
            (kill-buffer buf)
-           (when (and (file-exists-p target-file)
-                      (not (string-empty-p output)))
-             (with-current-buffer (find-file-noselect target-file)
-               (save-excursion
-                 (goto-char (point-min))
-                 (unless (re-search-forward "^\\* 天气\\(?:[ \t].*\\)?$" nil t)
-                   (goto-char (point-min))
-                   (while (looking-at-p "^#\\+")
-                     (forward-line 1))
-                   (while (looking-at-p "^[ \t]*$")
-                     (forward-line 1))
-                   (insert "* 天气\n" output "\n\n")))
-               (save-buffer)))))))))
+           (cond
+            ;; curl 失败时 -sS 会把错误写进 stdout, 别当成天气写进日记。
+            ((or (string-empty-p output)
+                 (string-prefix-p "curl" output))
+             (when (< attempt 2)
+               (my/weather--fetch callback (1+ attempt))))
+            (t
+             (setq my/weather--cache
+                   (cons (format-time-string "%Y-%m-%d") output))
+             (funcall callback output)))))))))
+
+(defun my/weather--get (callback)
+  "取天气: 当天缓存命中就直接回调, 否则发起异步请求。"
+  (let ((today (format-time-string "%Y-%m-%d")))
+    (if (and my/weather--cache
+             (string= (car my/weather--cache) today))
+        (funcall callback (cdr my/weather--cache))
+      (my/weather--fetch callback))))
+
+(defun my/journal--insert-weather (buffer text)
+  "在 BUFFER 的 front matter 之后插入 `* 天气' 标题 + TEXT。
+
+已有天气标题时不重复插入, 返回是否插入。"
+  (with-current-buffer buffer
+    (let ((m (point-marker))
+          inserted)
+      (set-marker-insertion-type m t)
+      (save-excursion
+        (goto-char (point-min))
+        (unless (re-search-forward "^\\*+ 天气[ \t]*$" nil t)
+          (goto-char (point-min))
+          (while (looking-at-p "^#\\+")
+            (forward-line 1))
+          (while (looking-at-p "^[ \t]*$")
+            (forward-line 1))
+          (insert "* 天气\n" text "\n\n")
+          (setq inserted t)))
+      (goto-char m)
+      inserted)))
 
 (defun my/denote-journal-auto-weather ()
-  "新建 journal 文件时异步插入顶部天气, 不阻塞 capture 流程。"
+  "新建 journal 时异步在顶部插入天气, 不阻塞新建流程。
+
+关键点: 只改新建 note 的 buffer。此时内容在内存里仍是明文, 保存时才
+按 `epa-file-name-regexp' 加密。旧实现是 curl 回来后 `find-file-noselect'
+读文件——那时文件多半已经落盘成密文, 读它等于在异步哨兵里解密,
+要么静默失败, 要么等口令把 Emacs 卡住。journal 全量加密一上 (9 月),
+天气就基本不再出现了, 时间线对得上。"
   (when (and (buffer-file-name)
              (string-match-p "__journal" (buffer-file-name)))
-    (my/denote-journal--insert-weather-async (buffer-file-name))))
+    (let ((buffer (current-buffer))
+          (file (buffer-file-name)))
+      (my/weather--get
+       (lambda (text)
+         (if (buffer-live-p buffer)
+             (with-current-buffer buffer
+               (when (my/journal--insert-weather buffer text)
+                 (save-buffer)))
+           ;; buffer 已关: 磁盘上仍是明文才补写; 已加密的文件不碰,
+           ;; 免得又要口令。
+           (when (and (file-exists-p file)
+                      (not (my/file-pgp-data-p file)))
+             (with-current-buffer (find-file-noselect file)
+               (when (my/journal--insert-weather (current-buffer) text)
+                 (save-buffer))))))))))
+
+(defun my/journal-insert-weather ()
+  "手动给当前日记补一条顶部天气 (新建时网络失败就用这个)。"
+  (interactive)
+  (my/weather--get
+   (lambda (text)
+     (when (my/journal--insert-weather (current-buffer) text)
+       (save-buffer)
+       (message "天气已插入: %s" text)))))
 
 (add-hook 'denote-after-new-note-hook #'my/denote-journal-auto-weather)
+
+(defun my/denote-journal--today-file-p (file)
+  "FILE 是不是今天的日记。"
+  (and file
+       (string-match-p "__journal" file)
+       (string-prefix-p (format-time-string "%Y%m%d")
+                        (file-name-nondirectory file))))
+
+(defun my/denote-journal--has-weather-p (&optional buffer)
+  "BUFFER 里是否已经有 `* 天气' 标题。"
+  (with-current-buffer (or buffer (current-buffer))
+    (save-excursion
+      (goto-char (point-min))
+      (re-search-forward "^\\*+ 天气[ \t]*$" nil t))))
+
+(defun my/denote-journal-ensure-weather (&rest _args)
+  "打开当天日记时, 发现还没天气就补一条。
+
+`denote-journal-new-or-existing-entry' 只在新文件上跑
+`denote-after-new-note-hook'。新建当天日记之后再次打开 (追加内容) 走的是
+\"existing\" 分支, hook 不触发, 天气就永远不会补上——所以这里再兜一层。
+只补当天: 翻旧日记不该被塞一条今天的天气。"
+  (let ((file (buffer-file-name))
+        (buffer (current-buffer)))
+    (when (and (my/denote-journal--today-file-p file)
+               (not (my/denote-journal--has-weather-p buffer)))
+      (my/weather--get
+       (lambda (text)
+         (when (buffer-live-p buffer)
+           (with-current-buffer buffer
+             (when (and (not (my/denote-journal--has-weather-p buffer))
+                        (my/journal--insert-weather buffer text))
+               (save-buffer)
+               (message "已补当天天气: %s" text)))))))))
+
+(advice-add 'denote-journal-new-or-existing-entry :after
+            #'my/denote-journal-ensure-weather)
+
+;; 真正的日记入口是 org-capture: `SPC n n j' → (org-capture nil "j"), 模板用
+;; (file my/journal-capture-target)。它既不走 denote 的 hook, 也不经过上面
+;; 的 advice。capture 打开目标文件必然经过 find-file, 所以兜底挂在
+;; `find-file-hook' 上, denote 新建、capture 追加、手动打开三条路都覆盖。
+(add-hook 'find-file-hook #'my/denote-journal-ensure-weather)
+
+;; 当天的日记 buffer 早就开着时, capture 不会重新 find-file, 上面这条就不触发。
+;; 再在 capture 落盘前补一次: 此时当前 buffer 就是日记文件本身。
+(add-hook 'org-capture-before-finalize-hook #'my/denote-journal-ensure-weather)
 #+end_src
 
 * Calendar (cal-china-x)
@@ -2594,6 +3330,28 @@ Use FILE arg, current buffer's file (if .epub), or prompt."
   :config
   (setq beancount-electric-currency t
         beancount-use-ido nil))           ; 用 vertico 接管补全
+
+;; rustledger LSP：实时诊断 / 账户与收款人补全 / hover 显示余额 / 重命名重构
+;;   二进制：Linux ~/.local/bin/rledger-lsp（v0.24.0）；Windows: scoop install rustledger
+;;   定位是「第二引擎」——只做校验与编辑增强；展示仍以 fava 为准
+;;   （rustledger 的 report 目前不做多商品折算，净资产视图别用它）
+;;   不想用就 (setq my/beancount-eglot nil)
+(defvar my/beancount-eglot t
+  "是否在 beancount-mode 里启用 rledger-lsp。")
+(when (and my/beancount-eglot (executable-find "rledger-lsp"))
+  (require 'eglot)
+  ;; 必须显式把根账本路径传给 LSP：账本在 ~/org/investment/ 子目录里，
+  ;; 而 eglot 交给 LSP 的 rootUri 是 project 根（~/org，因为有 .git），
+  ;; rledger-lsp 在 ~/org 下自动发现不到 main.beancount，就会退化成「单文件诊断」——
+  ;; 月度流水文件里没有 open 指令，于是满屏 "Account ... was never opened"。
+  ;; （2026-09-18 账本从 ~/beancounta 迁到 ~/org/investment 后才暴露：
+  ;;  以前工作区根就是账本根，自动发现能命中，所以一直没出问题。）
+  (add-to-list 'eglot-server-programs
+               `(beancount-mode . ("rledger-lsp"
+                                   :initializationOptions
+                                   (:journalFile ,(expand-file-name "investment/main.beancount"
+                                                                    org-directory)))))
+  (add-hook 'beancount-mode-hook #'eglot-ensure))
 
 (require 'subr-x)
 (require 'cl-lib)
@@ -3290,17 +4048,57 @@ When ACCOUNT is non-nil, ensure that account instead of the default normal accou
       (kill-buffer source-buffer))
     (message "Inserted %d balance checks for %s" count date)))
 
+(defconst my/beancount-fava-port 5000
+  "fava 监听端口；与 investment/.vscode/tasks.json 里的 --port 保持一致。")
+
+(defun my/beancount-fava-url ()
+  "fava 首页 URL。直接访问 / 即可，fava 会自己 302 到 /<slug>/，不用拼 slug。"
+  (format "http://localhost:%d/" my/beancount-fava-port))
+
+(defun my/beancount-fava-live-p ()
+  "fava 端口是否已在监听（Emacs 起的或别处起的都算）。"
+  (condition-case nil
+      (let ((conn (open-network-stream "fava-probe" nil "localhost" my/beancount-fava-port)))
+        (delete-process conn)
+        t)
+    (error nil)))
+
+(defun my/beancount-fava--open-when-ready (&optional tries)
+  "轮询等 fava 端口就绪后打开浏览器；TRIES 是已尝试次数（0.5s 一次，最多 15 秒）。"
+  (let ((tries (or tries 0)))
+    (cond ((my/beancount-fava-live-p)
+           (browse-url (my/beancount-fava-url))
+           (message "fava 已就绪：%s" (my/beancount-fava-url)))
+          ((< tries 30)
+           (run-with-timer 0.5 nil #'my/beancount-fava--open-when-ready (1+ tries)))
+          (t
+           (pop-to-buffer "*fava*")
+           (message "fava 15 秒仍未就绪，见 *fava* buffer")))))
+
 (defun my/beancount-fava-main ()
-  "Open main Beancount ledger and toggle/start Fava."
+  "打开主账本，确保 fava 在跑，然后在浏览器里打开报表。
+已实测（2026-09-18）：fava_dashboards 的 dashboards.yaml 是按账本文件所在目录解析的，
+把 cwd 设成 /tmp 起 fava，6 个 panel 照样全过，所以 cwd 不影响 dashboards。
+这里仍显式绑 default-directory，只是防止它落在 tramp / 已删除目录时子进程启动异常。"
   (interactive)
   (my/open-beancount-main)
-  (if (fboundp 'beancount-fava)
-      (beancount-fava)
-    (start-process "fava" "*fava*" (my/beancount-script "fava") (my/beancount-main-file))))
+  (let ((default-directory (file-name-directory (my/beancount-main-file))))
+    (if (my/beancount-fava-live-p)
+        (progn
+          (browse-url (my/beancount-fava-url))
+          (message "复用已在运行的 fava：%s" (my/beancount-fava-url)))
+      (start-process "fava" "*fava*"
+                     (my/beancount-script "fava")
+                     "--port" (number-to-string my/beancount-fava-port)
+                     (my/beancount-main-file))
+      (my/beancount-fava--open-when-ready))))
 
 (defun my/beancount-python-executable ()
-  "Return a Python executable with the investment script dependencies."
-  (let ((candidates (list (expand-file-name "scoop/apps/python311/current/python.exe" "~")
+  "Return a Python executable with the investment script dependencies.
+Linux 优先用 ~/.venvs/beancount（uv 建的 venv，装了 beancount/fava 全套）；
+Windows 用 scoop python311；都找不到才退回 PATH 上的 python3/python。"
+  (let ((candidates (list (expand-file-name ".venvs/beancount/bin/python" "~")
+                          (expand-file-name "scoop/apps/python311/current/python.exe" "~")
                           (executable-find "python3")
                           (executable-find "python"))))
     (catch 'found
@@ -3800,7 +4598,8 @@ identical to what `doom.ps1' does on Windows."
         :desc "Add keywords"                   "k" #'denote-keywords-add
         :desc "Remove keywords"                "K" #'denote-keywords-remove
         :desc "Dired in denote dir"            "d" #'denote-dired
-        :desc "Today's journal"                "j" #'denote-journal-new-or-existing-entry)
+        :desc "Today's journal"                "j" #'denote-journal-new-or-existing-entry
+        :desc "Insert weather · 补天气"        "W" #'my/journal-insert-weather)
        (:prefix ("i" . "investment · 投资")
         :desc "Beancount buy · 买入"                  "b" #'my/beancount-record-buy
         :desc "Beancount sell · 卖出"                 "s" #'my/beancount-record-sell
@@ -3854,7 +4653,16 @@ identical to what `doom.ps1' does on Windows."
        :desc "Screenshot"     "s" #'org-download-screenshot
        :desc "Yank"           "y" #'org-download-yank
        :desc "Delete file"   "d" #'my/org-delete-file-link-at-point
-       :desc "Rotate file"  "r" #'my/org-rotate-image-file)
+       :desc "Rotate file"  "r" #'my/org-rotate-image-file
+       :desc "Open external" "o" #'my/org-image-open-external
+       :desc "Zoom in"       "+" #'my/org-image-resize-up
+       :desc "Zoom out"      "-" #'my/org-image-resize-down
+       :desc "Caption"       "c" #'my/org-image-caption
+       :desc "Preview links" "l" #'org-link-preview
+       :desc "Compress→webp" "O" #'my/org-image-optimize
+       :desc "Grab http img" "D" #'my/org-image-download-link-at-point
+       :desc "Insert figure" "f" #'my/org-insert-image-figure
+       :desc "Number captions" "n" #'my/org-caption-number-mode)
       ;; NOTE: Doom 自带 (:prefix ("d" . "date/deadline"))，带描述的 :prefix 会
       ;; 清空该前缀原有键，所以 date 那几个键必须在这里显式补回来。
       (:prefix ("d" . "date/denote")
@@ -3885,6 +4693,7 @@ identical to what `doom.ps1' does on Windows."
        :desc "Toggle mode"     "t" #'org-transclusion-mode)
       :desc "TODO state"         "t" #'org-todo
       :desc "Paste rich text"    "V" #'my/org-paste-rich
+      :desc "Focus writing"      "F" #'my/focus-writing-toggle
       :desc "Rebucket entry"     "R" #'my/org-rebucket-current-entry
       :desc "Archive done tasks" "A" #'my/org-archive-done-tasks)
 #+end_src
@@ -3967,13 +4776,48 @@ identical to what `doom.ps1' does on Windows."
     (define-key evil-emacs-state-map  (kbd "C-\\") #'sis-switch)))
 #+end_src
 
-** Emacs MCP Server (emcp)
+** Smart Input Source (sis) + Rime — Linux (fcitx5)
 #+begin_src emacs-lisp
-(use-package! emcp
-  :config
-  (setq emcp-http-port 8766)
-  ;; Auto-start the MCP server with the 'inspect' profile on Emacs load so
-  ;; Claude Code (and other MCP clients) can talk to this Emacs instance.
-  (unless (and (boundp 'emcp--servers) (alist-get 'inspect emcp--servers))
-    (emcp-start 'inspect)))
+(when (and (featurep :system 'linux)
+           (executable-find "fcitx5-remote"))
+  (use-package! sis
+    :demand t
+    :config
+    ;; fcitx5-remote prints "1" (inactive → keyboard-us) or "2" (active → rime).
+    ;; `sis-ism-lazyman-config' points sis--ism at the fcitx5-remote binary and
+    ;; wires do-set to -c / -o; do-get is derived from the same binary.
+    (sis-ism-lazyman-config "1" "2" 'fcitx5)
+
+    ;; Poll once a second so switches made outside Emacs (e.g. Super+Space)
+    ;; are still picked up. No imm32-style race here, unlike Windows.
+    (setq sis-auto-refresh-seconds 1)
+
+    (sis-global-cursor-color-mode t)
+    (when (fboundp 'modus-themes-get-color-value)
+      (setq sis-other-cursor-color   (modus-themes-get-color-value 'fg-alt)
+            sis-default-cursor-color (modus-themes-get-color-value 'border)))
+
+    (sis-global-respect-mode t)
+    (sis-global-context-mode t)
+    (sis-global-inline-mode  t)
+
+    (setq sis-respect-go-english-triggers (list #'org-agenda))
+
+    ;; Resync after frame regains focus
+    (add-function :after after-focus-change-function
+                  (lambda () (sis--get)))
+
+    :hook
+    (org-capture-mode . sis-set-other))
+
+  ;; NOTE: deliberately duplicating the Windows bindings above rather than
+  ;; hoisting them into a shared helper — keeps either platform's block from
+  ;; breaking the other. Fold them together once both sides are settled.
+  (define-key global-map (kbd "C-\\") #'sis-switch)
+  (with-eval-after-load 'evil
+    (define-key evil-normal-state-map (kbd "C-\\") #'sis-switch)
+    (define-key evil-insert-state-map (kbd "C-\\") #'sis-switch)
+    (define-key evil-motion-state-map (kbd "C-\\") #'sis-switch)
+    (define-key evil-visual-state-map (kbd "C-\\") #'sis-switch)
+    (define-key evil-emacs-state-map  (kbd "C-\\") #'sis-switch)))
 #+end_src
