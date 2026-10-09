@@ -128,7 +128,9 @@
 ;; Org 视觉现代化: 标题/TODO/tag/checkbox/timestamp 美化
 ;; 与 valign 协同: 禁用 org-modern 的表格渲染, 交给 valign
 ;; 注意: 本块 tangle 生成 packages.el, 改这里而不是改 packages.el
-(package! org-modern)
+;; 2026-10-07 Sean: 关掉 org-modern —— 不喜欢它的标题样式。:disable t 停装/停用。
+(package! org-modern
+  :disable t)
 
 ;; 可视化 undo 树, 比 Doom 默认 undo-fu 更直观
 (package! vundo)
@@ -563,7 +565,8 @@ iscroll 与 ultra-scroll 争夺滚动控制权, 必须二选一, 否则两套逻
   ;; === 符号 / 数学 / emoji ===
   (set-fontset-font t 'symbol       (font-spec :family "Symbola"))
   (set-fontset-font t 'mathematical (font-spec :family "Symbola"))
-  (set-fontset-font t 'emoji        (font-spec :family "Segoe UI Emoji")))
+  ;; emoji: Windows 用 Segoe UI Emoji, Linux 用 Noto Color Emoji (均已装, 彩色渲染)
+  (set-fontset-font t 'emoji (font-spec :family (if (eq system-type 'windows-nt) "Segoe UI Emoji" "Noto Color Emoji"))))
 #+end_src
 
 * Editor Enhancements
@@ -733,30 +736,59 @@ iscroll 与 ultra-scroll 争夺滚动控制权, 必须二选一, 否则两套逻
   ~wrong-type-argument sequencep t~（我在 batch 里踩过）。默认值就够好，不要覆盖。
 
 #+begin_src emacs-lisp
-(use-package! org-modern
-  :hook (org-mode . org-modern-mode)
-  :hook (org-agenda-finalize . org-modern-agenda)
+;; 2026-10-07 Sean: 关掉 org-modern (packages 段已 :disable t) —— 不喜欢它的标题样式。
+;; 下面这段是旧配置, 留作恢复参考, 已注释不参与 tangle 生效。
+;; (use-package! org-modern
+;;   :hook (org-mode . org-modern-mode)
+;;   :hook (org-agenda-finalize . org-modern-agenda)
+;;   :config
+;;   (setq org-modern-table nil          ; 表格交给 valign
+;;         org-modern-table-vertical 3
+;;         org-modern-block-fringe 2     ; 代码块左侧 fringe 竖线
+;;         org-modern-hide-stars 'leading
+;;         org-modern-todo t
+;;         org-modern-todo-faces
+;;         '(("TODO" :background "#6b8cce" :foreground "#ffffff" :weight semibold)
+;;           ("NEXT" :background "#d6a05a" :foreground "#ffffff" :weight semibold)
+;;           ("PROG" :background "#7fae9b" :foreground "#ffffff" :weight semibold)
+;;           ("WAIT" :background "#bca45f" :foreground "#ffffff" :weight semibold)
+;;           ("DONE" :background "#9aa0a6" :foreground "#ffffff" :weight semibold)
+;;           ("FAIL" :background "#c79a9a" :foreground "#ffffff" :weight semibold))
+;;         org-modern-tag t
+;;         org-modern-timestamp t
+;;         org-modern-priority t
+;;         org-modern-keyword t
+;;         org-modern-block-name t
+;;         org-modern-horizontal-rule t))
+#+end_src
+
+** 默认居中: org-mode 常驻 visual-fill-column
+不用 writeroom 也能居中。=visual-fill-column-mode= 就是 writeroom 底层用来居中的那个包，
+单独开它 **只做居中**：不放大字体、不切 mixed-pitch、不动 modeline、不独占窗口。
+
+- 栏宽沿用 =writeroom-width= 的 100（中英混排，约 50 个汉字）
+- 窗口本身比栏宽窄时它会自动放弃居中（正常行为，不是配置没生效）
+- ⚠️ =visual-fill-column-width= / =-center-text= 都被 =(make-variable-buffer-local)=
+  标记过，普通 ~setq~ **只改当前 buffer**（启动时是 =*scratch*=），org buffer 根本拿不到。
+  必须 ~setq-default~。writeroom 之所以用 setq 也生效，是因为它在目标 buffer 里执行的。
+
+#+begin_src emacs-lisp
+(use-package! visual-fill-column
+  :hook (org-mode . visual-fill-column-mode)
   :config
-  (setq org-modern-table nil          ; 表格交给 valign
-        org-modern-table-vertical 3
-        org-modern-block-fringe 2     ; 代码块左侧 fringe 竖线
-        org-modern-hide-stars 'leading
-        org-modern-todo t
-        ;; org-modern 不读 org-todo-keyword-faces, 这里直接给每个关键字的胶囊配色。
-        ;; 低饱和柔和色, 避免默认 org-todo 亮红(经 :inverse-video 反相)太刺眼。
-        org-modern-todo-faces
-        '(("TODO" :background "#6b8cce" :foreground "#ffffff" :weight semibold)
-          ("NEXT" :background "#d6a05a" :foreground "#ffffff" :weight semibold)
-          ("PROG" :background "#7fae9b" :foreground "#ffffff" :weight semibold)
-          ("WAIT" :background "#bca45f" :foreground "#ffffff" :weight semibold)
-          ("DONE" :background "#9aa0a6" :foreground "#ffffff" :weight semibold)
-          ("FAIL" :background "#c79a9a" :foreground "#ffffff" :weight semibold))
-        org-modern-tag t
-        org-modern-timestamp t
-        org-modern-priority t
-        org-modern-keyword t
-        org-modern-block-name t
-        org-modern-horizontal-rule t))
+  ;; 中英混排: 汉字宽度约为英文两倍, 80 列只剩 ~40 个汉字, 太窄
+  (setq-default visual-fill-column-width 100
+                visual-fill-column-center-text t))
+
+(defun my/org-recenter-after-writeroom ()
+  "Restore centered layout after `writeroom-mode' is turned off.
+`writeroom--disable' calls (visual-fill-column-mode -1) and kills the
+buffer-local width/center variables, so an org buffer would go back to
+left-aligned after leaving zen.  This puts it back."
+  (when (derived-mode-p 'org-mode)
+    (setq-local visual-fill-column-width 100)
+    (setq-local visual-fill-column-center-text t)
+    (visual-fill-column-mode 1)))
 #+end_src
 
 ** Writeroom: 居中栏宽 (替代 olivetti)
@@ -767,13 +799,15 @@ Doom 默认键位：=SPC t z= 开关 zen，=SPC t Z= zen + 全屏独占。
 (after! writeroom-mode
   ;; 中英混排: 汉字宽度约为英文两倍, Doom 默认的 80 列只剩 ~40 个汉字, 太窄
   (setq writeroom-width 100
-        ;; 正文居中而不是贴左边缘
-        visual-fill-column-center-text t
         ;; 只影响当前 buffer, 不留全局副作用(Doom 已把 global-effects 置 nil)
         writeroom-maximize-window nil
         writeroom-mode-line t)
+  ;; 正文居中而不是贴左边缘; 这是 buffer-local 变量, 必须 setq-default
+  (setq-default visual-fill-column-center-text t)
   ;; 中文写作放大一档; 改 0 就是原尺寸
-  (setq +zen-text-scale 1.0))
+  (setq +zen-text-scale 1.0)
+  ;; 退出 zen 后回到普通居中(而不是贴左), 见 [默认居中]
+  (add-hook 'writeroom-mode-disable-hook #'my/org-recenter-after-writeroom))
 
 ;; 自动进去太打扰, 但要有个顺手的入口: 见 [[#my-focus-toggle][Focus mode toggle]]
 #+end_src
@@ -1215,6 +1249,46 @@ With a numeric prefix WIDTH, also emit an #+ATTR_ORG :width line."
                       (org-agenda-skip-function 'my/skip-habit))))))))
 #+end_src
 
+** Zenburn 下的 agenda 配色
+
+doom-themes 里没有 =org-agenda-*= 的 face 定义（=doom-themes-ext-org.el= 只管
+org-level / todo / done）, 所以切到 =doom-zenburn= 后 agenda 用的是 org 自带的
+X11 色名: =org-agenda-structure= 是 =LightSkyBlue= (#87CEFA), =org-time-grid= 是
+=LightGoldenrod= (#EEDD82), =org-agenda-date= 继承前者。这两个色不属于 zenburn 色板,
+在 #3F3F3F 上显得"外来", 而且时间网格那个亮黄会把整屏节奏抢走。
+
+下面把它们换回 zenburn 原生色（色值取自 =doom-zenburn-theme.el= 的 extra colors 段）,
+并拉开日期 / Clocked / Scheduled / Deadline 各行的对比度。
+
+注意: 必须用**带主题参数**的 =custom-theme-set-faces!= , 不能用裸 =custom-set-faces!= 。
+后者写进 =user= theme, 对**所有**主题生效, 切回 ef-light 时这套暗色会糊死浅色底。
+#+begin_src emacs-lisp
+(after! org
+  (custom-theme-set-faces! 'doom-zenburn
+    ;; 结构头 "Day-agenda (W39):"   ← 原本 LightSkyBlue
+    '(org-agenda-structure :foreground "#8CD0D3" :weight bold)    ; blue
+    ;; 日期行
+    '(org-agenda-date :foreground "#9FC59F")                      ; green+2
+    '(org-agenda-date-today :foreground "#F0DFAF" :weight bold)   ; yellow
+    '(org-agenda-date-weekend :foreground "#DC8CC3" :weight bold) ; magenta
+    '(org-agenda-date-weekend-today :foreground "#DC8CC3" :weight bold)
+    ;; 时间网格 "8:00......"  ← 原本 LightGoldenrod, 压暗
+    '(org-time-grid :foreground "#5F7F5F")                        ; green-2
+    '(org-agenda-current-time :foreground "#DCA3A3")              ; red+1
+    ;; Clocked 行（开 log mode 后会大量出现）
+    '(org-agenda-clocking :foreground "#93E0E3")                  ; cyan
+    ;; 已完成
+    '(org-agenda-done :foreground "#656555")                      ; fg-1
+    ;; Scheduled / Deadline 前缀
+    '(org-scheduled :foreground "#94BFF3")                        ; blue+1
+    '(org-scheduled-today :foreground "#8CD0D3" :weight bold)
+    '(org-scheduled-previously :foreground "#CC9393" :weight bold) ; red
+    '(org-upcoming-deadline :foreground "#DFAF8F" :weight bold)    ; orange
+    '(org-warning :foreground "#CC9393" :weight bold)
+    ;; org-super-agenda 的分组标题（daily / weekly 视图在用）
+    '(org-super-agenda-header :foreground "#F0DFAF" :weight bold)))
+#+end_src
+
 ** Capture helpers
 #+begin_src emacs-lisp
 (after! org
@@ -1359,11 +1433,11 @@ With a numeric prefix WIDTH, also emit an #+ATTR_ORG :width line."
            :empty-lines 1 :jump-to-captured t)
           ("b" "Books")
           ("bb" "书 · 待阅读" entry
-           (file+olp "~/org/notes/20260101T000024--reading-list__read_index.org" "待阅读")
+           (file+olp "~/org/notes/20260101T000024--书__index_read.org" "待阅读")
            "*** TODO %^{书名}\n:PROPERTIES:\n:作者: %^{作者}\n:类型: %^{类型|小说|非虚构|理财|网文|漫画|其他}\n:来源: %^{来源|微信读书|豆瓣|Z-Library|实体书|其他}\n:添加时间: %U\n:END:\n%?"
            :empty-lines 1 :jump-to-captured t)
           ("bB" "书 · 阅读中" entry
-           (file+olp "~/org/notes/20260101T000024--reading-list__read_index.org" "阅读中")
+           (file+olp "~/org/notes/20260101T000024--书__index_read.org" "阅读中")
            "*** READING %^{书名}\n:PROPERTIES:\n:作者: %^{作者}\n:类型: %^{类型|小说|非虚构|理财|网文|漫画|其他}\n:来源: %^{来源|微信读书|豆瓣|Z-Library|实体书|其他}\n:添加时间: %U\n:END:\n%?"
            :empty-lines 1 :jump-to-captured t)
           ("pl" "Protocol: Read later" entry (file "~/org/inbox.org")
@@ -1538,7 +1612,7 @@ With a numeric prefix WIDTH, also emit an #+ATTR_ORG :width line."
   (defun my/books-org-file-p ()
     "Return non-nil when visiting the books collection file."
     (and (buffer-file-name)
-         (file-equal-p (expand-file-name "~/org/notes/20260101T000024--reading-list__read_index.org")
+         (file-equal-p (expand-file-name "~/org/notes/20260101T000024--书__index_read.org")
                        (expand-file-name (buffer-file-name)))))
 
   (defun my/books-org-target-section-for-state (state)
@@ -2747,7 +2821,12 @@ denote-dired directory, matching case-insensitively."
   :if (not (featurep :system 'windows))
   :hook ((markdown-mode . jinx-mode))
   :bind (("M-$"   . jinx-correct)
-         ("C-M-$" . jinx-languages)))
+         ("C-M-$" . jinx-languages))
+  :config
+  ;; Linux 侧系统只装了 en_US(见 /usr/share/hunspell/), 不锁死语言的话
+  ;; jinx 会照 locale 去找 zh_CN 并反复报 "No dictionaries available"。
+  ;; 中英混排场景下固定英文词典, 只检查英文单词。
+  (setq jinx-languages "en_US"))
 #+end_src
 
 ** Focus mode toggle
@@ -2945,10 +3024,26 @@ Before 03:00 falls back to the previous day."
         (goto-char (point-min))
         (unless (re-search-forward "^\\*+ 天气[ \t]*$" nil t)
           (goto-char (point-min))
-          (while (looking-at-p "^#\\+")
-            (forward-line 1))
-          (while (looking-at-p "^[ \t]*$")
-            (forward-line 1))
+          ;; ⚠️ 两个 while 都必须同时检查 `forward-line' 是否真的前进了。
+          ;; 新建 journal 的 buffer 就是「front-matter 后面啥都没有」，
+          ;; `looking-at-p "^[ \t]*$"' 在 eob 处一直为真，而 `forward-line'
+          ;; 到 eob 后不再移动 point —— 死循环：Emacs 吃满一个核、
+          ;; emacsclient 全部无响应，calendar 里新建 journal 必卡。
+          ;; `not (eobp)' + 前进量守卫，任何内容都能退出。
+          (let ((moved nil))
+            (while (and (looking-at-p "^#\\+")
+                        (not (eobp))
+                        (progn (setq moved (point))
+                               (forward-line 1)
+                               (/= moved (point))))
+              nil))
+          (let ((moved nil))
+            (while (and (looking-at-p "^[ \t]*$")
+                        (not (eobp))
+                        (progn (setq moved (point))
+                               (forward-line 1)
+                               (/= moved (point))))
+              nil))
           (insert "* 天气\n" text "\n\n")
           (setq inserted t)))
       (goto-char m)
@@ -3172,6 +3267,29 @@ Before 03:00 falls back to the previous day."
   (advice-add 'nov-content-unique-identifier :around
               #'my/nov-content-unique-identifier-a)
 
+  ;; Fix: 又一类畸形 epub —— EPUB 2.0 的 <spine toc="ncx"> 引用 id="ncx"，
+  ;; 但 manifest 漏登记 <item id="ncx" .../>（toc.ncx 文件其实在 zip 里）。
+  ;; nov 的 nov--content-epub2-files 会抛 "EPUB 2 NCX file not found"，
+  ;; 同样被 Emacs 吞掉导致 nov-documents 为 0、buffer 空白（看着像乱码）。
+  ;; 兜底：manifest 找不到时直接去解压目录里捞 toc.ncx 用。
+  (defun my/nov-content-files-ncx-fallback (orig-fn directory content)
+    (condition-case err
+        (funcall orig-fn directory content)
+      (error
+       (let ((msg (error-message-string err)))
+         (if (string-match-p "EPUB 2 NCX" msg)
+             (let* ((manifest (nov-content-manifest directory content))
+                    (spine (nov-content-spine content))
+                    (files (delq nil (mapcar (lambda (item) (assq item manifest)) spine)))
+                    (ncx (car (directory-files directory t "\\.ncx\\'"))))
+               (if ncx
+                   (progn
+                     (setq nov-toc-id 'ncx)
+                     (cons (cons 'ncx ncx) files))
+                 (signal (car err) (cdr err))))
+           (signal (car err) (cdr err)))))))
+  (advice-add 'nov-content-files :around #'my/nov-content-files-ncx-fallback)
+
   ;; Fix: nov-save-place 中文路径 utf-8
   (defun my/nov-save-place-a (orig-fn &rest args)
     (let ((coding-system-for-write 'utf-8))
@@ -3182,6 +3300,12 @@ Before 03:00 falls back to the previous day."
 #+begin_src emacs-lisp
 (use-package! org-noter
   :commands org-noter
+  :init
+  ;; 不读 DJVU：本机没装 djvu 包，org-noter-djvu 加载时会往 echo area 刷
+  ;; "ATTENTION: org-noter-djvu needs the package `djvu'"。
+  ;; 必须在 org-noter 被 require 之前设置——org-noter.el 顶层就按这个变量
+  ;; 决定是否 (require 'org-noter-djvu)，放进 :config 已经晚了。
+  (setq org-noter-supported-modes '(doc-view-mode pdf-view-mode nov-mode))
   :config
   (setq org-noter-notes-search-path '("~/org/notes/")
         org-noter-default-notes-file-names '("notes.org")
@@ -3322,14 +3446,68 @@ Use FILE arg, current buffer's file (if .epub), or prompt."
 ;; - 安装 CLI:
 ;;   pip install beancount fava fava_investor
 ;;   pip install git+https://github.com/PhracturedBlue/fava-portfolio-summary@7d3301619025d735830c389948e5527456050d44
-;; - 主账本放在 ~/org/investment/main.beancount
+;; - 主账本放在 ~/org/investment/ledger/main.beancount（入口文件，只放 option/include）
 ;; - 正式交易/现金流用下面的 `my/beancount-record-*` 命令直接入账；org-capture 只做信息不完整时的暂存。
-;; - 通过 fava (浏览器 UI) 查看报表: fava ~/org/investment/main.beancount
+;; - 通过 fava (浏览器 UI) 查看报表: fava ~/org/investment/ledger/main.beancount
 (use-package! beancount
   :mode ("\\.beancount\\'" . beancount-mode)
   :config
   (setq beancount-electric-currency t
         beancount-use-ido nil))           ; 用 vertico 接管补全
+
+;; 账本根目录：2026-09-24 重构后流水都在 investment/ledger/ 下
+;; （accounts/ 账户声明、prices/ 价格、transactions/ 流水、main.beancount 入口）
+(defconst my/beancount-ledger-dir
+  (expand-file-name "investment/ledger/" org-directory)
+  "投资账本根目录：main.beancount 所在目录。")
+
+(defun my/beancount-main-file ()
+  "Return the main investment Beancount ledger path.
+2026-09-24 目录重构后它是「入口文件」——只有 option / fava 扩展 / query / include，
+不再直接承载交易。追加流水请用 `my/beancount-year-file'。"
+  (expand-file-name "main.beancount" my/beancount-ledger-dir))
+
+(defun my/beancount-year-file (&optional date)
+  "Return the per-year transaction file for DATE (a \"YYYY-MM-DD\" string).
+约定：transactions/ 下一年一个文件，不再按月拆。DATE 为空则取当前年份。
+文件不存在时自动创建，并把 include 行登记进 main.beancount。"
+  (let* ((year (if (and date (string-match "\\`\\([0-9]\\{4\\}\\)-" date))
+                   (match-string 1 date)
+                 (format-time-string "%Y")))
+         (file (expand-file-name (format "transactions/%s.beancount" year)
+                                 my/beancount-ledger-dir)))
+    (unless (file-exists-p file)
+      (my/beancount--init-year-file year file))
+    file))
+
+(defun my/beancount--init-year-file (year file)
+  "Create YEAR's transaction file FILE and register it in main.beancount."
+  (with-temp-buffer
+    (insert (format "; -*- mode: beancount; -*-\n\n;; %s 年流水\n" year))
+    (write-region (point-min) (point-max) file))
+  (with-current-buffer (find-file-noselect (my/beancount-main-file))
+    (save-excursion
+      (goto-char (point-min))
+      (let (last)
+        (while (re-search-forward "^include \"transactions/[0-9]\\{4\\}\\.beancount\"" nil t)
+          (setq last (point)))
+        (if last
+            (progn (goto-char last) (forward-line 1)
+                   (insert (format "include \"transactions/%s.beancount\"\n" year)))
+          (goto-char (point-max))
+          (insert (format "\ninclude \"transactions/%s.beancount\"\n" year)))))
+    (save-buffer))
+  (message "已创建 %s 并登记进 main.beancount"
+           (file-relative-name file my/beancount-ledger-dir)))
+
+(defun my/beancount-manual-price-file ()
+  "Return the hand-maintained price file."
+  (expand-file-name "prices/manual.beancount" my/beancount-ledger-dir))
+
+(defun my/beancount-balances-file ()
+  "Return the centralized balance-assertion file."
+  (expand-file-name "transactions/balances.beancount" my/beancount-ledger-dir))
+
 
 ;; rustledger LSP：实时诊断 / 账户与收款人补全 / hover 显示余额 / 重命名重构
 ;;   二进制：Linux ~/.local/bin/rledger-lsp（v0.24.0）；Windows: scoop install rustledger
@@ -3349,7 +3527,7 @@ Use FILE arg, current buffer's file (if .epub), or prompt."
   (add-to-list 'eglot-server-programs
                `(beancount-mode . ("rledger-lsp"
                                    :initializationOptions
-                                   (:journalFile ,(expand-file-name "investment/main.beancount"
+                                   (:journalFile ,(expand-file-name "investment/ledger/main.beancount"
                                                                     org-directory)))))
   (add-hook 'beancount-mode-hook #'eglot-ensure))
 
@@ -3429,7 +3607,9 @@ Use FILE arg, current buffer's file (if .epub), or prompt."
     ("CHENFAN"  :name "个人借款(陈凡)" :commodity "CNY"
      :account "Liabilities:Personal:ChenFan" :category "私人借款" :fee-free t)
     ("JIEBEI"   :name "借呗借款"       :commodity "CNY"
-     :account "Liabilities:Alipay:Jiebei" :category "消费借款" :fee-free t))
+     :account "Liabilities:Alipay:Jiebei" :category "消费借款" :fee-free t)
+    ("CMB:LOAN" :name "招行贷款"       :commodity "CNY"
+     :account "Liabilities:Bank:CMB:Loan" :category "银行借款" :fee-free t))
   "融资负债与现金等非 ETF 持仓的 balance 校验账户映射（供 SPC n i V 批量断言）。")
 
 (defconst my/beancount-pension-funds
@@ -3472,8 +3652,8 @@ Use FILE arg, current buffer's file (if .epub), or prompt."
       (user-error "Unknown pension fund: %s" code)))
 
 (defun my/beancount--append-bank-wealth-entry (entry &optional date code)
-  "Append ENTRY to main ledger for bank wealth products."
-  (find-file (my/beancount-main-file))
+  "Append ENTRY to the year transaction file for bank wealth products."
+  (find-file (my/beancount-year-file date))
   (goto-char (point-max))
   (unless (bolp) (insert "\n"))
   (insert "\n" entry)
@@ -3543,10 +3723,6 @@ Use FILE arg, current buffer's file (if .epub), or prompt."
                ""))
      date code)))
 
-
-(defun my/beancount-main-file ()
-  "Return the main investment Beancount ledger path."
-  (expand-file-name "investment/main.beancount" org-directory))
 
 (defun my/open-beancount-main ()
   "打开主 beancount 账本。"
@@ -3712,31 +3888,53 @@ ETF lines use BROKER-ACCOUNT unless LINE starts with a broker account alias."
     (unless (bolp) (insert "\n"))
     (insert text "\n")))
 
+(defun my/beancount--book-files ()
+  "Return every .beancount file under the investment book."
+  (directory-files-recursively my/beancount-ledger-dir "\\.beancount\\'"))
+
+(defun my/beancount--declared-in-book-p (regexp)
+  "Return non-nil if REGEXP matches a directive anywhere in the book."
+  (catch 'hit
+    (dolist (f (my/beancount--book-files))
+      (with-temp-buffer
+        (insert-file-contents f)
+        (when (re-search-forward regexp nil t) (throw 'hit t))))))
+
+(defun my/beancount--append-directive (file text)
+  "Append TEXT as a new directive at the end of FILE."
+  (with-current-buffer (find-file-noselect file)
+    (save-excursion
+      (goto-char (point-max))
+      (unless (bolp) (insert "\n"))
+      (insert "\n" text "\n"))
+    (save-buffer)))
+
 (defun my/beancount--ensure-fund-open (date code &optional account)
   "Ensure commodity and account directives for CODE exist, using DATE if inserted.
-When ACCOUNT is non-nil, ensure that account instead of the default normal account."
+When ACCOUNT is non-nil, ensure that account instead of the default normal account.
+搜索范围是整本账（重构后 commodity/open 都在 ledger/accounts/ 下，不在流水文件里）；
+缺失时写到对应的声明文件，而不是当前流水文件，避免污染入口 / 重复声明。"
   (let* ((fund (my/beancount--fund code))
          (name (plist-get fund :name))
          (commodity (plist-get fund :commodity))
          (account (or account (plist-get fund :account)))
-         (category (plist-get fund :category))
-         directives)
-    (save-excursion
-      (goto-char (point-min))
-      (unless (re-search-forward (format "^[0-9-]+ commodity %s\\b" (regexp-quote commodity)) nil t)
-        (push (format "%s commodity %s\n  name: \"%s\"\n  code: \"%s\"\n  asset_category: \"%s\""
-                      date commodity name code category)
-              directives))
-      (goto-char (point-min))
-      (unless (re-search-forward (format "^[0-9-]+ open %s\\b" (regexp-quote account)) nil t)
-        (push (format "%s open %s %s" date account commodity) directives))
-      (when directives
-        (my/beancount--insert-before-first-entry
-         (mapconcat #'identity (nreverse directives) "\n\n"))))))
+         (category (plist-get fund :category)))
+    (unless (my/beancount--declared-in-book-p
+             (format "^[0-9-]+ commodity %s\\b" (regexp-quote commodity)))
+      (my/beancount--append-directive
+       (expand-file-name "accounts/commodities.beancount" my/beancount-ledger-dir)
+       (format "%s commodity %s\n  name: \"%s\"\n  code: \"%s\"\n  asset_category: \"%s\""
+               date commodity name code category)))
+    (unless (my/beancount--declared-in-book-p
+             (format "^[0-9-]+ open %s\\b" (regexp-quote account)))
+      (my/beancount--append-directive
+       (expand-file-name "accounts/assets.beancount" my/beancount-ledger-dir)
+       (format "%s open %s %s" date account commodity)))))
 
-(defun my/beancount--append-entry (entry &optional date code account)
-  "Append ENTRY to main ledger, optionally ensuring CODE is open at DATE."
-  (find-file (my/beancount-main-file))
+(defun my/beancount--append-entry (entry &optional date code account file)
+  "Append ENTRY to FILE (default: the year transaction file for DATE).
+Optionally ensures CODE is open at DATE."
+  (find-file (or file (my/beancount-year-file date)))
   (when (and date code)
     (my/beancount--ensure-fund-open date code account))
   (goto-char (point-max))
@@ -3800,6 +3998,40 @@ When ACCOUNT is non-nil, ensure that account instead of the default normal accou
     (my/beancount--append-entry
      (format "%s * \"%s\"\n  cashflow_type: \"%s\"\n%s  trade_value: \"%s CNY\"\n%s%s%s"
              date title cashflow-type target-line amount note-line cash-posting counter-posting))))
+
+(defconst my/beancount-bank-interest-accounts
+  '(("CMB" :name "招行活期现金" :commodity "CNY"
+     :account "Assets:Bank:CMB:Cash"
+     :income "Income:Investment:BankInterest"))
+  "银行现金账户的存款结息映射：现金账户 + 对应的利息收入科目。")
+
+(defun my/beancount--bank-interest-candidates ()
+  "Return completion candidates for bank interest sources."
+  (mapcar (lambda (cell)
+            (cons (format "%s · %s" (car cell) (plist-get (cdr cell) :name)) (car cell)))
+          my/beancount-bank-interest-accounts))
+
+(defun my/beancount-record-bank-interest ()
+  "快速记录银行现金账户的存款利息收入（如招行活期季度结息）。"
+  (interactive)
+  (let* ((date (my/beancount--read-date))
+         (cands (my/beancount--bank-interest-candidates))
+         (code (if (= 1 (length cands))
+                   (caar my/beancount-bank-interest-accounts)
+                 (let ((choice (completing-read "结息账户: " cands nil t)))
+                   (or (cdr (assoc choice cands)) choice))))
+         (spec (or (cdr (assoc code my/beancount-bank-interest-accounts))
+                   (user-error "Unknown bank interest account: %s" code)))
+         (name (plist-get spec :name))
+         (account (plist-get spec :account))
+         (income (plist-get spec :income))
+         (amount (my/beancount--read-number-string "利息金额: "))
+         (note (my/beancount--safe-string (read-string "备注(可空): ")))
+         (title (format "%s结息" name))
+         (note-line (if (string-empty-p note) "" (format "  note: \"%s\"\n" note))))
+    (my/beancount--append-entry
+     (format "%s * \"%s\"\n  interest_type: \"BankInterest\"\n  bank: \"%s\"\n  trade_value: \"%s CNY\"\n%s  %s  %s CNY\n  %s  -%s CNY\n"
+             date title code amount note-line account amount income amount))))
 
 
 (defun my/beancount-record-buy ()
@@ -3969,9 +4201,120 @@ When ACCOUNT is non-nil, ensure that account instead of the default normal accou
          (price (my/beancount--read-number-string "当前净值: "))
          (ensure-code (when (eq (plist-get target :type) 'fund)
                         (plist-get target :code))))
+    ;; 手工净值写 ledger/prices/manual.beancount（auto.beancount 是脚本生成的，别手改）
     (my/beancount--append-entry
      (format "%s price %s %s CNY\n" date commodity price)
-     date ensure-code)))
+     date ensure-code nil (my/beancount-manual-price-file))))
+
+;;;; 批量录价：每日净值一行，插入后手工改数字
+;; 只放**拿不到公开行情**的标的。P022907/P022918/P022945 三只养老金基金由
+;; tools/update_prices.py（东财 NAV）自动写进 prices/auto.beancount，走 SPC n i u，
+;; 这里再录一遍就会和 auto 形成同日重复 price。招行定期宝没有公开接口，只能手工抄净值。
+
+(defconst my/beancount-price-batch-targets
+  '("DQB")
+  "批量录价（SPC n i p）的标的：只有拿不到公开行情的（招行定期宝）。")
+
+(defun my/beancount--manual-price-text ()
+  "Return the text of the manual price file, preferring a live buffer.
+优先读已打开的 buffer，这样上一次还没保存的录入也能被算作「已录过」。"
+  (let* ((file (my/beancount-manual-price-file))
+         (buf (get-file-buffer file)))
+    (cond (buf (with-current-buffer buf (save-restriction (widen) (buffer-string))))
+          ((file-exists-p file)
+           (with-temp-buffer (insert-file-contents file) (buffer-string))))))
+
+(defun my/beancount--last-price (commodity)
+  "Return (DATE . PRICE) for the last manual price directive of COMMODITY."
+  (let ((text (my/beancount--manual-price-text)))
+    (when text
+      (with-temp-buffer
+        (insert text)
+        (goto-char (point-max))
+        (when (re-search-backward
+               (format "^\\([0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\) price %s +\\([0-9.]+\\)"
+                       (regexp-quote commodity))
+               nil t)
+          (cons (match-string 1) (match-string 2)))))))
+
+(defun my/beancount--price-on-date (date commodity)
+  "Return the manual price already recorded for COMMODITY on DATE, else nil."
+  (let ((text (my/beancount--manual-price-text)))
+    (when text
+      (with-temp-buffer
+        (insert text)
+        (goto-char (point-min))
+        (when (re-search-forward
+               (format "^%s price %s +\\([0-9.]+\\)"
+                       (regexp-quote date) (regexp-quote commodity))
+               nil t)
+          (match-string 1))))))
+
+(defun my/beancount--price-batch-line (date code &optional width)
+  "Build one manual `price' line for CODE on DATE.
+价格预填上一次手工记录的净值，行尾注释写明沿用日期，提醒要改。
+WIDTH 用来把商品代码左对齐，保证四行的价格数字在同一列（方便 C-n 往下改）。"
+  (let* ((plist (my/beancount--holding-instrument code))
+         (commodity (plist-get plist :commodity))
+         (name (plist-get plist :name))
+         (width (or width (length commodity)))
+         (last (my/beancount--last-price commodity))
+         (value (if last (cdr last) "0.0000"))
+         (note (if last (format "沿用 %s，记得改" (car last)) "无历史值，请填写")))
+    (format "%s price %s %s CNY  ; %s (%s)"
+            date
+            (truncate-string-to-width commodity width nil ?\s)
+            value name note)))
+
+(define-minor-mode my/beancount-price-batch-mode
+  "Minor mode for a freshly inserted batch of `price' lines.
+`C-c C-c' 保存文件并跑 bean-check。"
+  :lighter " PriceBatch"
+  :keymap (let ((map (make-sparse-keymap)))
+            (define-key map (kbd "C-c C-c") #'my/beancount-price-batch-commit)
+            map))
+
+(defun my/beancount-price-batch-commit ()
+  "Save the batch price file, leave review mode, and run bean-check."
+  (interactive)
+  (my/beancount-price-batch-mode -1)
+  (save-buffer)
+  (my/beancount-check-main))
+
+(defun my/beancount-record-price-batch ()
+  "一次性生成当天待录净值（`my/beancount-price-batch-targets`）并打开 buffer 改价格。
+价格预填上期值，光标落在第一行价格上，C-n 沿列往下改；改完 C-c C-c 保存并 bean-check。
+同一天同一标的已经录过则跳过（全部录过时直接报错提示）。
+ETF 与养老金基金的净值不要在这里录，走 SPC n i u 自动抓。"
+  (interactive)
+  (let* ((date (my/beancount--read-date "净值日期: "))
+         (width (apply #'max
+                       (mapcar (lambda (code)
+                                 (length (plist-get (my/beancount--holding-instrument code)
+                                                    :commodity)))
+                               my/beancount-price-batch-targets)))
+         lines existing beg)
+    (dolist (code my/beancount-price-batch-targets)
+      (let ((commodity (plist-get (my/beancount--holding-instrument code) :commodity)))
+        (if (my/beancount--price-on-date date commodity)
+            (push commodity existing)
+          (push (my/beancount--price-batch-line date code width) lines))))
+    (setq lines (nreverse lines)
+          existing (nreverse existing))
+    (unless lines
+      (user-error "%s 这批净值都已录入：%s" date (string-join existing " ")))
+    (find-file (my/beancount-manual-price-file))
+    (goto-char (point-max))
+    (unless (bolp) (insert "\n"))
+    (setq beg (point))
+    (insert "\n" (mapconcat #'identity lines "\n") "\n")
+    (my/beancount-price-batch-mode 1)
+    ;; 光标停在第一行价格的数字开头，方便直接改
+    (goto-char beg)
+    (re-search-forward "price \\(CNY\\|[A-Z0-9]+\\) +" nil t)
+    (message "%d 行待改%s；改完 C-c C-c 保存并 bean-check"
+             (length lines)
+             (if existing (format "（已跳过已录入的 %s）" (string-join existing " ")) ""))))
 
 (defun my/beancount-record-balance ()
   "快速记录一条 ETF/基金持仓 balance 校验。"
@@ -3985,9 +4328,10 @@ When ACCOUNT is non-nil, ensure that account instead of the default normal accou
          (shares (my/beancount--read-number-string "持有份额/股数(不是基金代码): ")))
     (when (string= shares code)
       (user-error "这里要填持有份额/股数，不是基金代码；%s 当前应填实际剩余份额" code))
+    ;; balance 断言集中放 ledger/transactions/balances.beancount（与 apply-balances.py 输出一致）
     (my/beancount--append-entry
      (format "%s balance %s %s %s\n" date account shares commodity)
-     date code account)))
+     date code account (my/beancount-balances-file))))
 
 (defvar-local my/beancount-balance-batch-date nil
   "Balance date for the current Beancount batch balance buffer.")
@@ -4020,7 +4364,7 @@ When ACCOUNT is non-nil, ensure that account instead of the default normal accou
       (insert "# Paste holdings as CODE SHARES, one per line.\n")
       (insert (format "# ETF default account: %s.\n" broker-account))
       (insert "# ETF lines may override it with: 普通账户 CODE SHARES or 信用账户 CODE SHARES.\n")
-      (insert "# Supported: ETF codes, pension fund codes, DYB, DQB, CMB (招行活期现金).\n")
+      (insert "# Supported: ETF codes, pension fund codes, DYB, DQB, CMB (招行活期现金), CMB:LOAN (招行贷款).\n")
       (insert "# Submit with C-c C-c. Cancel with C-c C-k.\n")
       (insert "# Examples:\n")
       (insert "# 信用账户 513870 1234\n")
@@ -4043,7 +4387,7 @@ When ACCOUNT is non-nil, ensure that account instead of the default normal accou
                  broker-account))
          (count (plist-get built :count))
          (entry (plist-get built :entry)))
-    (my/beancount--append-entry entry)
+    (my/beancount--append-entry entry nil nil nil (my/beancount-balances-file))
     (when (buffer-live-p source-buffer)
       (kill-buffer source-buffer))
     (message "Inserted %d balance checks for %s" count date)))
@@ -4126,9 +4470,9 @@ Fall back to the script sitting next to `my/beancount-python-executable'."
           name))))
 
 (defun my/beancount-update-prices-latest ()
-  "抓取最近两周 ETF 收盘价，更新 prices.beancount。"
+  "抓取最近两周 ETF 收盘价，更新 ledger/prices/auto.beancount。"
   (interactive)
-  (let* ((script (expand-file-name "investment/scripts/update_prices.py" org-directory))
+  (let* ((script (expand-file-name "investment/tools/update_prices.py" org-directory))
          (default-directory (expand-file-name "investment/" org-directory)))
     (compilation-start
      (format "%s %s latest"
@@ -4138,9 +4482,9 @@ Fall back to the script sitting next to `my/beancount-python-executable'."
      (lambda (_) "*beancount update prices latest*"))))
 
 (defun my/beancount-rebuild-prices-history ()
-  "重建全部 ETF 历史收盘价 prices.beancount；建议每周跑一次。"
+  "重建全部 ETF 历史收盘价 ledger/prices/auto.beancount；建议每周跑一次。"
   (interactive)
-  (let* ((script (expand-file-name "investment/scripts/update_prices.py" org-directory))
+  (let* ((script (expand-file-name "investment/tools/update_prices.py" org-directory))
          (default-directory (expand-file-name "investment/" org-directory)))
     (compilation-start
      (format "%s %s history"
@@ -4603,7 +4947,8 @@ identical to what `doom.ps1' does on Windows."
        (:prefix ("i" . "investment · 投资")
         :desc "Beancount buy · 买入"                  "b" #'my/beancount-record-buy
         :desc "Beancount sell · 卖出"                 "s" #'my/beancount-record-sell
-        :desc "Beancount price · 记录价格"            "p" #'my/beancount-record-price
+        :desc "Beancount prices · 批量记录价格"        "p" #'my/beancount-record-price-batch
+        :desc "Beancount price · 单个记录价格"         "P" #'my/beancount-record-price
         :desc "Beancount balance · 持仓校验"          "B" #'my/beancount-record-balance
         :desc "Beancount balances · 批量持仓校验"     "V" #'my/beancount-record-balance-batch
         :desc "Update prices latest · 更新近期价格"   "u" #'my/beancount-update-prices-latest
@@ -4614,6 +4959,7 @@ identical to what `doom.ps1' does on Windows."
         :desc "Bank wealth redeem · 银行理财赎回"     "r" #'my/beancount-record-bank-redeem
         :desc "Pension fund buy · 养老金基金买入"     "y" #'my/beancount-record-pension-buy
         :desc "CMB cashflow · 招行转入转出"          "C" #'my/beancount-record-cmb-cashflow
+        :desc "Bank interest · 银行结息收入"         "i" #'my/beancount-record-bank-interest
         :desc "Collateral transfer · 担保品划转"      "t" #'my/beancount-record-collateral-transfer
         :desc "Margin buy · 融资买入"                "m" #'my/beancount-record-margin-buy
         :desc "Margin sell · 融资卖出"               "M" #'my/beancount-record-margin-sell)
