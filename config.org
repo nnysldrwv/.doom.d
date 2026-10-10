@@ -238,6 +238,13 @@ Loaded early so downstream config (org-gcal, agent-shell …) sees the credentia
 ;; (cp936/GBK) 编码 stdout，而 Emacs 按 utf-8 解码 -> 中文乱码。
 ;; 强制子进程用 utf-8 输出，与 Emacs 解码一致。
 (setenv "PYTHONIOENCODING" "utf-8")
+;; notes/ 里有文件用文件尾 Local Variables 钉住 utf-8-unix（防止 Windows 侧存成
+;; gbk/dos）。buffer-file-coding-system 不在 Emacs 的免检名单里
+;; (files.el 只放行 mode / unibyte / coding)，默认会弹 "may not be safe" 确认。
+;; 进 safe-local-variable-values 后走 safe-local-variable-p 分支，不再打扰。
+;; 注意别用提示框里的 "!" —— 那写进 ~/.config/doom/custom.el，不在 git 白名单，
+;; Windows 侧同步不到、还会再弹。
+(add-to-list 'safe-local-variable-values '(buffer-file-coding-system . utf-8-unix))
 #+end_src
 
 ** Quiet
