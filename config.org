@@ -67,6 +67,10 @@
        yaml                           ; 轻量, 写 frontmatter/CI 有用
        latex
 
+       :email
+       ;; +mbsync 用 mbsync(isync) 拉邮件；+gmail 启用 Gmail 的标签/已发送特殊处理
+       (mu4e +gmail +mbsync)
+
        :app
        (calendar +org-gcal)
        (rss +org +youtube)
@@ -488,7 +492,7 @@ iscroll 与 ultra-scroll 争夺滚动控制权, 必须二选一, 否则两套逻
 * Appearance
 ** Theme & UI
 #+begin_src emacs-lisp
-(setq doom-theme 'ef-light)
+(setq doom-theme 'leuven)
 
 (use-package! doom-modeline
   :custom
@@ -1920,10 +1924,37 @@ Returns the Org text, or nil on failure."
                    (insert-file-contents out))
                  ;; pandoc 抽出媒体时写的是绝对路径, 改成相对路径免得换机器就断链
                  (let ((text (string-trim (buffer-string))))
-                   (replace-regexp-in-string
-                    (regexp-quote (file-name-unquote img-dir))
-                    (file-relative-name img-dir default-directory)
-                    text t t)))))
+                   (setq text (replace-regexp-in-string
+                               (regexp-quote (file-name-unquote img-dir))
+                               (file-relative-name img-dir default-directory)
+                               text t t))
+                   ;; ⚠️ pandoc 给图片输出的是裸路径 [[.images/x.jpg]]: 没有 file: 前缀时
+                   ;; org 把它解析成 **fuzzy** 链接(不是 file), 内联图片一张都不会显示
+                   ;; (2026-10-10 踩到: org-download 写的是 [[file:...]] 所以那边正常,
+                   ;;  粘贴过来的全都看不了)。这里统一补上 file:。
+                   ;; 用 [^][:] 排除含冒号的 http(s):/ 等带 type 的链接, 只动裸相对路径。
+                   (setq text (replace-regexp-in-string
+                               "\\[\\[\\([^][:]+\\.\\(?:png\\|jpe?g\\|gif\\|webp\\|tiff?\\|svgz?\\|bmp\\)\\)\\]\\]"
+                               "[[file:\\1]]"
+                               text t nil))
+                   ;; 有些站点(知乎)把图标存成 .svgz, 但内容其实是纯 SVG 文本而非 gzip:
+                   ;; Emacs 不认 .svgz 后缀 -> 这类图整批不显示。检测 magic number,
+                   ;; 不是真 gzip 就改成 .svg 后缀并同步修正链接。
+                   (dolist (old (directory-files img-dir t "\\.svgz\\'" t))
+                     (let ((new (concat (file-name-sans-extension old) ".svg")))
+                       ;; 用 -literally 读: 普通的 insert-file-contents 会被
+                       ;; auto-compression-mode 先解压, 那就永远读不到 gzip magic 了。
+                       (unless (equal (with-temp-buffer
+                                        (set-buffer-multibyte nil)
+                                        (insert-file-contents-literally old nil 0 2)
+                                        (buffer-string))
+                                      "\x1f\x8b")
+                         (rename-file old new t)
+                         (setq text (replace-regexp-in-string
+                                     (regexp-quote (file-name-nondirectory old))
+                                     (file-name-nondirectory new)
+                                     text t t)))))
+                   text))))
       (ignore-errors (delete-file tmp))
       (ignore-errors (delete-file out)))))
 
@@ -1942,6 +1973,34 @@ links — materialize them with `my/org-image-download-link-at-point'."
         (my/org-display-images)
         (message "OK: rich text pasted (images -> %s)"
                  (file-relative-name img-dir default-directory))))))
+
+(defvar my/org-dedupe-script "~/.local/bin/org-dedupe-images.py"
+  "感知哈希去重脚本(需要 python 的 PIL)。见 `my/org-dedupe-inline-images'。")
+
+(defun my/org-dedupe-inline-images (&optional apply)
+  "删除本 buffer 里「相邻重复」的内联图片, 保留分辨率更高的那份。
+知乎这类站点在 HTML 里同时给了缩略图(jpg)和原图(webp), pandoc 会把两份都
+抽出来 -> 笔记里就出现一对长得一模一样的图(2026-10-10 踩到: 56 张其实只有
+28 张)。判定用 dHash 感知哈希, 默认只报告(dry run), \\`C-u' 前缀才真的改文件;
+冗余图片走 gio trash 进回收站(可恢复), 不直接删。"
+  (interactive "P")
+  (unless buffer-file-name
+    (user-error "Buffer 还没存盘, 先保存"))
+  (let ((script (expand-file-name my/org-dedupe-script)))
+    (unless (file-exists-p script)
+      (user-error "缺少去重脚本 %s" script))
+    (save-buffer)
+    (let ((out-buf (get-buffer-create "*Org dedupe*")))
+      (with-current-buffer out-buf (erase-buffer))
+      (apply #'call-process (or (executable-find "python3") "python3")
+             nil out-buf t
+             (append (list script buffer-file-name)
+                     (and apply (list "--apply"))))
+      (when apply
+        (revert-buffer t t)
+        (when (fboundp 'org-link-preview-clear) (org-link-preview-clear))
+        (my/org-display-images))
+      (display-buffer out-buf))))
 #+end_src
 
 ** org-download
@@ -4908,6 +4967,128 @@ identical to what `doom.ps1' does on Windows."
 (desktop-save-mode 1)
 #+end_src
 
+* Email (mu4e + mbsync)
+#+begin_src emacs-lisp
+;;; Email (mu4e + mbsync)
+;;
+;; 外部依赖（系统级，必须 sudo 装，Doom 装不了）：
+;;   sudo apt install isync maildir-utils
+;;     isync          → mbsync，负责 IMAP 双向同步
+;;     maildir-utils  → mu（索引/查询）+ mu4e（Emacs 界面 elisp）
+;;
+;; 数据流：  邮件服务器 --mbsync--> ~/.mail/{gmail,outlook} (Maildir)
+;;                                  --mu index--> Xapian 索引 --mu4e--> Emacs
+;;
+;; 密码放在 ~/.authinfo.gpg（GPG 加密，直接用 emacs 打开编辑，保存自动重加密）。
+;; mbsync 通过 ~/.local/bin/authinfo-get 解密取密码 —— 配置文件里没有明文。
+;; 配置文件：
+;;   ~/.mbsyncrc              IMAP 同步规则（Gmail + Outlook 两个 Channel）
+;;   ~/.authinfo.gpg          凭据
+;;   ~/.local/bin/authinfo-get 解密取密码的小脚本
+;;
+;; 首次使用流程（按顺序跑一次）：
+;;   1. emacs ~/.authinfo.gpg   把 CHANGE_ME_GMAIL / CHANGE_ME_OUTLOOK 换成应用专用密码
+;;   2. mkdir -p ~/.mail/gmail ~/.mail/outlook
+;;   3. mbsync --all            首次全量同步，几万封邮件可能要几十分钟
+;;   4. mu init --maildir ~/.mail \
+;;          --my-address yuanxiang424@gmail.com \
+;;          --my-address yuan_xiang@outlook.com
+;;      mu index
+;;   5. SPC o m 打开 mu4e（SPC o M 写新邮件）
+;;
+;; 日常：mu4e 每 5 分钟自动跑一次 mbsync --all + mu index。
+
+;; Ubuntu 把 mu4e 的 elisp 装到 /usr/share/emacs/site-lisp/mu4e，
+;; 而自编的 Emacs 31（prefix=/usr/local）不会自动把 /usr/share/... 放进 load-path，
+;; 不补这一行 (require 'mu4e) 直接失败、整个模块静默哑火。
+(dolist (dir (append (file-expand-wildcards "/usr/share/emacs/site-lisp/*mu4e*")
+                     (file-expand-wildcards "/usr/local/share/emacs/site-lisp/*mu4e*")))
+  (when (file-directory-p dir)
+    (add-to-list 'load-path dir)))
+
+(after! mu4e
+  (setq mu4e-root-maildir "~/.mail")
+  (when (boundp 'mu4e-maildir)
+    (setq mu4e-maildir "~/.mail"))
+
+  (setq
+   ;; mbsync 移动邮件会改文件名，mu4e 必须跟着改，否则索引与文件对不上
+   mu4e-change-filenames-when-moving t
+   ;; 每 5 分钟自动 mbsync + reindex；嫌吵改 nil，然后手动 U 更新
+   mu4e-update-interval 300
+   mu4e-get-mail-command "mbsync --all"
+   ;; Gmail 用标签而不是文件夹，邮件不会真的"移动"，可以做懒检查
+   mu4e-index-cleanup nil
+   mu4e-index-lazy-check t
+   ;; 收件人显示为名字而不是一长串地址
+   mu4e-view-show-addresses t
+   mu4e-compose-dont-reply-to-self t
+   mu4e-user-mail-address-list '("yuanxiang424@gmail.com"
+                                 "yuan_xiang@outlook.com"))
+
+  ;; +gmail flag 靠 maildir 根名含 "gmail" 自动识别；这里显式登记一遍更保险
+  (setq +mu4e-gmail-accounts '(("yuanxiang424@gmail.com" . "/gmail")))
+
+  (setq mu4e-contexts
+        (list
+         ;; ---------------- Gmail ----------------
+         (make-mu4e-context
+          :name "Gmail"
+          :match-func (lambda (msg)
+                        (when msg
+                          (string-prefix-p "/gmail"
+                                           (mu4e-message-field msg :maildir))))
+          :vars '((user-mail-address     . "yuanxiang424@gmail.com")
+                  (user-full-name        . "Sean Yuan")
+                  (mu4e-sent-folder      . "/gmail/[Gmail]/Sent Mail")
+                  (mu4e-drafts-folder    . "/gmail/[Gmail]/Drafts")
+                  (mu4e-trash-folder     . "/gmail/[Gmail]/Trash")
+                  ;; Gmail 没有真正的"归档"目录，/gmail/Archive 是一个自建标签。
+                  ;; mbsync 把它 CREATE 到服务器上（Gmail 会变成一个 label），
+                  ;; 移进去就等于去掉 INBOX 标签 = 归档。若 Gmail 拒绝建目录，
+                  ;; 改成 "/gmail/[Gmail]/All Mail"（代价是索引里出现重复邮件）。
+                  (mu4e-refile-folder    . "/gmail/Archive")
+                  (smtpmail-smtp-server  . "smtp.gmail.com")
+                  (smtpmail-smtp-service . 587)
+                  (smtpmail-stream-type  . starttls)
+                  (smtpmail-smtp-user    . "yuanxiang424@gmail.com")))
+         ;; --------------- Outlook ---------------
+         (make-mu4e-context
+          :name "Outlook"
+          :match-func (lambda (msg)
+                        (when msg
+                          (string-prefix-p "/outlook"
+                                           (mu4e-message-field msg :maildir))))
+          :vars '((user-mail-address     . "yuan_xiang@outlook.com")
+                  (user-full-name        . "Sean Yuan")
+                  ;; Outlook 个人账号的目录名取决于网页界面语言：
+                  ;; 英文是 Sent/Drafts/Deleted，中文界面可能是「已发送邮件」等。
+                  ;; 跑完 mbsync --all 后 ls ~/.mail/outlook 看实际名字再改。
+                  (mu4e-sent-folder      . "/outlook/Sent")
+                  (mu4e-drafts-folder    . "/outlook/Drafts")
+                  (mu4e-trash-folder     . "/outlook/Deleted")
+                  (mu4e-refile-folder    . "/outlook/Archive")
+                  (smtpmail-smtp-server  . "smtp-mail.outlook.com")
+                  (smtpmail-smtp-service . 587)
+                  (smtpmail-stream-type  . starttls)
+                  (smtpmail-smtp-user    . "yuan_xiang@outlook.com")))))
+
+  (setq mu4e-bookmarks
+        '((:name "未读"            :query "flag:unread AND NOT flag:trashed" :key ?u)
+          (:name "今天"            :query "date:today..now"                  :key ?t)
+          (:name "最近 7 天"        :query "date:7d..now"                     :key ?w)
+          (:name "Gmail 收件箱"     :query "maildir:/gmail/INBOX"             :key ?g)
+          (:name "Outlook 收件箱"   :query "maildir:/outlook/INBOX"           :key ?o)
+          (:name "带附件"          :query "mime:application/* OR mime:image/*" :key ?a)
+          (:name "Gmail 已发送"     :query "maildir:\"/gmail/[Gmail]/Sent Mail\"" :key ?G)
+          (:name "Outlook 已发送"   :query "maildir:/outlook/Sent"            :key ?O))))
+
+;; 有些邮件服务商（含 Outlook）发的 HTML 邮件肉眼没法看，优先看 text/plain
+(with-eval-after-load 'mm-decode
+  (setq mm-discouraged-alternatives '("text/html" "text/richtext")
+        mm-text-html-renderer 'shr))
+#+end_src
+
 * Keybindings
 ** Leader
 #+begin_src emacs-lisp
@@ -4929,7 +5110,9 @@ identical to what `doom.ps1' does on Windows."
        :desc "Weekly agenda"    "w" (cmd! (org-agenda nil "w"))
        :desc "GTD review"       "g" (cmd! (org-agenda nil "g"))
        :desc "Beancount ledger" "$" #'my/open-beancount-main
-       :desc "EPUB reader"      "R" #'my/epub-reader-open-dwim)
+       :desc "EPUB reader"      "R" #'my/epub-reader-open-dwim
+       :desc "Mail (mu4e)"      "m" #'mu4e
+       :desc "Compose mail"     "M" #'mu4e-compose-new)
 
       ;; Notes / Denote
       (:prefix ("n" . "notes")
@@ -5015,6 +5198,7 @@ identical to what `doom.ps1' does on Windows."
        :desc "Compress→webp" "O" #'my/org-image-optimize
        :desc "Grab http img" "D" #'my/org-image-download-link-at-point
        :desc "Insert figure" "f" #'my/org-insert-image-figure
+       :desc "Dedupe imgs"   "x" #'my/org-dedupe-inline-images
        :desc "Number captions" "n" #'my/org-caption-number-mode)
       ;; NOTE: Doom 自带 (:prefix ("d" . "date/deadline"))，带描述的 :prefix 会
       ;; 清空该前缀原有键，所以 date 那几个键必须在这里显式补回来。
