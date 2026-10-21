@@ -52,7 +52,10 @@
        ;; 已移除: lookup (主要服务于代码跳转)
 
        :os
-       (:if (featurep :system 'windows) windows)
+       ;; Doom v26 起移除了 os/windows 与 os/linux 模块（:os 只剩 macos / tty）。
+       ;; 旧的 `(featurep :system 'windows) windows` 会报 "module was removed"，
+       ;; 故改为只按需加载 macos；Windows / Linux 本身都不需要 OS 模块。
+       (:if (featurep :system 'macos) macos)
 
        :lang
        emacs-lisp                     ; 自己写配置 + elisp babel
@@ -61,7 +64,12 @@
         +dragndrop
         +present
         +noter
-        +pandoc)
+        +pandoc
+        ;; 2026-10-18 启用: org-roam。走 Doom 官方 flag 而不是手写 package!——
+        ;; flag 自带 pin + 测试过的 keybinds/popup 规则, 且默认 org-roam-directory
+        ;; 就是 ~/org/roam, 与迁移产出目录一致。键位在 org localleader 的 `m' 前缀
+        ;; (SPC m m f 找节点 / i 插入链接 / m 反链buffer / d 日期)。
+        +roam)
        python                         ; 保留以支持 babel (去掉 +lsp)
        sh                             ; babel 经常跑 shell
        yaml                           ; 轻量, 写 frontmatter/CI 有用
@@ -72,7 +80,9 @@
        (mu4e +gmail +mbsync)
 
        :app
-       (calendar +org-gcal)
+       ;; Doom v26 起 org-gcal 已并入 calendar 模块且不再有 +org-gcal flag，
+       ;; 写成 `(calendar +org-gcal)' 会触发 "not a valid flag" 警告。
+       calendar
        (rss +org +youtube)
 
        :config
@@ -90,18 +100,21 @@
 (package! ob-powershell)
 (package! sis)
 
-;; denote
-(package! denote)
-(package! denote-org)
-(package! denote-journal)
-(package! denote-markdown)
+;; denote: 2026-10-17 卸载（4 个包: denote / denote-org / denote-journal /
+;; denote-markdown）。笔记库已是根目录 7 个大文件，不再有 denote 文件；
+;; 只剩「denote 风格文件名」这一套命名约定，实现在 config.el 的
+;; 「文件名生成」块（my/org-file-name-format），不依赖任何包。
+
+;; markdown-ts-appear: markdown-ts-mode 的"读时渲染/写时显源码"增强 (需 Emacs 31.1+)
+;; - markdown-ts-mode 本体用 Emacs 31 内置版: Doom markdown 模块的 .doommodule 为空,
+;;   不认 +tree-sitter flag; 且内置版更新, 不装 MELPA 的 LionyxML 版
+;; - markdown-table-wrap 是硬依赖 (Package-Requires), straight 不自动解析, 必须显式声明
+(package! markdown-ts-appear)
+(package! markdown-table-wrap)
 (package! consult-notes
   :recipe (:host github :repo "mclear-tools/consult-notes"))
 
-;; agent shell (高频使用, 保留)
-(package! shell-maker)
-(package! acp)
-(package! agent-shell)
+;; agent shell (2026-10-21 删除: athenai 不再使用, 连带 acp / shell-maker)
 
 ;; performance
 (package! gcmh)
@@ -193,7 +206,7 @@
 #+end_src
 
 ** Secrets
-Loaded early so downstream config (org-gcal, agent-shell …) sees the credentials.
+Loaded early so downstream config (org-gcal …) sees the credentials.
 #+begin_src emacs-lisp
 (load! "secrets" doom-user-dir t)
 #+end_src
@@ -459,16 +472,72 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
     (kill-local-variable 'scroll-conservatively)
     (message "ImgPerf: 已恢复")))
 
+(declare-function my/org-link-file-at-point "config")
+
 (defun my/org-preview-images-near-point ()
   "清掉全 buffer 的图片预览, 只加载当前窗口上下各约 2 屏范围。
-适合几百张图的长文档: 不滚动时不去扛整份 buffer 的解码量。"
+适合几百张图的长文档: 不滚动时不去扛整份 buffer 的解码量。
+
+加载完在 echo area 报一句: 内联了几张 / 几张缺文件 / 几张不是图片。
+这句报告是刚需, 不是装饰 —— org 自己的 org-link-preview-file 在路径解析
+失败时是**静默返回 nil** 的(见 ol.el), 于是「这里没图」和「图坏了」在
+界面上长得一模一样, 按完 z i 毫无反应也不知道该往哪查。"
   (interactive)
-  (when (fboundp 'org-link-preview-clear) (org-link-preview-clear))
-  (when (fboundp 'org-link-preview-region)
-    (org-link-preview-region
-     nil nil
-     (save-excursion (goto-char (window-start)) (forward-line -60) (point))
-     (save-excursion (goto-char (window-end)) (forward-line 60) (point)))))
+  (let* ((beg (save-excursion (goto-char (window-start)) (forward-line -60) (point)))
+         (end (save-excursion (goto-char (window-end)) (forward-line 60) (point)))
+         (n 0) missing other described)
+    ;; 先自己扫一遍算清楚, 再让 org 去做真正的内联。org 那一步是异步的
+    ;; (org-link-preview-region 把候选塞进 org-link-preview--queue, 按
+    ;;  org-link-preview-delay 用 idle timer 分批跑), 回不来结果。
+    (save-excursion
+      (goto-char beg)
+      ;; 定位到链接上要用 save-excursion 包住: 直接 (goto-char (match-beginning 0))
+      ;; 会把下一次搜索的起点退回链接开头, 于是**永远重复匹配同一条链接** ——
+      ;; 死循环, 而且死在 GUI 单线程里, 整个 Emacs 卡住。
+      ;; (org 自己的做法是 (forward-char -1), 见 ol.el 的 org-link-preview-region;
+      ;;  这里额外加 (and (< (point) end) …) 兜底, 谁改坏了也不会无限转。)
+      (while (and (< (point) end)
+                  (re-search-forward org-link-any-re end t))
+        (save-excursion
+          (goto-char (match-beginning 0))
+          (when-let ((path (my/org-link-file-at-point)))
+            (cond ((not (file-exists-p path)) (push path missing))
+                  ((not (string-match-p (image-file-name-regexp) path)) (push path other))
+                  ;; 带描述的链接 org 默认不内联 (include-linked=nil), 别算成成功
+                  ((org-element-contents-begin (org-element-context)) (push path described))
+                  (t (setq n (1+ n))))))))
+    (when (fboundp 'org-link-preview-clear) (org-link-preview-clear))
+    (when (fboundp 'org-link-preview-region)
+      (org-link-preview-region nil nil beg end))
+    (message "z i: 内联 %d 张%s%s%s"
+             n
+             (if missing
+                 (format " | 缺文件 %d: %s"
+                         (length missing)
+                         (mapconcat #'file-name-nondirectory (nreverse missing) " "))
+               "")
+             (if other (format " | 非图片 %d" (length other)) "")
+             (if described
+                 (format " | 带描述 %d (org 不内联, 要内联用 C-u M-x org-link-preview)"
+                         (length described))
+               ""))))
+
+;; `z i' 原本绑到 org-toggle-inline-images —— 它扫全 buffer, 大文件里卡死。
+;; 改绑到上面这个「只预览光标附近」的版本。doom+ 在 evil-org-mode-map 里
+;; 先绑了 zi, 这里后注册, 覆盖它。org-toggle-inline-images 本身仍可从
+;; 菜单 / M-x 调用, 没被废除。
+(map! :after evil-org
+      :map evil-org-mode-map
+      :n "zi" #'my/org-preview-images-near-point)
+
+;; 兜底: doom+ 在 org-load-hook 上给 http/https 注册了同步下载型 :preview,
+;; 若其执行顺序排在 config 的 `(after! org ...)' 之后, 上面那次摘除会被覆盖。
+;; 这里 append 一个再摘一次; 用了 append, 故排在 doom+ 的 handler 之后跑。
+(defun my/org-disable-remote-image-previews-h ()
+  (setq org-display-remote-inline-images 'skip)
+  (org-link-set-parameters "http"  :preview nil)
+  (org-link-set-parameters "https" :preview nil))
+(add-hook 'org-load-hook #'my/org-disable-remote-image-previews-h :append)
 
 ;;; --- iscroll: 让大图像素级滚过, 而不是整块跳进跳出窗口 ---
 ;; 它治的是「滚动行为」(用 set-window-vscroll 把一张图当多行来滚),
@@ -492,7 +561,189 @@ iscroll 与 ultra-scroll 争夺滚动控制权, 必须二选一, 否则两套逻
 * Appearance
 ** Theme & UI
 #+begin_src emacs-lisp
-(setq doom-theme 'leuven)
+;;; Omarchy 配色同步
+;; 背景: Omarchy 自带一份 Emacs 配置 (~/.config/emacs), 但 Doom 的加载优先级更高
+;; (~/.emacs.d > ~/.config/emacs), 于是 Omarchy 的集成在 Doom 下从不执行 ——
+;; `omarchy-color-bg' 之类变量根本没被定义过, 换系统主题 Emacs 也不跟随。
+;;
+;; 这里反过来: 把 Omarchy 的**配色**接进 Doom, 让 Doom 继续做 UI 装配。
+;; 做法是复用 Omarchy 生成的 omarchy-colors.el + omarchy-theme.el 这两个文件:
+;;   - omarchy-theme.el   常驻 (~/.config/emacs/themes), 是标准 custom theme;
+;;   - omarchy-colors.el  由 `omarchy theme set` 重新生成到当前主题目录下。
+;; 所以只要把两处加进 load-path, 再让 Doom 加载名为 `omarchy` 的主题即可。
+;;
+;; 2026-10-12 升级: `omarchy` 是薄主题, 只定义 45 个 face; 第三方插件
+;; (doom-modeline / vertico / corfu / dirvish / magit / mu4e / elfeed) 全都吃兜底色。
+;; 现改为用 doom-themes port:
+;;   ~/.config/omarchy/themed/doom-omarchy-theme.el.tpl
+;;     -> 由 Omarchy 模板引擎渲染到 ~/.local/state/omarchy/current/theme/doom-omarchy-theme.el
+;; 模板用官方 Omarchy 4 的变量 (background_strip / mix_strip a b 0.5 ...),
+;; 来自 peterpaul/omarchy-emacs-doom-themes, 但**没装那个包** —— 只要它的 tpl。
+;; 它自带的 file-watch 兜底和这里的监听会重复触发, 故不引入其 lisp 库。
+;;
+;; 注意只借配色, 不加载 Omarchy 那份 init: 它会关掉 menu-bar/tool-bar、
+;; 改 border-width、接管 shell 配置和 emacs server, 都会和 Doom 打架。
+;; 同理 `omarchy-emacs` 装的 ~/.config/omarchy/hooks/theme-set.d/omarchy-emacs
+;; 会在每次换主题时把薄主题 `omarchy` 强拉回来, 已改名停用 (见 doom-emacs.md)。
+
+(defconst my/omarchy--current-base
+  (or (cl-find-if (lambda (dir) (file-directory-p (expand-file-name "theme" dir)))
+                  (list (expand-file-name "~/.local/state/omarchy/current")
+                        (expand-file-name "~/.config/omarchy/current")))
+      (expand-file-name "~/.local/state/omarchy/current"))
+  "Omarchy 当前主题资源所在目录 (Omarchy 4 用 XDG state, 3 用 config)。")
+
+(defconst my/omarchy-theme-directory
+  (expand-file-name "theme" my/omarchy--current-base)
+  "Omarchy 当前主题的生成资源目录, 内含 omarchy-colors.el。")
+
+(defconst my/omarchy-theme-name-file
+  (expand-file-name "theme.name" my/omarchy--current-base)
+  "记录当前主题名的文件; 监听它而非 theme/ 目录, 因为换主题是 rm -rf + mv。")
+
+(defconst my/omarchy-doom-theme-file
+  (expand-file-name "doom-omarchy-theme.el" my/omarchy-theme-directory)
+  "Omarchy 模板渲染出的 doom-themes port 主题文件, 每次 `omarchy theme set` 重写。")
+
+;; omarchy-colors.el 需要在 load-path 上 (omarchy-theme.el 会 require 它),
+;; omarchy-theme.el 需要在 custom-theme-load-path 上 (Emacs 按 `<name>-theme.el` 找)。
+;; doom-omarchy-theme.el 渲染结果也落在 my/omarchy-theme-directory 里,
+;; 所以这个目录同样要进 custom-theme-load-path。
+(add-to-list 'load-path my/omarchy-theme-directory)
+(add-to-list 'custom-theme-load-path my/omarchy-theme-directory)
+(add-to-list 'custom-theme-load-path (expand-file-name "~/.config/emacs/themes"))
+
+;; Doom 在 after-init-hook 里调 doom-init-theme-h -> (load-theme doom-theme t),
+;; 所以这里给符号即可。
+;; doom-omarchy 是 doom-themes 家族的成员 (def-doom-theme), face 覆盖面约 1300 条,
+;; 而颜色仍是 Omarchy 当前主题的配色 —— 换系统主题时文件被重新渲染, 下面监听跟进。
+;; 若 port 文件还没渲染出来 (干净安装后第一次启动), 退回 Omarchy 自带薄主题,
+;; 避免 after-init-hook 里 (load-theme doom-theme t) 直接报错中断启动。
+(if (file-exists-p my/omarchy-doom-theme-file)
+    (setq doom-theme 'doom-omarchy)
+  (setq doom-theme 'omarchy))
+
+(defun my/omarchy-apply-theme ()
+  "按当前 Omarchy 主题重新载入配色并刷新所有 frame。
+doom-omarchy-theme.el 是模板渲染产物, deftheme 求值时就把颜色烘进了 face
+spec, 换主题时必须重新 load-file 才能拿到新配色。"
+  (interactive)
+  (let ((colors-file (expand-file-name "omarchy-colors.el" my/omarchy-theme-directory)))
+    (if (file-exists-p colors-file)
+        (progn
+          ;; 上一个主题的语义色要先解绑: 新主题没定义的键不能留旧值,
+          ;; 否则 omarchy-theme.el 会拿上一套颜色去填 face。
+          (dolist (sym '(omarchy-color-muted omarchy-color-selection
+                         omarchy-color-dark-fg omarchy-color-light-fg
+                         omarchy-color-bright-fg omarchy-color-dark-bg
+                         omarchy-color-darker-bg omarchy-color-lighter-bg
+                         omarchy-color-orange))
+            (makunbound sym))
+          (load-file colors-file)
+          ;; 主题生效前先把底色刷上去, 避免重新 enable 期间的残留闪烁
+          (set-face-attribute 'default nil
+                              :background omarchy-color-bg
+                              :foreground omarchy-color-fg)
+          (modify-all-frames-parameters
+           `((background-color . ,omarchy-color-bg)
+             (foreground-color . ,omarchy-color-fg)))
+          ;; 彻底清掉上一个主题 (含 doom-themes 家族), 再整体重载
+          (dolist (theme '(omarchy doom-omarchy doom-leuven doom-one doom-one-light doom-zenburn))
+            (disable-theme theme)
+            (put theme 'theme-settings nil)
+            (setq custom-known-themes (delq theme custom-known-themes)))
+          (if (file-exists-p my/omarchy-doom-theme-file)
+              (progn
+                (load-file my/omarchy-doom-theme-file)
+                (enable-theme 'doom-omarchy))
+            ;; 兜底: port 主题文件还没渲染出来时, 退回 Omarchy 自带的薄主题
+            (let ((theme-file (locate-file "omarchy-theme" custom-theme-load-path '(".el"))))
+              (when theme-file
+                (load-file theme-file)
+                (enable-theme 'omarchy))))
+          ;; 让 doom-modeline / dashboard 之类挂 doom-load-theme-hook 的模块重算。
+          ;; 是 boundp 不是 fboundp: doom-load-theme-hook 是**变量**不是函数,
+          ;; 用 fboundp 判断恒为 nil —— 这块代码以前从来没执行过。
+          ;; 修好后, TODO 关键字配色 / agenda 配色也靠它跟随主题重算。
+          (when (boundp 'doom-load-theme-hook)
+            (run-hooks 'doom-load-theme-hook))
+          ;; *Output* 之类的 buffer 会把 face 存成文本属性, 主题换了不会自动跟着变,
+          ;; 让它们 revert 一次重新求值即可。
+          ;; (别用 redisplay-scratch-pane: 它在 Emacs 31 已被移除。)
+          (dolist (buf (buffer-list))
+            (with-current-buffer buf
+              (when (derived-mode-p 'output-mode)
+                (revert-buffer :ignore-auto :noconfirm :preserve-modes)))))
+      (message "Omarchy colors not available at %s; keeping current theme."
+               my/omarchy-theme-directory))))
+
+;; 监听 theme.name, 这样 `omarchy theme set X` 之后 Emacs 自己就跟上,
+;; 不依赖 omarchy-restart-emacs (那是给 Omarchy 那份 Emacs 用的, 见下方 shim)。
+;;
+;; 这里直接执行而不是挂 emacs-startup-hook: config.el 是在 Doom 启动流程里
+;; 加载的, 而 emacs-startup-hook 在那之前就跑完了, 挂上去永远不会触发。
+(defvar my/omarchy--theme-watch nil
+  "监听 theme.name 的 file-notify 描述符。")
+
+(defun my/omarchy--watch-theme ()
+  "注册/刷新 theme.name 的监听, 并把当前 Omarchy 配色应用上去。"
+  (interactive)
+  ;; 必须显式 require: config.el 加载时 filenotify 还没被别处拉进来,
+  ;; 下面的 fboundp 判断会把整块跳过, 于是监听和配色都没生效。
+  (require 'filenotify nil t)
+  (when (and (file-exists-p my/omarchy-theme-name-file)
+             (fboundp 'file-notify-add-watch))
+    (when (and my/omarchy--theme-watch (fboundp 'file-notify-rm-watch))
+      (ignore-errors (file-notify-rm-watch my/omarchy--theme-watch)))
+    (setq my/omarchy--theme-watch
+          (file-notify-add-watch
+           my/omarchy-theme-name-file '(change)
+           (lambda (_event) (my/omarchy-apply-theme))))
+    ;; daemon 启动时可能还没有图形帧, 那时 Doom 的 doom-init-theme-h 不会跑,
+    ;; 所以这里主动刷一次, 免得开第一个窗口时还是默认主题。
+    (my/omarchy-apply-theme)))
+
+(when (fboundp 'file-notify-add-watch)
+  (my/omarchy--watch-theme)
+  ;; Emacs server 起新帧时(比如你从终端 emacsclient -c 打开窗口)再刷一次,
+  ;; 覆盖 daemon 早于本次配色生成的场景。
+  (add-hook 'server-after-make-frame-hook #'my/omarchy--watch-theme))
+
+;; 兜底: 上面两处都在 config.el 加载时求值, 那时 filenotify 未必可用。
+;; Doom 在 config.el 之后才跑 emacs-startup-hook, 所以挂在这里最稳,
+;; 保证 watcher 一定注册、配色一定应用。
+(add-hook 'emacs-startup-hook #'my/omarchy--watch-theme)
+
+;; solaire-mode: Doom :ui doom 模块把 solaire-global-mode 挂在
+;; doom-load-theme-hook 上 (sources/doom+/modules/ui/doom/config.el:21-23),
+;; 每次加载主题都会把"非文件 buffer"(org-agenda / Help / 终端...) 的 default
+;; 面重映射到 solaire-default-face; doom-themes-base.el:1359 把它定义为
+;; :background bg-alt。当前深色配色下 bg-alt=#181d20, bg=#2d353b —— agenda 近黑,
+;; 文件 buffer 正常深灰 (2026-10-14 截图像素实测)。不要这个区分, 彻底关掉。
+;;
+;; 2026-10-14 实测的坑: 只在 with-eval-after-load 里摘钩子 +
+;; (solaire-global-mode -1) 不够。hook 对 solaire-global-mode 是无参调用, 而
+;; Emacs 31 全局化 minor mode 的语义是"无参 = 开启"(见 macroexpand
+;; define-globalized-minor-mode 的 docstring); solaire-mode.el 通常正是被这次调用
+;; autoload 加载的, with-eval-after-load 体内的 -1 跑在"开启"之前, 是空操作,
+;; 加载返回后调用照常把模式打开。(daemon 里 solaire-mode.el 恰好被 desktop 恢复
+;; 提前加载, 所以同一份配置 daemon 里是关的、GUI 里是开的 —— 这就是 10-13 的
+;; 修复"有时灵有时不灵"的原因。)
+;; 解法: doom-after-init-hook (Doom 启动最末端, 主题早已加载完) 再关一次;
+;; with-eval-after-load 那条路保留, 覆盖 desktop 提前加载和 doom/reload。
+(defun my/solaire-mode-off ()
+  (when (boundp 'doom-load-theme-hook)
+    (remove-hook 'doom-load-theme-hook #'solaire-global-mode))
+  (when (boundp '+popup-buffer-mode-hook)
+    (remove-hook '+popup-buffer-mode-hook #'turn-on-solaire-mode))
+  (when (featurep 'solaire-mode)
+    (solaire-global-mode -1)
+    (dolist (buf (buffer-list))
+      (with-current-buffer buf
+        (when (bound-and-true-p solaire-mode)
+          (solaire-mode -1))))))
+(with-eval-after-load 'solaire-mode (my/solaire-mode-off))
+(add-hook 'doom-after-init-hook #'my/solaire-mode-off)
 
 (use-package! doom-modeline
   :custom
@@ -553,29 +804,43 @@ iscroll 与 ultra-scroll 争夺滚动控制权, 必须二选一, 否则两套逻
 #+end_src
 
 ** Fonts
-方案 1: 拉丁用 Ubuntu Mono, 汉字用 Sarasa Mono SC。
-方案 2: 拉丁用 Jetbrains Mono, 汉字用 Sarasa Mono SC。
+跨平台字体映射。Windows 用 Sarasa Mono SC + Symbola；Linux（Arch/Omarchy）没有
+这两款，等宽 CJK 用 =Noto Sans Mono CJK SC=，符号用 =Noto Sans Symbols 2=。
+拉丁字体两平台统一用 =JetBrainsMono Nerd Font=（Arch 上 =JetBrains Mono= 会被
+fontconfig 匹配到 Nerd Font 版本，显式写全名更稳）。
 #+begin_src emacs-lisp
-;; Doom 自带的字体变量配置
-;; (setq doom-font (font-spec :family "Ubuntu Mono" :size 18)
-(setq doom-font (font-spec :family "Jetbrains Mono" :size 26)
-      doom-big-font (font-spec :family "Jetbrains Mono" :size 40)
+(defconst my/cjk-font
+  (if (eq system-type 'windows-nt) "Sarasa Mono SC" "Noto Sans Mono CJK SC")
+  "Font family used for CJK/han glyphs.")
+
+(defconst my/symbol-font
+  (if (eq system-type 'windows-nt) "Symbola" "Noto Sans Symbols 2")
+  "Font family used for symbol and mathematical glyphs.")
+
+(defconst my/latin-font "JetBrainsMono Nerd Font"
+  "Font family used for latin text.")
+
+;; Linux 上 GDK_SCALE=2，字号按比例缩小；Windows 沿用原值。
+(defconst my/doom-font-size (if (eq system-type 'windows-nt) 26 13))
+
+(setq doom-font (font-spec :family my/latin-font :size my/doom-font-size)
+      doom-big-font (font-spec :family my/latin-font
+                    :size (* 1.5 my/doom-font-size))
       doom-serif-font doom-font
-      doom-symbol-font (font-spec :family "Sarasa Mono SC")
-      ;; doom-variable-pitch-font (font-spec :family "Ubuntu Mono" :weight 'bold))
-      doom-variable-pitch-font (font-spec :family "Jetbrains Mono" :weight 'bold))
+      doom-symbol-font (font-spec :family my/symbol-font)
+      doom-variable-pitch-font (font-spec :family my/latin-font :weight 'bold))
 (setq use-default-font-for-symbols nil)
 
 ;; Doom 的字体加载顺序问题: 必须在 after-setting-font-hook 里设, 否则被覆盖
 (add-hook! 'after-setting-font-hook
-  ;; === 关键: 给 CJK 脚本指定 Sarasa Mono SC ===
-  (set-fontset-font t 'han      (font-spec :family "Sarasa Mono SC"))
-  (set-fontset-font t 'cjk-misc (font-spec :family "Sarasa Mono SC"))
-  (set-fontset-font t 'kana     (font-spec :family "Sarasa Mono SC"))
-  (set-fontset-font t 'hangul   (font-spec :family "Sarasa Mono SC"))
+  ;; === 关键: 给 CJK 脚本指定等宽 CJK 字体 ===
+  (set-fontset-font t 'han      (font-spec :family my/cjk-font))
+  (set-fontset-font t 'cjk-misc (font-spec :family my/cjk-font))
+  (set-fontset-font t 'kana     (font-spec :family my/cjk-font))
+  (set-fontset-font t 'hangul   (font-spec :family my/cjk-font))
   ;; === 符号 / 数学 / emoji ===
-  (set-fontset-font t 'symbol       (font-spec :family "Symbola"))
-  (set-fontset-font t 'mathematical (font-spec :family "Symbola"))
+  (set-fontset-font t 'symbol       (font-spec :family my/symbol-font))
+  (set-fontset-font t 'mathematical (font-spec :family my/symbol-font))
   ;; emoji: Windows 用 Segoe UI Emoji, Linux 用 Noto Color Emoji (均已装, 彩色渲染)
   (set-fontset-font t 'emoji (font-spec :family (if (eq system-type 'windows-nt) "Segoe UI Emoji" "Noto Color Emoji"))))
 #+end_src
@@ -660,13 +925,74 @@ iscroll 与 ultra-scroll 争夺滚动控制权, 必须二选一, 否则两套逻
   ;; ---- TODO keywords ----
   (setq org-todo-keywords
         '((sequence "TODO(t)" "NEXT(n)" "PROG(p!)" "WAIT(w@/!)" "|" "DONE(d!)" "FAIL(f@)")))
-  (setq org-todo-keyword-faces
-        '(("TODO" :foreground "#2952a3" :weight bold)
-          ("NEXT" :foreground "#e67e22" :weight bold)
-          ("PROG" :foreground "#5f8f7c" :weight bold)
-          ("WAIT" :foreground "#8b6914" :weight bold)
-          ("DONE" :foreground "#2e7d32" :weight bold)
-          ("FAIL" :foreground "#9e9e9e" :weight bold)))
+
+  ;; 配色**不写死色值**, 每次主题加载时按明暗重新推导。
+  ;; 旧配置用的是 Material 深色系 (#2952a3 / #2e7d32), 那是给**浅色底**调的:
+  ;; 放在 doom-omarchy 的深底 (#1e1e2e) 上, TODO 对比度只有 2.21:1、DONE 3.20:1,
+  ;; 又暗又闷。反过来, 为深底调的亮色搬到浅底上会直接发飘 —— 两头不讨好,
+  ;; 所以只能动态算。下面两个工具函数也被 "Agenda 配色" 一节复用。
+  (defun my/color--chan (c)
+    "sRGB 通道 gamma 解码, C 为 0..1。"
+    (if (<= c 0.03928)
+        (/ c 12.92)
+      (expt (/ (+ c 0.055) 1.055) 2.4)))
+
+  (defun my/color--hex-chan (hex i)
+    "取 HEX 第 I 个通道 (0=R 1=G 2=B), 返回 0..1。"
+    (/ (float (string-to-number (substring hex (* i 2) (+ (* i 2) 2)) 16))
+       255.0))
+
+  (defun my/color-luminance (color)
+    "COLOR (hex 字符串) 的 WCAG 相对亮度 (0..1)。
+
+这里自己解析 hex 字符串, **不用** `color-name-to-rgb': 后者内部走
+X 颜色数据库, 在没有图形栈的环境 (--batch / 纯终端 daemon / 早期启动阶段)
+会返回错误值 —— 实测 (color-name-to-rgb \"#1e1e2e\") 返回 (0.0 0.0 1.0),
+拿去判明暗会得到完全错误的结论。而 doom-color 返回的本身就是 hex,
+直接解析即可, 零依赖。
+
+COLOR 为 nil 时按纯黑处理: 主题尚未 enable 时 `doom-color' 返回 nil
+(daemon 启动 + desktop-read 恢复 org buffer 就会撞上这个时机),
+此时若直接调 `replace-regexp-in-string' 会抛 (wrong-type-argument arrayp nil)。"
+    (let* ((hex (substring (replace-regexp-in-string "\\`#" "" (or color "#000000")) 0 6))
+           (r (my/color--chan (my/color--hex-chan hex 0)))
+           (g (my/color--chan (my/color--hex-chan hex 1)))
+           (b (my/color--chan (my/color--hex-chan hex 2))))
+      (+ (* 0.2126 r) (* 0.7152 g) (* 0.0722 b))))
+
+  (defun my/todo-face (hue alpha &optional attrs)
+    "取当前主题的 HUE 语义色, 朝背景(深底)/前景(浅底) 混合 ALPHA, 拼成 face spec。
+主题未加载时 `doom-color' 一律返回 nil, 这里给每个颜色都兜底色, 避免
+早期求值 (desktop-read 阶段) 把整个启动打断。"
+    (let* ((bg (or (doom-color 'bg) "#000000"))
+           (fg (or (doom-color 'fg) "#ffffff"))
+           (dark-p (< (my/color-luminance bg) 0.5))
+           (color (doom-blend (or (doom-color hue) "#ffffff")
+                              (if dark-p bg fg) alpha)))
+      (append (list :foreground color) attrs)))
+
+  (defun my/org-todo-keyword-faces ()
+    "TODO 关键字配色: 色相编码语义, 亮度编码紧迫度。
+未启动=蓝 / 待行动=黄 / 进行中=青 / 阻塞=紫 / 已完成=绿 / 已终止=暗红。
+要你动手的最亮 (8~10:1), 已完成和已终止的收敛 (3~5:1), 别抢视线。"
+    `(("TODO" ,@(my/todo-face 'blue   0.78 '(:weight bold)))
+      ("NEXT" ,@(my/todo-face 'yellow 0.88 '(:weight bold)))
+      ("PROG" ,@(my/todo-face 'teal   0.85 '(:weight bold)))
+      ("WAIT" ,@(my/todo-face 'violet 0.72 '(:weight bold)))
+      ("DONE" ,@(my/todo-face 'green  0.62 '(:weight bold)))
+      ("FAIL" ,@(my/todo-face 'red    0.58 '(:weight bold)))))
+
+  (defun my/org-todo-faces-apply ()
+    "重算 TODO 关键字配色。挂 `doom-load-theme-hook', 换主题时自动跟随。"
+    (setq org-todo-keyword-faces (my/org-todo-keyword-faces)))
+
+  (add-hook 'doom-load-theme-hook #'my/org-todo-faces-apply)
+  ;; 这里不能直接求值: org 可能在主题 enable **之前**就被 autoload 了
+  ;; (daemon 模式下 desktop-read 恢复 ~/org/*.org 会触发), 那时 (doom-color 'bg)
+  ;; 还是 nil, 算出来的是兜底色而非主题色。颜色可用时才算, 否则留给
+  ;; doom-load-theme-hook 在主题加载后重算。
+  (when (doom-color 'bg)
+    (setq org-todo-keyword-faces (my/org-todo-keyword-faces)))
 
   (setq org-log-done 'time
         org-log-into-drawer t)
@@ -687,6 +1013,19 @@ iscroll 与 ultra-scroll 争夺滚动控制权, 必须二选一, 否则两套逻
         org-image-actual-width nil
         org-image-max-width 0.85
         org-image-align 'center)
+
+  ;; ---- 关掉「远程图同步下载」型预览 (大文件里 `z i' 卡死的根因) ----
+  ;; org 9.8 里 org-toggle-inline-images 会把整条 org-link-preview-region 跑一遍,
+  ;; 对 buffer 里**每条**链接调用它的 :preview 函数。doom+ 给 http/https 注册了
+  ;; +org-link-preview-image-url-fn, 内部用 url-retrieve-synchronously **同步下载**;
+  ;; notes.org 里 100+ 条 RSS / 网页链接于是全成了预览候选 —— 点一次 `z i'
+  ;; 就是同步抓 100+ 个 URL, GUI 单线程被堵死 = 假死。
+  ;; 本地图片链接 (file:/attachment:) 不走这里, 照常内联显示, 所以只摘 http/https。
+  ;; 注: org-load-hook 上也挂了同款兜底 (见 my/org-preview-images-near-point 旁),
+  ;;     防 doom+ 的注册在加载顺序上覆盖掉这一段。
+  (setq org-display-remote-inline-images 'skip)
+  (org-link-set-parameters "http"  :preview nil)
+  (org-link-set-parameters "https" :preview nil)
 
   (custom-set-variables '(org-startup-indented nil))
 
@@ -928,11 +1267,34 @@ With a numeric prefix WIDTH, also emit an #+ATTR_ORG :width line."
 #+begin_src emacs-lisp
 (after! org
   (require 'org-attach)
+
+  ;; 目录 = attach 年月 (2026-10-20 起, 取代平铺池)。
+  ;; 内置那两个 ID->路径函数**都不校验 ID 格式**, 只判长度:
+  ;;   org-attach-id-uuid-folder-format: (< 2 (length id)) -> <前2>/<余下>
+  ;;   org-attach-id-ts-folder-format:   (< 6 (length id)) -> <前6>/<余下>
+  ;; 于是 list 顺序是个互斥的二元选择 —— uuid 在前会把 ts ID 切成
+  ;; 20/260430T…, ts 在前会把 UUID 切成 5f2162/9a-…。本库 ID 是混合的
+  ;; (文件级 ts + heading 级 UUID), 两边都会错, 所以自己写一个显式判格式。
+  ;; 注: ID 取该 heading 最早附件的时间戳, 目录名因此是真实的 attach 年月,
+  ;; 不是「建 ID 那天」—— 2026-10-20 迁移时 55 个附件是这么定的。
+  (defun my/org-attach-id-folder-format (id)
+    "`<YYYYMM>/<rest>' for timestamp IDs, `<2>/<rest>' for UUIDs."
+    (cond ((string-match-p "\\`[0-9]\\{8\\}T[0-9]\\{6\\}" id)
+           (format "%s/%s" (substring id 0 6) (substring id 6)))
+          ((string-match-p "\\`[0-9a-f]\\{8\\}-[0-9a-f]\\{4\\}-" id)
+           (format "%s/%s" (substring id 0 2) (substring id 2)))
+          (t (org-attach-id-fallback-folder-format id))))
+
   (setq org-attach-id-dir (expand-file-name "data/" org-directory)
+        org-attach-id-to-path-function-list '(my/org-attach-id-folder-format)
         org-attach-method 'cp
         org-attach-use-inheritance t
         org-attach-store-link-p 'attached
-        org-attach-auto-tag nil)
+        org-attach-auto-tag nil
+        ;; Emacs 30/Org 9.7+ 才有: 拖放与粘贴的图一律进 org-attach,
+        ;; 由下面 ** org-attach 统一收口 里的 advice 统一命名。
+        org-yank-dnd-method 'attach
+        org-yank-image-save-method 'attach)
 
   ;; Fix attachment 链接中文乱码
   (defun my/org-attach-store-link-decoded (&rest _)
@@ -949,6 +1311,563 @@ With a numeric prefix WIDTH, also emit an #+ATTR_ORG :width line."
                      (substring (car latest) (length "attachment:"))))
                    'utf-8))))))
   (advice-add 'org-attach-attach :after #'my/org-attach-store-link-decoded))
+#+end_src
+
+** 文件名生成（denote 风格，但不依赖 denote 包）
+#+begin_src emacs-lisp
+;; 2026-10-17: denote 包已卸载，但 ~/org/data/ 里已有一千多个
+;; `<id>--<slug>__<kw1>_<kw2>.ext' 命名的附件，格式必须延续（排序、去重、
+;; 人工可读性都靠它）。这里自己实现一份，行为对齐 denote:
+;;   id   = %Y%m%dT%H%M%S 时间戳
+;;   slug = 非字母数字转连字符（保留 CJK，跟标题里的中文一致），首尾连字符去掉，
+;;          且一律 downcase —— 实测 denote 对标题段也 downcase，历史文件全是小写
+;;   kw   = 每个关键词 sluggify + 小写，用 _ 连接，整体前缀 __
+;;   keywords 为空 → 省略 __ 段
+(defconst my/date-identifier-format "%Y%m%dT%H%M%S"
+  "时间戳 ID 格式，沿用 denote identifier，保证与历史附件名可一起排序。")
+
+(defconst my/known-keywords
+  '(;; 工作 / 生活分界
+    "work"
+    ;; 领域
+    "gamedev" "emacs" "ai" "pkm" "investment" "health" "habit" "read" "hire" "media"
+    ;; 状态 / 跨域标记
+    "idea" "memo" "tool" "project" "index"
+    ;; 形态
+    "journal" "document" "movie" "tv" "anime" "music" "game" "book" "manga")
+  "关键词白名单，只用于附件命名时的补全（原 denote-known-keywords 的镜像）。
+笔记本身已经不再用 keyword 分类——那是大文件体系之前的事。")
+
+;; 两个 sluggify 各自复刻 denote 的对应函数（denote.el 1101 / 1187 / 1199）。
+;; 关键点: 只有空格和下划线转连字符，**其余非字母数字字符原样保留**，
+;; 所以《》（）这些全角标点会留在文件名里 —— data/ 里那 3 个历史附件
+;; （《艳遇修真》（珍藏最终版1-263章）等）就是这个规则，别改成「非字母数字
+;; 一律转连字符」，否则新名字跟老名字对不上。
+(defun my/sluggify-title (title)
+  "Slug of TITLE for the file-name title part.  Replaces `denote-sluggify-title'."
+  (let ((s (replace-regexp-in-string "[][{}!@#$%^&*()+'\"?,.\|;:~`‘’“”/=]*" "" title)))
+    (setq s (replace-regexp-in-string "_\\|\\s-+" "-" s))
+    (setq s (replace-regexp-in-string "-\\{2,\\}" "-" s))
+    (downcase (replace-regexp-in-string "^-\\|-$" "" s))))
+
+(defun my/sluggify-keyword (keyword)
+  "Slug of KEYWORD: lowercased, punctuation dropped.  Replaces `denote-sluggify-keyword'."
+  (downcase (replace-regexp-in-string "[][{}!@#$%^&*()+'\"?,.\|;:~`‘’“”/_ =-]*" "" keyword)))
+
+(defun my/keywords-prompt (&optional prompt)
+  "Read keywords with completion.  Replacement for `denote-keywords-prompt'."
+  (let ((input (completing-read-multiple
+                (or prompt "Keywords (逗号分隔, TAB 补全, 直接回车=无): ")
+                my/known-keywords nil nil)))
+    (mapcar #'my/sluggify-keyword input)))
+
+(defun my/org-file-name-format (filename &optional keywords)
+  "Rewrite FILENAME to denote style: <id>--<slug>__<keywords><ext>.
+KEYWORDS 非空才带 __ 段。不依赖 denote 包，格式与它保持一致。"
+  (let* ((ext   (or (file-name-extension filename t) ""))
+         (base  (or (file-name-sans-extension filename) ""))
+         (id    (format-time-string my/date-identifier-format))
+         (slug  (my/sluggify-title base))
+         (kwstr (if keywords
+                    (concat "__" (mapconcat #'my/sluggify-keyword keywords "_"))
+                  "")))
+    (concat id "--" slug kwstr ext)))
+#+end_src
+
+** org-attach 统一收口（所有附件只走 org-attach-attach）
+#+begin_src emacs-lisp
+;; 思路来自 https://gist.github.com/yibie/9bd280522c24eec41ce0b32b327967cd
+;; 粘贴 / 截图 / 拖放 / org-download / 手动 attach 全部汇到 org-attach-attach,
+;; 命名规则与「复制还是移动」只写一遍。针对本机改了三处:
+;;   1. macOS 依赖 (pngpaste/qlmanage/Finder) -> wl-paste/xclip + xdg-open
+;;   2. 命名换成 denote 风格 (复用 my/org-file-name-format)
+;;   3. 不做无条件 mv —— gist 那样会把从文件管理器拖进来的原件删掉
+(after! org
+  (require 'org-attach)
+
+  ;;; 1. 公共函数: 解析 file:/attachment: 链接的真实路径
+  ;; 别拿 org-attach-id-dir 当基准目录 —— entry 可以用 DIR 属性覆盖它,
+  ;; 只有 (org-attach-dir) 才是该 heading 真正的目录。
+  ;; (之前三处硬编码 org-attach-id-dir, 而真实目录是 data/<YYYYMM>/<余下>/,
+  ;; 于是 attachment: 链接一律被判成「文件不存在」—— 删链接的命令还会照样把链接吃掉。)
+  (defun my/org-link-file-at-point ()
+    "Return the absolute path of the file/attachment link at point, or nil.
+`file:' 相对 `default-directory', `attachment:' 相对该 heading 真正的
+attach 目录。"
+    (let* ((ctx  (org-element-context))
+           (type (org-element-property :type ctx))
+           (path (when (member type '("file" "attachment"))
+                   (org-element-property :path ctx))))
+      (when path
+        (expand-file-name (org-link-unescape path)
+                          (if (equal type "attachment")
+                              (my/org-attach--dir)
+                            default-directory)))))
+
+  (defun my/org-attach--dir ()
+    "The attachment directory in use, falling back to the pool root.
+2026-10-20 起附件按 entry 分目录 (data/<YYYYMM>/<ID余下>/), `org-attach-dir'
+对「既无 ID 也无 DIR」的条目仍然返回 nil —— 那时回落 org-attach-id-dir:
+data/ 顶层还躺着 82 个无主孤儿, 老链接有可能指向那里。
+末尾斜杠统一去掉, 跟 `org-attach-dir' 自己的风格一致。"
+    (directory-file-name
+     (or (org-attach-dir)
+         org-attach-id-dir)))
+
+  ;; 2026-10-20: 上面这个兜底原先做在 org-attach-dir 自己的 advice 里
+  ;; (平铺时代: 所有条目共用 data/, 于是「没有 ID」不等于「没有目录」)。
+  ;; 分目录之后那个 advice 必须撤掉, 否则 org-attach-dir 对无 ID 条目永远返回
+  ;; 池子, org-attach-dir-get-create 就不会给它造 ID —— 新附件会继续落进平铺
+  ;; 池, 目录结构立刻腐化。撤掉之后 org 自己的解析
+  ;; (org-attach-expand -> (expand-file-name file (org-attach-dir))) 对无 ID 条目
+  ;; 拿到 nil, expand-file-name 会把它当相对 default-directory 解析 ——
+  ;; 2026-10-18 实测过: 路径变成 ~/org/<文件名> 而不是 ~/org/data/<文件名>,
+  ;; ol.el 的 org-link-preview-file 里 (file-exists-p file) 为 nil, 函数
+  ;; **静默返回 nil**: 不显示、不报错、echo area 干干净净。全库 47 张图里
+  ;; 37 张是这么丢的。分目录之后「有附件却没有 ID」的条目已经不存在了
+  ;; (迁移时给 31 个挂载 heading 全部注入了 ID), 剩下的无 ID 条目本来就没链接。
+
+  ;;; 2. 命名: 可读名保留, 机器名转 denote 名
+  (defvar my/org-attach-generated-name-regexps
+    '("\\`[0-9a-f]\\{16,\\}\\'"                            ; hash
+      "\\`[0-9a-f]\\{8\\}-[0-9a-f]\\{4\\}-[0-9a-f-]+\\'"    ; uuid
+      "\\`[0-9_. -]+\\'"                                    ; 纯数字/日期
+      "\\`wechatimg[0-9]+\\'"                               ; 微信导出 (英文名)
+      "\\`微信图片[0-9_]*\\'"                                ; 微信导出 (中文名)
+      "\\`\\(mmexport\\|wx_camera_[0-9]+\\)"                ; 微信导出
+      "\\`[0-9]+_\\.pic\\(_hd\\)?\\'"                       ; 微博图床
+      "\\`\\(img\\|dsc\\|pxl\\)[_-]?[0-9]+"                 ; 相机
+      "\\`clipboard-"
+      "\\`\\(screenshot\\|screen shot\\|截屏\\|截图\\|屏幕截图\\|屏幕快照\\)"
+      "\\`\\(image\\|img\\|download\\|unnamed\\|untitled\\|file\\)\\([ _-]?[0-9]*\\)\\'"
+      "\\`\\(screencapture\\|flameshot\\|snipaste\\)[ _-]?[0-9]*") ; Linux 截图工具
+    "Base names (no extension, case-insensitive) that say nothing about the content.")
+
+  (defvar my/org-attach-slug-length 24
+    "Maximum width of the heading part of a generated file name.")
+
+  (defun my/org-attach--slug ()
+    "The current heading (or the file title) squeezed into a file-name fragment."
+    (let* ((title (or (and (derived-mode-p 'org-mode)
+                           (not (org-before-first-heading-p))
+                           (org-get-heading t t t t))
+                      (and (derived-mode-p 'org-mode)
+                           (cadar (org-collect-keywords '("TITLE"))))
+                      ""))
+           (text (if (string-match org-link-bracket-re title)
+                     (replace-regexp-in-string org-link-bracket-re
+                                               (lambda (m) (or (match-string 2 m) ""))
+                                               title)
+                   title))
+           (slug (string-trim (replace-regexp-in-string "[^[:alnum:]]+" "-" text)
+                              "-+" "-+")))
+      (string-trim-right
+       (truncate-string-to-width slug my/org-attach-slug-length) "-+")))
+
+  (defvar my/org-attach-slug-min-width 3
+    "Minimum `string-width' for a generated slug to count as information.")
+
+  (defun my/org-attach--slug-useful-p (slug)
+    "Non-nil when SLUG says something about the file.
+大文件体系下一个 heading 常常就叫 `12.11'、`天气'、`一张图', 直接拿它做 slug
+会产出 `20260506T013013--12-11.jpg' 这种比原文件名还糟的东西 —— 这时宁可原样
+保留 `20260913_104934.jpg'。"
+    (and slug
+         (>= (string-width slug) my/org-attach-slug-min-width)
+         ;; 纯数字 / 纯日期: 12-11, 2026-10-17
+         (not (string-match-p "\\`[0-9]+\\(-[0-9]+\\)*\\'" slug))))
+
+  (defun my/org-attach--generated-name-p (base)
+    "Non-nil when BASE (no extension) looks machine-generated."
+    (let ((case-fold-search t))
+      (seq-some (lambda (re) (string-match-p re base))
+                my/org-attach-generated-name-regexps)))
+
+  (defun my/org-attach-name-for-file (file)
+    "The name FILE should get: kept if readable, else <id>--<slug>.ext.
+机器名转成 20261013T235000--标题.ext, 复用 `my/org-file-name-format'。
+这也是 `org-download-file-format-function'。
+
+2026-10-17 起**不再带 __keyword 段**。以前那段取的是 heading 当时的 tag
+(`my/org-attach--keywords'), 而 tag 会改、会删、条目会 refile, 文件名却不跟着
+更新 —— 半年后 `__health' 就是一条错误线索。归因靠笔记正文和 CUSTOM_ID,
+共享池不负责分类。附带效果: 改名频率下降, `my/org-attach-rename' 要重写的链接
+也变少。"
+    (let* ((name (file-name-nondirectory file))
+           (base (file-name-sans-extension name)))
+      (if (not (my/org-attach--generated-name-p base))
+          name
+        (let ((slug (my/org-attach--slug)))
+          (my/org-file-name-format
+           (concat (if (my/org-attach--slug-useful-p slug) slug base)
+                   (file-name-extension name t)))))))
+
+  (defun my/org-attach--unique-name (name dir)
+    "Return NAME, or NAME with -2, -3… before the extension if DIR has it already."
+    (let ((base (file-name-sans-extension name))
+          (ext  (file-name-extension name t))
+          (n 1)
+          (candidate name))
+      (while (file-exists-p (expand-file-name candidate dir))
+        (setq n (1+ n)
+              candidate (format "%s-%d%s" base n ext)))
+      candidate))
+
+  ;;; 3. 收口: :around advice
+  (defvar my/org-attach-move-from-dirs
+    (list temporary-file-directory)
+    "Only files inside these directories are MOVED, not copied.
+gist 是无条件 mv —— 那在拖放场景是灾难: 从文件管理器拖个 PDF 进来原件就没了。
+这里默认只移临时目录 (粘贴/截图/URL 下载都落在那里)。想让 Downloads 也移走:
+  (add-to-list 'my/org-attach-move-from-dirs (expand-file-name \"~/Downloads\"))")
+
+  (defun my/org-attach--movable-p (file)
+    "Non-nil when FILE may be moved instead of copied."
+    (let ((dir (expand-file-name (file-name-directory (expand-file-name file)))))
+      (seq-some (lambda (d)
+                  (and d (string-prefix-p (expand-file-name d) dir)))
+                my/org-attach-move-from-dirs)))
+
+  (defun my/org-attach--attach-a (orig file &optional visit-dir method)
+    "Around advice for `org-attach-attach': uniform names, mv only from staging.
+Only regular local files attached with cp/mv are touched; ln, lns, url, none
+and directories are passed to ORIG unchanged."
+    (let ((effective (or method org-attach-method)))
+      (if (or (not (memq effective '(cp mv)))
+              (not (file-regular-p file)))
+          (funcall orig file visit-dir method)
+        (let* ((file (expand-file-name file))
+               (name (my/org-attach--unique-name
+                      (my/org-attach-name-for-file file)
+                      (org-attach-dir 'get-create))))
+          (if (string= name (file-name-nondirectory file))
+              ;; 名字不用改: 只决定 mv 还是 cp
+              (funcall orig file visit-dir
+                       (if (my/org-attach--movable-p file) 'mv 'cp))
+            ;; 改名: 先复制到暂存目录再 attach, 成功之后才动原件,
+            ;; 中途失败什么都不会丢。
+            (let* ((stage  (make-temp-file "org-attach" t))
+                   (staged (expand-file-name name stage)))
+              (unwind-protect
+                  (progn
+                    (copy-file file staged nil t)
+                    (prog1 (funcall orig staged visit-dir 'mv)
+                      (when (my/org-attach--movable-p file)
+                        (delete-file file))))
+                (delete-directory stage t))))))))
+
+  (advice-add 'org-attach-attach :around #'my/org-attach--attach-a)
+
+  ;;; 4. Linux 剪贴板取图 (Wayland 优先, X11 兜底)
+  (defun my/org-attach--clipboard-image-to (file)
+    "Write the clipboard image to FILE.  Return non-nil on success."
+    (let ((cmd (cond ((executable-find "wl-paste")
+                      (format "wl-paste --no-newline --type image/png > %s"
+                              (shell-quote-argument file)))
+                     ((executable-find "xclip")
+                      (format "xclip -selection clipboard -t image/png -o > %s"
+                              (shell-quote-argument file))))))
+      (and cmd
+           (zerop (call-process-shell-command cmd nil nil))
+           (file-regular-p file)
+           (> (file-attribute-size (file-attributes file)) 0))))
+
+  (defun my/org-attach--insert-link (name)
+    "Insert a link to attachment NAME.  Images get no description, so they inline.
+预览走 `my/org-display-images', 不用 org-link-preview-region —— 本机统一封装过,
+重复调用会叠加 overlay。"
+    (let ((image (string-match-p (image-file-name-regexp) name)))
+      (insert (org-link-make-string (concat "attachment:" name)
+                                    (unless image name)))
+      (when image (my/org-display-images))))
+
+  (defun my/org-attach-paste-image ()
+    "Attach the clipboard image to the current heading and insert a link."
+    (interactive)
+    (let ((tmp (expand-file-name
+                (format-time-string "clipboard-%Y%m%dT%H%M%S.png")
+                temporary-file-directory)))
+      (unless (my/org-attach--clipboard-image-to tmp)
+        (user-error "No image on the clipboard"))
+      (my/org-attach--insert-link
+       (string-remove-prefix "attachment:"
+                             (car (org-attach-attach tmp nil 'mv))))))
+
+  ;;; 5. 命令: 插入已有链接 / 改名 / 最新下载 / 外部打开
+  (defun my/org-attach--shared-dir-p (&optional dir)
+    "Non-nil when DIR is the shared flat pool, not a per-entry directory.
+2026-10-20 起绝大多数目录都是 per-entry 的, 这一关基本不再触发 —— 只有回落
+到 org-attach-id-dir 的无 ID 条目(其附件躺在 82 个孤儿里)才会命中, 而那种
+情况下「删整个目录」确实等于「删全部附件」, 守卫理应生效。"
+    (let ((dir (or dir (my/org-attach--dir))))
+      (string= (file-name-as-directory (expand-file-name dir))
+                  (file-name-as-directory
+                   (expand-file-name org-attach-id-dir)))))
+
+  (defun my/org-attach--subtree-attachments ()
+    "File names referenced by `attachment:' links in the current subtree.
+分目录之后 `org-attach-file-list' 能直接列目录了, 但共享附件(同一个文件被
+两个 heading 引用, 如染色体报告)仍然只有链接说得清, 所以保留这条路径。
+链接删了文件就成了孤儿, 那是另一回事。"
+    (let (names)
+      (save-excursion
+        (save-restriction
+          (unless (org-before-first-heading-p) (org-narrow-to-subtree))
+          (goto-char (point-min))
+          ;; 非贪婪: [[attachment:a.jpg]] 与 [[attachment:a.jpg][说明]] 都能吃掉
+          (while (re-search-forward
+                  "\\[\\[attachment:\\([^]]+?\\)\\]\\(?:\\[[^]]*\\]\\)?\\]" nil t)
+            (let ((name (org-link-unescape
+                         (match-string-no-properties 1))))
+              ;; 去掉 ::page 之类的后缀
+              (when (string-match "::" name)
+                (setq name (substring name 0 (match-beginning 0))))
+              (unless (member name names)
+                (push name names))))))
+      (nreverse names)))
+
+  (defun my/org-attach--files (&optional all)
+    "Attachment file names of the current heading; error if there are none.
+默认只认当前 subtree 里 attachment: 链接引用过的文件 —— 共享附件(同一个
+文件被两个 heading 引用)只有链接说得清。ALL 非 nil (C-u) 时改列整个目录,
+即 org-attach 眼里的归属, 想引用本目录里没被链接引用过的文件时用这个。"
+    (if all
+        (let ((dir (my/org-attach--dir)))
+          (or (and dir (org-attach-file-list dir))
+              (user-error "No attachment directory")))
+      (let ((dir (my/org-attach--dir)))
+        (or (seq-filter (lambda (n) (file-exists-p (expand-file-name n dir)))
+                        (my/org-attach--subtree-attachments))
+            (user-error "No attachments on this heading")))))
+
+  (defun my/org-attach--read (prompt &optional all)
+    "Pick one attachment of the current heading with PROMPT.
+With a single attachment, return it without asking.  ALL 传给
+`my/org-attach--files'."
+    (let ((files (my/org-attach--files all)))
+      (if (cdr files) (completing-read prompt files nil t) (car files))))
+
+  (defun my/org-attach-open (&optional in-emacs)
+    "Like `org-attach-open', but only offers this heading's attachments.
+原版列整个目录, 平铺之后会冒出上百个无关文件。"
+    (interactive "P")
+    (let ((path (expand-file-name (my/org-attach--read "Open attachment: ")
+                                  (my/org-attach--dir))))
+      (run-hook-with-args 'org-attach-open-hook path)
+      (org-open-file path in-emacs)))
+
+  (defun my/org-attach-delete-one ()
+    "Like `org-attach-delete-one', but only offers this heading's attachments."
+    (interactive)
+    (let* ((dir      (my/org-attach--dir))
+           (name     (my/org-attach--read "Delete attachment: "))
+           (file     (expand-file-name name dir)))
+      (unless (and (file-exists-p file)
+                   (y-or-n-p (format "Delete %s from %s? " name dir)))
+        (user-error "Aborted"))
+      (delete-file file)
+      (run-hook-with-args 'org-attach-after-change-hook dir)
+      (message "Deleted %s" name)))
+
+  ;; org-attach-delete-all 会删掉整个 attach 目录 —— 平铺之后那就是全部附件。
+  ;; 直接拦掉, 真要批量删请用 Dired。
+  (defun my/org-attach-delete-all-guard (orig &rest args)
+    "Refuse `org-attach-delete-all' when attachments live in the shared pool."
+    (if (my/org-attach--shared-dir-p)
+        (user-error "Attachments live in the shared pool %s; delete from Dired"
+                    org-attach-id-dir)
+      (apply orig args)))
+  (advice-add 'org-attach-delete-all :around #'my/org-attach-delete-all-guard)
+
+  (defun my/org-attach-insert-link ()
+    "Insert a link to one of the current heading's attachments.
+C-u: 从整个 ~/org/data/ 池子里挑 (引用别处已有的文件)。"
+    (interactive)
+    (my/org-attach--insert-link
+     (my/org-attach--read "Insert link to: " current-prefix-arg)))
+
+  (defun my/org-attach-rename ()
+    "Rename an attachment and rewrite the links to it in this subtree."
+    (interactive)
+    (let* ((dir  (my/org-attach--dir))
+           (old  (my/org-attach--read "Rename attachment: " current-prefix-arg))
+           (ext  (file-name-extension old t))
+           (base (read-string (format "New name (%s is kept): " ext)
+                              (file-name-sans-extension old)))
+           (new  (concat (file-name-sans-extension
+                          (if (string-suffix-p ext base) base (concat base ext)))
+                         ext)))
+      (when (string-empty-p (file-name-sans-extension new))
+        (user-error "The name cannot be empty"))
+      (unless (string= old new)
+        ;; 池子是共用的, 撞名会静默覆盖别人的文件 —— 宁可报错。
+        (when (file-exists-p (expand-file-name new dir))
+          (user-error "%s already exists in %s" new dir))
+        (rename-file (expand-file-name old dir) (expand-file-name new dir))
+        (let ((count 0)
+              (re (concat "\\(attachment:\\)"
+                          (regexp-opt (list old (org-link-escape old)))
+                          "\\(\\]\\|::\\)")))
+          (save-excursion
+            (save-restriction
+              (unless (org-before-first-heading-p) (org-narrow-to-subtree))
+              (goto-char (point-min))
+              ;; re-search-forward 自己会前进, 不需要额外的 eobp 守卫
+              (while (re-search-forward re nil t)
+                (replace-match (concat "\\1" (org-link-escape new) "\\2") t)
+                (setq count (1+ count)))))
+          (message "Renamed to %s, rewrote %d link(s)" new count)))))
+
+  (defvar my/org-attach-download-dir "~/Downloads/"
+    "Where `my/org-attach-latest-download' looks for the newest file.")
+
+  (defun my/org-attach-latest-download ()
+    "Attach the newest file in the download directory and insert a link."
+    (interactive)
+    (let ((file (car (sort
+                      (seq-filter
+                       (lambda (f)
+                         (and (file-regular-p f)
+                              (not (string-match-p
+                                    "\\.\\(crdownload\\|download\\|part\\|tmp\\)\\'"
+                                    f))))
+                       (directory-files
+                        (expand-file-name my/org-attach-download-dir) t "\\`[^.]"))
+                      #'file-newer-than-file-p))))
+      (unless file (user-error "The download directory is empty"))
+      (when (y-or-n-p (format "Attach %s? " (file-name-nondirectory file)))
+        (my/org-attach--insert-link
+         (string-remove-prefix "attachment:" (car (org-attach-attach file)))))))
+
+  (defun my/org-attach-file (file)
+    "Attach FILE to the current heading and insert a link."
+    (interactive "fAttach file: ")
+    (my/org-attach--insert-link
+     (string-remove-prefix "attachment:" (car (org-attach-attach file)))))
+
+  (defun my/org-attach-xdg-open ()
+    "Open an attachment with the desktop default application."
+    (interactive)
+    (let ((file (expand-file-name (my/org-attach--read "Open: " current-prefix-arg)
+                                  (my/org-attach--dir))))
+      (call-process "xdg-open" nil 0 nil file)))
+
+  ;;; 5b. 孤儿扫描 (平铺池子没有 per-entry 目录, 「谁引用了它」只能看链接)
+  (defvar my/org-attach-orphan-scan-files
+    '("inbox.org")
+    "Org files scanned for attachment links, relative to `org-directory'.
+2026-10-18 退役: notes/things/finance/health/media/read 已并入 ~/org/roam/,
+这份列表只剩根目录的 inbox(收件箱) —— 其余一律走
+`my/org-attach--scan-files' 里的 roam 递归, 加新节点不用再来改这张表。
+2026-10-19: journal 拆成 ~/org/roam/daily/, 从这里摘掉了 —— 它现在由 roam 递归
+负责收录, 而这正是旧矛盾被解除的地方: 日记已经匿名化到 roam 树里, 不需要
+为它单独留一条。
+
+注意 `my/org-attach--linked-names' 会用 `epa-file-name-regexp' 主动跳过密文,
+而 roam/daily/ 现在匹配该正则 —— 所以**日记引用的附件仍会被误报成孤儿**,
+行为和 2026-10-19 之前一致, 没有变差。要真正修掉, 得让这里容忍 daily 目录
+逐次解密 (~236 个文件, 且可能弹口令框), 是个独立的性能/隐私权衡, 暂不做。")
+
+  (defun my/org-attach--scan-files ()
+    "Every Org file that might link into the attachment pool."
+    (let (files)
+      (dolist (rel my/org-attach-orphan-scan-files)
+        (push (expand-file-name rel org-directory) files))
+      ;; roam 是全库唯一的笔记真源, 递归扫全部节点。
+      ;; 注意别把 .retired-*/ 或 _orig-*/ 之类的归档挪进来 —— 它们仍留着
+      ;; attachment: 链接, 扫进去会把本该回收的孤儿判成「有人引用」。
+      (dolist (f (directory-files-recursively
+                  (expand-file-name "roam/" org-directory) "\\.org\\'"))
+        (push f files))
+      ;; 归档出去的条目还留着链接, 不扫会误报
+      (dolist (f (file-expand-wildcards
+                  (expand-file-name ".archive/*.org" org-directory)))
+        (push f files))
+      (seq-filter #'file-readable-p (seq-uniq files))))
+
+  (defun my/org-attach--linked-names ()
+    "Hash table of every file name mentioned by a file:/attachment: link.
+这里只需「有没有出现过」, 不需要出现在哪 —— 所以把候选文件统统拼进一个
+临时 buffer 再统一扫, 比逐文件 re-search 快得多。"
+    (let ((table (make-hash-table :test #'equal))
+          (enc (or (bound-and-true-p epa-file-name-regexp) "\\`\\'")))
+      (with-temp-buffer
+        (dolist (f (my/org-attach--scan-files))
+          ;; 密文读进来只剩二进制, 而且会连带触发一遍解密 —— 直接跳过
+          (unless (string-match-p enc f)
+            (ignore-errors (insert-file-contents f))))
+        (goto-char (point-min))
+        (while (re-search-forward
+                "\\[\\[\\(?:attachment\\|file\\):\\([^]|]+\\)" nil t)
+          (let* ((target (match-string-no-properties 1))
+                 ;; data/xxx 与 ../notes/.images/xxx 都取最后一段
+                 (name (car (last (split-string target "/")))))
+            (unless (string-empty-p name)
+              (puthash (org-link-unescape name) t table)))))
+      table))
+
+  (defun my/org-attach-list-orphans ()
+    "Report files in `org-attach-id-dir' that no Org link refers to.
+平铺池子里「哪个文件属于谁」只能靠链接判断; 链接删了、条目被覆盖、或者文件是
+旁路进来的(手机 / shell 拷贝, 不走 `org-attach-attach'), 它就永远留在池子里没人
+知道 —— 还得跟着 rclone 双向同步到 R2。
+
+注意: ~/org/roam/daily/ 下的日记是全文件加密的, 扫描时会跳过 —— 它们引用的
+附件一样会被误报。2026-10-19 journal 拆分前后行为一致, 没有变差。"
+    (interactive)
+    (let* ((dir   (file-name-as-directory org-attach-id-dir))
+           (table (my/org-attach--linked-names))
+           (all   (directory-files dir nil "\\`[^.]" t))
+           rows total)
+      (dolist (f all)
+        (unless (gethash f table)
+          (let ((size (file-attribute-size
+                       (file-attributes (expand-file-name f dir)))))
+            (setq total (+ (or total 0) size))
+            (push (cons size f) rows))))
+      (setq rows (sort rows (lambda (a b) (> (car a) (car b)))))
+      (with-current-buffer (get-buffer-create "*org-attach orphans*")
+        (let ((inhibit-read-only t))
+          (erase-buffer)
+          (insert (format ";; %d / %d files in %s are referenced by no org link.\n"
+                          (length rows) (length all) dir))
+          (insert (format ";; total %s\n" (file-size-human-readable (or total 0))))
+          (insert ";; CAUTION: ~/org/roam/daily/ is encrypted and was skipped, so\n")
+          (insert ";; attachments referenced only by a daily note show up here.\n\n")
+          (dolist (row rows)
+            (insert (format "%8s  %s\n"
+                            (file-size-human-readable (car row))
+                            (expand-file-name (cdr row) dir)))))
+        (goto-char (point-min))
+        (special-mode)
+        (pop-to-buffer (current-buffer)))
+      (message "%d orphan(s), %s — see *org-attach orphans*"
+               (length rows) (file-size-human-readable (or total 0)))))
+
+  ;;; 6. transient 菜单 (Linux 版, 没有 Quick Look / Finder)
+  (after! transient
+    (transient-define-prefix my/org-attach-menu ()
+      "Attachments of the current heading."
+      [["Add"
+        ("a" "Pick a file"        my/org-attach-file)
+        ("l" "Newest download"    my/org-attach-latest-download)
+        ("v" "Clipboard image"    my/org-attach-paste-image)
+        ("u" "From URL"           org-attach-url)
+        ("b" "Contents of buffer" org-attach-buffer)]
+       ;; 不用 org-attach-open / org-attach-delete-one / org-attach-sync:
+       ;; 前两个列整个目录 (平铺后是上百个无关文件), sync 的 ATTACH tag 语义
+       ;; 在共享池子里没有意义。org-attach-delete-all 由上面的 advice 拦住。
+       ["View"
+        ("o" "Open"               my/org-attach-open)
+        ("O" "xdg-open"           my/org-attach-xdg-open)
+        ("f" "Directory in Dired" org-attach-reveal-in-emacs)
+        ("i" "Insert link"        my/org-attach-insert-link)]
+       ["Organise"
+        ("r" "Rename"             my/org-attach-rename)
+        ("d" "Delete one"         my/org-attach-delete-one)
+        ("s" "Set directory"      org-attach-set-directory)
+        ("g" "List orphans"       my/org-attach-list-orphans)
+        ("?" "Stock dispatcher"   org-attach)]])))
 #+end_src
 
 ** CJK emphasis fix (from ljg)
@@ -1074,10 +1993,38 @@ With a numeric prefix WIDTH, also emit an #+ATTR_ORG :width line."
 (after! org
   (setq org-agenda-inhibit-startup t
         org-agenda-tags-column 'auto
-        org-agenda-files '("~/org/inbox.org"
-                           "~/org/notes/20260101T000018--habits-hub__habit_index.org"
-                           "~/org/append-note.org"
-                           "~/org/.calendar")
+        ;; 2026-10-18 退役: notes/things/finance/health/media/read 六个根主文件
+        ;; 已并入 ~/org/roam/。这里递归收 roam 里的**任务型**节点:
+        ;; roam/media/ 下 9 个分类文件与 roam/read/ 下的书单/读书笔记是记录库,
+        ;; 它们的伪 TODO 已转成 :状态: 属性 (实测 TODO 关键字 = 0), 这里继续
+        ;; 排除 —— 仍是 Sean 拍板的「记录不该当任务扫」语义, 不是性能取舍。
+        ;; 2026-10-18 二次改: media.org 拆成 roam/media/ 下 9 个文件, 排除判据从
+        ;; 「文件名 = media.org」改成「在 roam/media/ 目录下」。漏改会让 9 个记录库
+        ;; 文件 (尤其 Top250 的 420 个 heading) 全进 agenda。
+        ;; 2026-10-19 四改: read.org 拆成 roam/read/ 下 17 个文件 (8 书单 +
+        ;; 8 本书笔记 + 1 index), 判据同样从文件名改成目录前缀。
+        ;; 2026-10-19 五改: journal 也拆进了 roam/daily/ (236 个文件), 必须一起
+        ;; 排除 —— 「journal 不进 agenda」是铁律。它比前两条更隐蔽: 日记是
+        ;; 加密的, 进了 agenda 不会报错, 只会静默拖慢并让 236 篇日记出现在
+        ;; 任务视图里。
+        ;; ⚠️ 判据必须**内联**在这里, 不能改成调用
+        ;; `my/org-record-library-file-p': 那个函数定义在本文件更靠后的块里,
+        ;; 而 `org-agenda-files' 是**加载期**求值的, 调用它必报 void-function。
+        org-agenda-files (append '("~/org/inbox.org" "~/org/.calendar")
+                                 (seq-remove
+                                  (lambda (f)
+                                    (let ((f (expand-file-name f)))
+                                      (or (string-prefix-p
+                                           (expand-file-name "roam/media/" org-directory)
+                                           f)
+                                          (string-prefix-p
+                                           (expand-file-name "roam/read/" org-directory)
+                                           f)
+                                          (string-prefix-p
+                                           (expand-file-name "roam/daily/" org-directory)
+                                           f))))
+                                  (directory-files-recursively
+                                   "~/org/roam" "\\.org\\'")))
         org-default-notes-file "~/org/inbox.org")
 
   ;; Archive
@@ -1260,66 +2207,87 @@ With a numeric prefix WIDTH, also emit an #+ATTR_ORG :width line."
                       (org-agenda-skip-function 'my/skip-habit))))))))
 #+end_src
 
-** Zenburn 下的 agenda 配色
+** Agenda 配色（明暗自适应）
 
-doom-themes 里没有 =org-agenda-*= 的 face 定义（=doom-themes-ext-org.el= 只管
-org-level / todo / done）, 所以切到 =doom-zenburn= 后 agenda 用的是 org 自带的
-X11 色名: =org-agenda-structure= 是 =LightSkyBlue= (#87CEFA), =org-time-grid= 是
-=LightGoldenrod= (#EEDD82), =org-agenda-date= 继承前者。这两个色不属于 zenburn 色板,
-在 #3F3F3F 上显得"外来", 而且时间网格那个亮黄会把整屏节奏抢走。
+*更正一条旧结论*: 之前这里写「doom-themes 里没有 =org-agenda-*= 的 face 定义」是**错的**。
+=doom-themes-base.el:1217-1229= 定义了全套, 其中:
 
-下面把它们换回 zenburn 原生色（色值取自 =doom-zenburn-theme.el= 的 extra colors 段）,
-并拉开日期 / Clocked / Scheduled / Deadline 各行的对比度。
+#+begin_example
+(org-time-grid :foreground comments)
+#+end_example
 
-注意: 必须用**带主题参数**的 =custom-theme-set-faces!= , 不能用裸 =custom-set-faces!= 。
-后者写进 =user= theme, 对**所有**主题生效, 切回 ef-light 时这套暗色会糊死浅色底。
+这才是时间线看不见的真根因 —— =doom-omarchy= 的 =comments= 取
+=(if doom-omarchy-brighter-comments base5 base1)=, 默认 =base1 = #4d5063=,
+在 =#1e1e2e= 底上对比度只有 **2.06:1**; 而 =org-agenda-current-time= 继承
+=org-time-grid=, 那条「◀── now ──」指示线跟着一起隐形了。
+
+（顺带一提: 旧注释里说的 X11 =LightGoldenrod= 那是**非 doom 主题**才走到的默认值,
+切到 doom 家族后压根不会用到。）
+
+下面按主题明暗重算: 深底把语义色往前景提亮, 浅底往背景压暗 —— =alpha= 在两种
+情况下都表示「要多接近主题主色」, 语义对称, 不用为深浅各维护一套色值。
+
+注意: 仍然必须用**带主题参数**的方式（这里直接用 =custom-theme-set-faces= +
+=doom-theme= 变量）, 不能用裸 =custom-set-faces!= 。后者写进 =user= theme,
+对**所有**主题生效, 切回浅色主题时这套配色会糊死白底。
 #+begin_src emacs-lisp
 (after! org
-  (custom-theme-set-faces! 'doom-zenburn
-    ;; 结构头 "Day-agenda (W39):"   ← 原本 LightSkyBlue
-    '(org-agenda-structure :foreground "#8CD0D3" :weight bold)    ; blue
-    ;; 日期行
-    '(org-agenda-date :foreground "#9FC59F")                      ; green+2
-    '(org-agenda-date-today :foreground "#F0DFAF" :weight bold)   ; yellow
-    '(org-agenda-date-weekend :foreground "#DC8CC3" :weight bold) ; magenta
-    '(org-agenda-date-weekend-today :foreground "#DC8CC3" :weight bold)
-    ;; 时间网格 "8:00......"  ← 原本 LightGoldenrod, 压暗
-    '(org-time-grid :foreground "#5F7F5F")                        ; green-2
-    '(org-agenda-current-time :foreground "#DCA3A3")              ; red+1
-    ;; Clocked 行（开 log mode 后会大量出现）
-    '(org-agenda-clocking :foreground "#93E0E3")                  ; cyan
-    ;; 已完成
-    '(org-agenda-done :foreground "#656555")                      ; fg-1
-    ;; Scheduled / Deadline 前缀
-    '(org-scheduled :foreground "#94BFF3")                        ; blue+1
-    '(org-scheduled-today :foreground "#8CD0D3" :weight bold)
-    '(org-scheduled-previously :foreground "#CC9393" :weight bold) ; red
-    '(org-upcoming-deadline :foreground "#DFAF8F" :weight bold)    ; orange
-    '(org-warning :foreground "#CC9393" :weight bold)
-    ;; org-super-agenda 的分组标题（daily / weekly 视图在用）
-    '(org-super-agenda-header :foreground "#F0DFAF" :weight bold)))
+  (defun my/org-agenda-faces-apply ()
+    "重算 agenda 配色。挂 `doom-load-theme-hook', 换主题时自动跟随。
+
+时间网格是背景性元素, 够看就行 (目标 ~3:1); 当前时间指示线要能一眼扫到
+(目标 ~6:1); 已完成项收敛, 别抢视线。"
+    (let* ((bg (or (doom-color 'bg) "#000000"))
+           (fg (or (doom-color 'fg) "#ffffff"))
+           (dark-p (< (my/color-luminance bg) 0.5))
+           (mix (lambda (hue alpha)
+                  (doom-blend (if (eq hue 'fg) fg (doom-color hue))
+                              (if dark-p bg fg)
+                              alpha)))
+           (subtle (lambda (alpha) (doom-blend fg bg alpha))))
+      (custom-theme-set-faces
+       doom-theme
+       ;; 时间网格 "8:00 ┄┄┄┄┄"   ← comments(base1) 2.06:1 → ~3.1:1
+       `(org-time-grid ((t (:foreground ,(funcall subtle (if dark-p 0.42 0.55))))))
+       ;; 当前时间指示线 "◀── now ──"   ← 原本继承 org-time-grid 一起隐形
+       `(org-agenda-current-time ((t (:foreground ,(funcall mix 'red 0.90) :weight bold))))
+       ;; 日期行
+       `(org-agenda-date ((t (:foreground ,(funcall mix 'violet 0.85) :weight bold))))
+       `(org-agenda-date-today ((t (:foreground ,(funcall mix 'yellow 0.95) :weight bold))))
+       `(org-agenda-date-weekend ((t (:foreground ,(funcall mix 'violet 0.60) :weight bold))))
+       `(org-agenda-date-weekend-today ((t (:foreground ,(funcall mix 'yellow 0.95) :weight bold))))
+       ;; 结构头 "Day-agenda (W39):"
+       `(org-agenda-structure ((t (:foreground ,fg :weight bold))))
+       ;; Clocked 行（开 log mode 后会大量出现）
+       `(org-agenda-clocking ((t (:foreground ,(funcall mix 'cyan 0.85)))))
+       ;; 已完成 —— 收敛
+       `(org-agenda-done ((t (:foreground ,(funcall mix 'green 0.42)))))
+       ;; Scheduled / Deadline 前缀
+       `(org-scheduled ((t (:foreground ,fg))))
+       `(org-scheduled-today ((t (:foreground ,(funcall mix 'blue 0.80) :weight bold))))
+       `(org-scheduled-previously ((t (:foreground ,(funcall mix 'red 0.90) :weight bold))))
+       `(org-upcoming-deadline ((t (:foreground ,(funcall mix 'orange 0.90) :weight bold))))
+       `(org-warning ((t (:foreground ,(funcall mix 'red 0.90) :weight bold))))
+      ;; org-super-agenda 的分组标题（daily / weekly 视图在用）
+      (when (facep 'org-super-agenda-header)
+        (custom-theme-set-faces
+         doom-theme
+         `(org-super-agenda-header ((t (:foreground ,(funcall mix 'yellow 0.95) :weight bold)))))))))
+
+  (add-hook 'doom-load-theme-hook #'my/org-agenda-faces-apply))
 #+end_src
 
 ** Capture helpers
 #+begin_src emacs-lisp
 (after! org
   ;; ---- Append Note helper ----
-  (defun my/append-note-goto-bottom ()
-    "Move point to end of append-note.org with date separator."
-    (let ((today-sep (format-time-string "-- %Y-%m-%d --")))
-      (goto-char (point-max))
-      (unless (save-excursion
-                (goto-char (point-min))
-                (search-forward today-sep nil t))
-        (unless (bolp) (insert "\n"))
-        (insert "\n" today-sep "\n")))
-    (goto-char (point-max)))
-
+  ;; 2026-10-16: append-note.org 已并入 inbox.org (内容在「速记流」heading 下),
+  ;; 速记现在直接往 inbox 追加裸 heading, 不再需要日期分隔符与跳转函数。
   (defun my/append-note-open-at-end-h ()
-    "Always place point at the end when visiting append-note.org."
+    "打开 inbox.org 时把光标放到末尾 (速记流的追加位置)。"
     (when (and buffer-file-name
                (file-equal-p buffer-file-name
-                             (expand-file-name "~/org/append-note.org")))
+                             (expand-file-name "~/org/inbox.org")))
       (goto-char (point-max))))
 
   (add-hook 'find-file-hook #'my/append-note-open-at-end-h t)
@@ -1378,35 +2346,14 @@ X11 色名: =org-agenda-structure= 是 =LightSkyBlue= (#87CEFA), =org-time-grid=
     (or (re-search-backward "^\\* My Notes" nil t) (goto-char (point-max)))
     (forward-line 1)))
 
-(defun my/protocol-note-target ()
-  "Target for org-capture 'pn': reference note from org-protocol."
-  (let* ((url   (or (plist-get org-store-link-plist :link)
-                    (plist-get org-store-link-plist :url) ""))
-         (title (or (plist-get org-store-link-plist :description)
-                    (read-string "Title: ")))
-         (slug  (replace-regexp-in-string
-                 "^-\\|-$" ""
-                 (replace-regexp-in-string
-                  "[^a-zA-Z0-9一-鿿]+" "-"
-                  (downcase (string-trim title)) t t)))
-         (id    (format-time-string "%Y%m%dT%H%M%S"))
-         (file  (expand-file-name (format "notes/%s--%s__read.org" id slug) org-directory)))
-    (set-buffer (org-capture-target-buffer file))
-    (when (= (buffer-size) 0)
-      (insert (format "#+title: %s\n#+date: [%s]\n#+filetags: :read:\n#+identifier: %s\n\n* Source\n%s\n\n* Summary\n\n* My Notes\n"
-                      title (format-time-string "%Y-%m-%d %a") id url)))
-    (goto-char (point-max))
-    (or (re-search-backward "^\\* My Notes" nil t) (goto-char (point-max)))
-    (forward-line 1)))
 #+end_src
 
 ** Capture templates
 #+begin_src emacs-lisp
 (after! org
   (setq org-capture-templates
-        '(("a" "Append Note" plain
-           (file+function "~/org/append-note.org" my/append-note-goto-bottom)
-           "- %?"
+        '(          ("a" "Append Note" entry (file "~/org/inbox.org")
+           "* %?"
            :empty-lines 1 :jump-to-captured t)
           ("i" "Inbox" entry (file "~/org/inbox.org")
            "* %^{标题}  %^g\n:PROPERTIES:\n:CREATED: %U\n:END:\n\n%?"
@@ -1414,50 +2361,63 @@ X11 色名: =org-agenda-structure= 是 =LightSkyBlue= (#87CEFA), =org-time-grid=
           ("t" "Task" entry (file "~/org/inbox.org")
            "* TODO %?\n:PROPERTIES:\n:CREATED: %U\n:END:\n" :empty-lines 1)
           ("j" "Journal" entry
-           (file my/journal-capture-target)
+           (function my/journal-capture-target)
            "* %<%H:%M>\n%?"
            :empty-lines 1 :jump-to-captured t)
           ("m" "Media")
+          ;; 2026-10-18 二次改: media.org 已拆成 roam/media/ 下的 9 个文件,
+          ;; 每个文件 = 一个类别。于是 olp 只剩一级 (桶名), 模板层级 `***' 降为 `**'
+          ;; —— 照旧写 `***' 会让新条目挂在 `* 想看' 的孙层, 与存量 640 条错位。
+          ;;   1) 状态写 :状态: 属性, 不写 TODO 关键字 —— P3 已把 media 的全部
+          ;;      伪 TODO 迁成属性 (未开始/已完成/进行中/已放弃); 模板继续写
+          ;;      `*** TODO 片名' 会让新条目用第二套状态机制, agenda 与抽屉
+          ;;      里的 :状态: 互不认账。
+          ;;   2) 必须带 :ID: —— 没有 ID 的 heading 不会进 org-roam 的 nodes 表,
+          ;;      capture 出来的片子搜不到、也连不上 backlinks。
           ("mm" "电影 · 想看" entry
-           (file+olp "~/org/notes/20260101T000020--media-collection__index.org" "影视动漫" "电影" "想看")
-           "**** TODO %^{片名}\n:PROPERTIES:\n:添加时间: %U\n:END:\n%?"
+           (file+olp "~/org/roam/media/20261014000247-电影记录.org" "想看")
+           "** %^{片名}\n:PROPERTIES:\n:ID:       %(org-id-new)\n:状态: 未开始\n:添加时间: %U\n:END:\n%?"
            :empty-lines 1 :jump-to-captured t)
           ("mM" "电影 · 看完" entry
-           (file+olp "~/org/notes/20260101T000020--media-collection__index.org" "影视动漫" "电影" "看完")
-           "**** DONE %^{片名}\n:PROPERTIES:\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
+           (file+olp "~/org/roam/media/20261014000247-电影记录.org" "看完")
+           "** %^{片名}\n:PROPERTIES:\n:ID:       %(org-id-new)\n:状态: 已完成\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
            :empty-lines 1 :jump-to-captured t)
           ("mt" "电视剧 · 想看" entry
-           (file+olp "~/org/notes/20260101T000020--media-collection__index.org" "影视动漫" "电视剧" "想看")
-           "**** TODO %^{片名}\n:PROPERTIES:\n:添加时间: %U\n:END:\n%?"
+           (file+olp "~/org/roam/media/20261014000248-电视剧记录.org" "想看")
+           "** %^{片名}\n:PROPERTIES:\n:ID:       %(org-id-new)\n:状态: 未开始\n:添加时间: %U\n:END:\n%?"
            :empty-lines 1 :jump-to-captured t)
           ("mT" "电视剧 · 看完" entry
-           (file+olp "~/org/notes/20260101T000020--media-collection__index.org" "影视动漫" "电视剧" "看完")
-           "**** DONE %^{片名}\n:PROPERTIES:\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
+           (file+olp "~/org/roam/media/20261014000248-电视剧记录.org" "看完")
+           "** %^{片名}\n:PROPERTIES:\n:ID:       %(org-id-new)\n:状态: 已完成\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
            :empty-lines 1 :jump-to-captured t)
           ("ma" "动漫 · 想看" entry
-           (file+olp "~/org/notes/20260101T000020--media-collection__index.org" "影视动漫" "动漫" "想看")
-           "**** TODO %^{片名}\n:PROPERTIES:\n:添加时间: %U\n:END:\n%?"
+           (file+olp "~/org/roam/media/20261014000249-动漫记录.org" "想看")
+           "** %^{片名}\n:PROPERTIES:\n:ID:       %(org-id-new)\n:状态: 未开始\n:添加时间: %U\n:END:\n%?"
            :empty-lines 1 :jump-to-captured t)
           ("mA" "动漫 · 看完" entry
-           (file+olp "~/org/notes/20260101T000020--media-collection__index.org" "影视动漫" "动漫" "看完")
-           "**** DONE %^{片名}\n:PROPERTIES:\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
+           (file+olp "~/org/roam/media/20261014000249-动漫记录.org" "看完")
+           "** %^{片名}\n:PROPERTIES:\n:ID:       %(org-id-new)\n:状态: 已完成\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
            :empty-lines 1 :jump-to-captured t)
           ("b" "Books")
+          ;; 2026-10-19: read.org 拆成 roam/read/ 下 17 个文件。原 olp
+          ;; ("书" "待阅读" / "阅读中") 本来就指向不存在的标题 (这套模板从没被用过,
+          ;; 全库 0 个 :来源:-by-capture 条目), 拆完后连文件都没了。
+          ;; 现在的实际结构: `我想读的书单' 一个文件, 下面是四个**类型桶**
+          ;; (`* 网文书单 / * 小说书单 / * 非虚构书单 / * 理财书单'), 条目是 `** 书名'。
+          ;; 于是模板层级 `***' 降为 `**', olp 只剩桶名一级。
+          ;; 桶名只能写死一个 (capture 的 target 在 `%^{类型}' 求值之前就解析完了),
+          ;; 这里默认落 `小说书单'; 要按类型分桶就得拆成 4 个键位, 由 Sean 定。
           ("bb" "书 · 待阅读" entry
-           (file+olp "~/org/notes/20260101T000024--书__index_read.org" "待阅读")
-           "*** TODO %^{书名}\n:PROPERTIES:\n:作者: %^{作者}\n:类型: %^{类型|小说|非虚构|理财|网文|漫画|其他}\n:来源: %^{来源|微信读书|豆瓣|Z-Library|实体书|其他}\n:添加时间: %U\n:END:\n%?"
+           (file+olp "~/org/roam/read/20260101000024-我想读的书单.org" "小说书单")
+           "** %^{书名}\n:PROPERTIES:\n:ID:       %(org-id-new)\n:状态: 未开始\n:作者: %^{作者}\n:类型: %^{类型|小说|非虚构|理财|网文|漫画|其他}\n:来源: %^{来源|微信读书|豆瓣|Z-Library|实体书|其他}\n:添加时间: %U\n:END:\n%?"
            :empty-lines 1 :jump-to-captured t)
           ("bB" "书 · 阅读中" entry
-           (file+olp "~/org/notes/20260101T000024--书__index_read.org" "阅读中")
-           "*** READING %^{书名}\n:PROPERTIES:\n:作者: %^{作者}\n:类型: %^{类型|小说|非虚构|理财|网文|漫画|其他}\n:来源: %^{来源|微信读书|豆瓣|Z-Library|实体书|其他}\n:添加时间: %U\n:END:\n%?"
+           (file+olp "~/org/roam/read/20260101000024-我想读的书单.org" "小说书单")
+           "** %^{书名}\n:PROPERTIES:\n:ID:       %(org-id-new)\n:状态: 在读\n:作者: %^{作者}\n:类型: %^{类型|小说|非虚构|理财|网文|漫画|其他}\n:来源: %^{来源|微信读书|豆瓣|Z-Library|实体书|其他}\n:添加时间: %U\n:END:\n%?"
            :empty-lines 1 :jump-to-captured t)
           ("pl" "Protocol: Read later" entry (file "~/org/inbox.org")
            "* TODO %:annotation\n:PROPERTIES:\n:CREATED: %U\n:END:\n%i\n"
            :immediate-finish t :jump-to-captured t)
-          ("pn" "Protocol: Note → references/" plain
-           (function my/protocol-note-target)
-           "#+begin_quote\n%i\n#+end_quote\n%?"
-           :jump-to-captured t)
           )))
 #+end_src
 
@@ -1472,22 +2432,212 @@ X11 色名: =org-agenda-structure= 是 =LightSkyBlue= (#87CEFA), =org-time-grid=
         (when (file-regular-p path)
           (push path result)))))
 
-  (defun my/org-notes-files () (my/org-top-level-org-files "~/org/notes/"))
+  ;; 2026-10-18 退役: ~/org/notes/ 是 denote 时代的目录, 早已清空,
+  ;; 笔记真源是 ~/org/roam/。保留这个名字免得破坏任何存量引用,
+  ;; 语义已改成「roam 的独立节点」—— 与 my/org-roam-node-files 同源。
+  (defalias 'my/org-notes-files #'my/org-roam-node-files)
+
+  ;;; --- org-id: ID 统一为 denote 风格时间戳 (2026-10-19) ----------------
+  ;; org-id-method 默认是 'uuid, 造出 21df7539-5321-58f1-… 这种随机串 —— 与
+  ;; 文件名 (`20260430181117-slug.org')、heading CUSTOM_ID (`my/org-heading-id'
+  ;; 的 %Y%m%dT%H%M%S)、附件名 (`20260425--slug.pdf') 三处时间戳 slug 全都对不上,
+  ;; 是这套体系里唯一的例外。改成 'ts 并去掉默认的 .%6N 尾巴, 于是
+  ;; org-id-get-create 产出的形态与 my/org-heading-id 完全一致。
+  ;;
+  ;; 已知限制 (org-id.el 的 org-id-new, 实测):
+  ;;   ts 分支**不做唯一性检查**, 就一句 (format-time-string org-id-ts-format)。
+  ;;   砍到秒级 = 同一秒内建两个 ID 会撞。
+  ;;   → **2026-10-21 已解决**: 下面给 org-id-new 加了 :around advice,
+  ;;     撞了按 denote 口径 +1 秒顺延。见 `my/org-id-new-unique'。
+  ;;
+  ;; 存量 (2026-10-19 批量迁移, 脚本见 ~/org/.agent/id-migrate/):
+  ;;   roam/ 115 个节点的 :ID: 已从 UUID 改写为「文件名时间戳」, 并给缺的 16 个
+  ;;   补齐 :CUSTOM_ID: —— 现在 :ID: = :CUSTOM_ID: = 文件名时间戳, 三者统一。
+  ;;   未动: roam/daily/ 236 个 (GPG 密文, 且是人的领地) 与 heading 级 :ID:
+  ;;   (1030 个 UUID —— heading 没有时间基准, 硬造时间戳等于伪造创建时间, 不干)。
+  (require 'org-id)
+  (setq org-id-method 'ts
+        org-id-ts-format "%Y%m%dT%H%M%S")
+
+  ;;; --- ts ID 唯一性: 同秒撞车则 +1 秒顺延 (2026-10-21) -----------------
+  ;; org-id-new 的 ts 分支不做唯一性检查, 砍到秒级后同一秒内建两个节点必然撞 ID,
+  ;; 而 org-roam 要求 ID 唯一, 撞了会**静默**坏掉节点查找。
+  ;; 口径照抄 denote (denote.el 的 `denote--find-first-unused-id-as-date'):
+  ;;   "If ID is already used, increment it 1 second at a time until an
+  ;;    available id is found."
+  ;; 关键: 是**先查占用表再顺延**, 不是无脑 +1 —— 2026-10-21 修那 7 个 17 位 ID 时
+  ;; 第一版硬编码 +i 就撞上了「沧浪之水」已占用的 20261017T234257。
+  ;; 判"已占用"看三处, 缺一不可:
+  ;;   ① `my/org-id-issued' —— 本次会话已发出的 ID。org-id-locations 只在文件
+  ;;      **保存后**才更新, 同一秒内连续建两个节点时它还查不到, 必须自己记账。
+  ;;   ② `org-id-locations' —— 落盘过的 (.orgids, 是 hash-table 不是 alist,
+  ;;      用 `(length ...)' 会报 sequencep)。
+  ;;   ③ roam db 的 nodes 表 —— db 没加载时用 ignore-errors 跳过。
+  (defvar my/org-id-issued (make-hash-table :test #'equal)
+    "本次会话已发出的 ts ID。org-id-locations 落盘前的去重靠它。")
+
+  (defun my/org-id-used-p (id)
+    "ID 已被占用则返回非 nil。"
+    (or (gethash id my/org-id-issued)
+        (and (hash-table-p org-id-locations) (gethash id org-id-locations))
+        (and (fboundp 'org-roam-db-query)
+             (ignore-errors
+               (org-roam-db-query [:select id :from nodes :where (= id $s1)] id)))))
+
+  (defun my/org-id-new-unique (orig &optional prefix)
+    "org-id-new 的 :around advice: ts 模式下保证 ID 全局唯一。
+
+被占用就按 denote 口径 +1 秒顺延, 上限 1000 次防死循环
+(denote 用 10000; 本库没那么密)。非 ts 模式、或 ID 不是纯时间戳形态
+(如 UUID) 时原样返回, 不干预。"
+    (let ((id (funcall orig prefix)))
+      (if (not (and (eq org-id-method 'ts)
+                    (string-match-p "\\`[0-9]\\{8\\}T[0-9]\\{6\\}\\'" id)))
+          id
+        (let ((cur id) (i 0))
+          (while (and (my/org-id-used-p cur) (< i 1000))
+            (setq cur (format-time-string
+                       org-id-ts-format
+                       (time-add (date-to-time cur) 1))
+                  i (1+ i)))
+          (puthash cur t my/org-id-issued)
+          cur))))
+
+  (advice-add 'org-id-new :around #'my/org-id-new-unique)
+  ;; ⚠ 已知边界: 只保证了 **:ID:** 唯一。文件名走的是 org-roam 自己的模板
+  ;;   `%<%Y%m%d%H%M%S>-${slug}.org', 与 ID 分开生成 —— 极端情况 (同一秒 +
+  ;;   slug 完全相同) 下文件名仍会撞, 且此时顺延后 ID 与文件名会差 1 秒,
+  ;;   破坏「:ID: = :CUSTOM_ID: = 文件名时间戳」的三者统一。
+  ;;   触发概率极低 (要同秒 + 同名), 且 org-roam 遇到已存在文件会报错而非
+  ;;   静默覆盖。要彻底统一得让文件名模板也走同一个唯一化函数, 待定。
+
+  ;;; --- heading 级 ID (2026-10-16 起) ----------------------------------
+  ;; 迁移到根目录大文件后, 一篇笔记 = 一个 subtree, 不再是 denote 文件。
+  ;; denote 那套 heading 链接 `[[denote:文件ID::#heading-CUSTOM-ID]]' 依赖
+  ;; 「文件 ID 从文件名取」, notes.org 不是 denote 文件 → 该机制已失效。
+  ;; 现在改用 org 原生: heading 的 CUSTOM_ID + `[[#ID]]' 链接。
+  ;;
+  ;; 注意 ID 只在「要被链接/要进导航」时才需要, 不必每个 heading 都发
+  ;; —— 批量发 ID 是 denote 的思路, 大文件体系下按需加才对 (Voit 第 4 条)。
+  (defun my/org-heading-id (&optional add-to-nav)
+    "给当前 heading 设一个 denote 风格的时间戳 CUSTOM_ID。
+
+已存在则复用原值, 不覆盖。带前缀参数 (C-u) 时, 同时把
+`- [[#ID][标题]]' 追加进本文件顶部 `* 导航' 列表的末尾。"
+    (interactive "P")
+    (save-excursion
+      (org-back-to-heading t)
+      (let* ((existing (org-entry-get nil "CUSTOM_ID"))
+             (id (or existing (format-time-string "%Y%m%dT%H%M%S")))
+             (title (substring-no-properties (org-get-heading t t t t))))
+        (org-set-property "CUSTOM_ID" id)
+        (when add-to-nav
+          (condition-case err
+              (my/org--nav-add-link id title)
+            (error (message "导航未更新: %s" (error-message-string err)))))
+        (message (if existing
+                     "CUSTOM_ID 已存在: %s"
+                   "CUSTOM_ID 已设置: %s")
+                 id)
+        id)))
+
+  (defun my/org--nav-add-link (id title)
+    "在本文件 `* 导航' 列表末尾追加一条 `- [[#ID][TITLE]]'。"
+    (save-excursion
+      (goto-char (point-min))
+      ;; 注意: 必须是 `\\s-*' 或 `[[:space:]]*', 不能写成 `\\s*' ——
+      ;; 后者是「一个语法类为 * 的字符」, 不是「零个或多个空白」, 永远匹配不上。
+      (unless (re-search-forward "^\\* 导航[[:space:]]*$" nil t)
+        (user-error "当前文件没有 `* 导航' heading"))
+      (let ((end (save-excursion
+                   (if (re-search-forward "^\\* " nil t)
+                       (line-beginning-position)
+                     (point-max)))))
+        (goto-char end)
+        (skip-chars-backward " \t\n")
+        (beginning-of-line)
+        ;; 继承「上一条」的缩进: notes.org 的导航是分组嵌套的
+        ;; (- Emacs / "  - [[...]]")，照抄缩进才会落进最后一组,
+        ;; 否则会冒出一个新的顶层组名。
+        (let ((indent (if (looking-at "\\([ \t]*\\)[-+] ")
+                          (match-string-no-properties 1)
+                        "")))
+          (end-of-line)
+          (insert (format "\n%s- [[#%s][%s]]" indent id title))))))
+
+  ;; 2026-10-18 退役: 六个根主文件已并入 ~/org/roam/, refile 跟着改。
+  ;; refile 是**写入通道**, 必须能到达记录库 (把 inbox 里的「想看这部」refile
+  ;; 进 roam/media.org 是刚需), 所以它**包含** media/read —— 与
+  ;; org-agenda-files 刻意不同 (agenda 是扫描通道, 不该看记录)。
+  ;; 三条 target 按「文件里装多少层」分工:
+  ;;   inbox        :maxlevel 1 —— 收件箱, 不往深层塞
+  ;;   file-node    :maxlevel 2 —— roam 的 85 个 file-per-node 节点
+  ;;   media/read   :maxlevel 3 —— 两个大文件内部的分类层 (** 想看 / ** 看完 等)
+  ;; 2026-10-18 三改: media.org 拆成 roam/media/ 下 9 个文件。记录库从「两个大文件」
+  ;; 变成「两个目录」, 判据统一成 my/org-record-library-file-p。
+  ;; 2026-10-19 四改: read.org 也拆成 roam/read/ (17 个文件), 判据里去掉 read.org
+  ;; 文件名特例, 换成目录前缀 —— 漏改会让 17 个记录库文件全落进
+  ;; my/org-roam-node-files, refile 时 maxlevel 从 3 掉到 2 (书单条目挂不上)。
+  (defun my/org-record-library-file-p (f)
+    "F 是记录库文件吗? ~/org/roam/media/ 下的 9 个 + ~/org/roam/read/ 下的 17 个。"
+    (let ((f (expand-file-name f)))
+      (or (string-prefix-p (expand-file-name "roam/media/" org-directory) f)
+          (string-prefix-p (expand-file-name "roam/read/" org-directory) f))))
+
+  (defun my/org-daily-file-p (f)
+    "F 是某天的日记吗? ~/org/roam/daily/YYYY-MM-DD.org。
+
+2026-10-19 journal 拆进 roam/daily/ 后加的。日记虽然是 roam 节点
+(有 :ID:, 进 db), 但它有三个特殊性质, 决定了它要跟其它节点分开对待:
+  1. **加密** —— 任何按路径批量读文件的东西 (org-ql / consult-notes /
+     `my/org-attach--scan-files') 读到的是二进制, 轻则乱码、重则报错;
+  2. **不进 agenda** —— 「journal 不是待处理队列」是铁律;
+  3. **不是 refile 目的地** —— 往回流的方向是反的: 日记里「脱离今天仍有
+     独立价值」的东西应该 refile **出去** 到 roam, 而不是往某一天里塞。
+     再说 236 个候选会把 refile 列表淹掉。"
+    (let ((f (expand-file-name f)))
+      (string-prefix-p (expand-file-name "roam/daily/" org-directory) f)))
+
+  (defun my/org-roam-node-files ()
+    "roam/ 下的独立节点文件 (file-per-node), 不含 media/read 记录库, 也不含 daily。
+
+排除 daily 的理由见 `my/org-daily-file-p' —— 这里是最关键的一处: 这份列表
+同时喂给 `org-refile-targets' 与 `my/org-org-notes-files', 漏掉的话
+236 个加密日记文件会被 org-ql 逐个当成 org 文件读进去。"
+    (seq-remove (lambda (f) (or (my/org-record-library-file-p f)
+                                (my/org-daily-file-p f)))
+                (directory-files-recursively
+                 (expand-file-name "roam/" org-directory) "\\.org\\'")))
+
+  (defun my/org-roam-bulk-files ()
+    "roam/ 下的记录型大文件: media/ 下 9 个 + read/ 下 17 个。
+每个文件内部还是几十上百个 heading 节点 (Top250 420 个、书单 199 个), 所以
+:maxlevel 仍要 3 —— 书单是 `文件 > * 网文书单 > ** 书名' 三层。"
+    (append (directory-files (expand-file-name "roam/media/" org-directory) t "\\.org\\'")
+            (directory-files (expand-file-name "roam/read/" org-directory) t "\\.org\\'")))
 
   (setq org-refile-targets
         '(("~/org/inbox.org" :maxlevel . 1)
-          ("~/org/append-note.org" :maxlevel . 1)
-          (my/org-notes-files :maxlevel . 2)))
+          (my/org-roam-node-files :maxlevel . 2)
+          (my/org-roam-bulk-files :maxlevel . 3)))
   (setq org-refile-use-outline-path 'file
         org-outline-path-complete-in-steps nil
         org-refile-allow-creating-parent-nodes 'confirm
         org-refile-use-cache nil)
 
   ;; ---- Tags ----
-  (setq org-tag-alist '((:startgroup)
-                        ("work" . ?w) ("personal" . ?p) ("learning" . ?l)
-                        (:endgroup)
-                        ("emacs" . ?e) ("ai" . ?a) ("tools" . ?t))))
+  ;; 与 denote keyword 白名单 my/known-keywords 共用单一真源, 详见文件名生成块,
+  ;; 不再手维护两份。SPC m q 弹出的 tag 列表 = 这里加上当前 buffer 已用过的 tag。
+  ;; 注意: 移除了原先 work/personal/learning 互斥组与单字母快选键; denote 体系
+  ;; 没有互斥概念, work 是唯一的工私分界标记, 不打 work 默认私人,
+  ;; 所以 personal/learning 两个旧 tag 不再出现。若想恢复快选键, 单独建
+  ;; my/org-tag-fast-keys 再 merge 即可。
+  ;; org-tag-alist 的元素**必须是 cons** (TAG . 快选键), 裸字符串过不了
+  ;; org--tag-add-to-alist 的 pcase —— agenda 构建到第一个文件就直接报
+  ;; `Invalid association in tag alist: "work"' (2026-10-17 实测)。
+  ;; (mapcar #'list ...) 包成 (("work") ("gamedev") ...) = `#+TAGS:' 行的
+  ;; 无快选键形态, 与 org-tag-string-to-alist 的产物同构, 顺带完成深拷贝。
+  (setq org-tag-alist (mapcar #'list my/known-keywords)))
 #+end_src
 
 ** Babel: Image dir & Bash on Windows
@@ -1552,11 +2702,35 @@ X11 色名: =org-agenda-structure= 是 =LightSkyBlue= (#87CEFA), =org-time-grid=
 ** Media library auto-rebucket
 #+begin_src emacs-lisp
 (after! org
+  ;; 2026-10-16: 电影 / 电视剧 / 动漫 已合并进单个 ~/org/media.org,
+  ;; 结构变成 `* 电影 > ** 想看 > *** TODO 片名`。
+  ;; 「类别」现在一律从条目所在子树的**祖父标题**取 (见
+  ;; my/media-org-current-entry-context), 所以「每文件一个类别」的映射表作废 ——
+  ;; 一个文件装不下三个类别。
+  ;; 2026-10-18 三改: media.org 拆成 roam/media/ 下的 9 个文件 (一个文件 = 一个类别)。
+  ;; 层级跟着抬一级 —— `* 电影记录 > ** 想看 > *** 片名' 变成
+  ;; `文件 电影记录.org > * 想看 > ** 片名', 于是:
+  ;;   · 条目只剩一个父标题 (桶), 没有祖父 (类别) 了
+  ;;   · 类别改从**文件名**取 (my/media-org-file-category 不再恒 nil)
+  ;;   · find-section-position 找不到类别 heading 时会退回全 buffer 搜桶名, 正好对
+  (defconst my/media-org-dir
+    (expand-file-name "media/" (expand-file-name "roam/" org-directory)))
+
   (defun my/media-org-file-p ()
-    "Return non-nil when visiting the media library file."
-    (and (buffer-file-name)
-         (file-equal-p (expand-file-name "~/org/notes/20260101T000020--media-collection__index.org")
-                       (expand-file-name (buffer-file-name)))))
+    "Return non-nil when visiting a file under ~/org/roam/media/."
+    (and buffer-file-name
+         (string-prefix-p my/media-org-dir (expand-file-name buffer-file-name))))
+
+  (defun my/media-org-file-category ()
+    "类别 = 文件名去扩展名, 再剥掉 roam 时间戳前缀。
+文件名是 roam 默认命名 `%<%Y%m%d%H%M%S>-<slug>.org', 所以
+`20261014000247-电影记录' 的类别是 `电影记录' (时间戳只是排序用)。"
+    (and buffer-file-name
+         (let ((name (file-name-sans-extension
+                      (file-name-nondirectory buffer-file-name))))
+           (if (string-match "\\`[0-9]\\{14\\}-\\(.+\\)" name)
+               (match-string 1 name)
+             name))))
 
   (defun my/media-org-target-section-for-state (state)
     "Map TODO STATE to a media library section name."
@@ -1568,36 +2742,39 @@ X11 色名: =org-agenda-structure= 是 =LightSkyBlue= (#87CEFA), =org-time-grid=
       (_ nil)))
 
   (defun my/media-org-current-entry-context ()
-    "Return plist for the current media entry, or nil when not applicable."
+    "Return plist for the current media entry, or nil when not applicable.
+只看两级父标题: 父 = 桶 (想看/在看/看完/已放弃), 祖父 = 类别。
+文件里没有类别包装层时退回用文件对应的类别, 所以层级深浅都能用。"
     (save-excursion
       (org-back-to-heading t)
-      (when (= (org-outline-level) 4)
-        (let (category section)
-          (save-excursion
-            (while (org-up-heading-safe)
-              (pcase (org-outline-level)
-                (3 (setq section (org-get-heading t t t t)))
-                (2 (setq category (org-get-heading t t t t))))))
-          (when (and (member category '("电影" "电视剧" "动漫"))
-                     (member section '("想看" "在看" "看完" "已放弃")))
-            (list :category category :section section))))))
+      (let (category section)
+        (save-excursion
+          (when (org-up-heading-safe)
+            (setq section (org-get-heading t t t t))
+            (when (org-up-heading-safe)
+              (setq category (org-get-heading t t t t)))))
+        (when (member section '("想看" "在看" "看完" "已放弃"))
+          (let ((cat (or category (my/media-org-file-category))))
+            (when cat
+              (list :category cat :section section)))))))
 
   (defun my/media-org-find-section-position (category section)
-    "Return buffer position of CATEGORY -> SECTION in media.org."
+    "Return buffer position of CATEGORY -> SECTION, or nil.
+文件里找不到 CATEGORY 标题时 (单类别文件) 直接在全 buffer 找 SECTION。"
     (save-excursion
       (save-restriction
+        (widen)
         (goto-char (point-min))
-        (when (re-search-forward "^\\* 影视动漫$" nil t)
+        (when (re-search-forward (format "^\\*+ %s$" (regexp-quote category)) nil t)
           (org-narrow-to-subtree)
-          (goto-char (point-min))
-          (when (re-search-forward (format "^\\*\\* %s$" (regexp-quote category)) nil t)
-            (org-narrow-to-subtree)
-            (goto-char (point-min))
-            (when (re-search-forward (format "^\\*\\*\\* %s$" (regexp-quote section)) nil t)
-              (line-beginning-position)))))))
+          (goto-char (point-min)))
+        (when (re-search-forward (format "^\\*+ %s$" (regexp-quote section)) nil t)
+          (line-beginning-position)))))
 
   (defun my/media-org-rebucket-current-entry ()
-    "Move the current media entry to the section implied by its TODO state."
+    "Move the current media entry to the section implied by its TODO state.
+先定位目标桶再 cut: 旧版先 cut 后找, 桶缺失时会把条目剪掉又不贴上,
+静默丢条目 (原文件里「在看」桶根本不存在, PROG 状态必踩)。"
     (interactive)
     (when-let* ((context (and (my/media-org-file-p)
                               (my/media-org-current-entry-context)))
@@ -1605,9 +2782,11 @@ X11 色名: =org-agenda-structure= 是 =LightSkyBlue= (#87CEFA), =org-time-grid=
                 (category (plist-get context :category))
                 (current-section (plist-get context :section)))
       (unless (equal current-section target-section)
-        (let ((level (org-outline-level)))
-          (org-cut-subtree)
-          (when-let ((target-pos (my/media-org-find-section-position category target-section)))
+        (let ((level (org-outline-level))
+              (target-pos (my/media-org-find-section-position category target-section)))
+          (if (null target-pos)
+              (message "media: 找不到「%s / %s」桶, 条目留在原地" category target-section)
+            (org-cut-subtree)
             (goto-char target-pos)
             (org-end-of-subtree t t)
             (unless (bolp)
@@ -1620,11 +2799,18 @@ X11 色名: =org-agenda-structure= 是 =LightSkyBlue= (#87CEFA), =org-time-grid=
 ** Books library auto-rebucket
 #+begin_src emacs-lisp
 (after! org
+  ;; 2026-10-19: read.org 拆成 roam/read/ 下 17 个文件, 判据改成目录前缀。
+  ;; !! 注意下面的 rebucket 逻辑从 2026-10-16 起就是**死的**: 它认的是
+  ;; `* 书 > ** 待阅读 > *** 书名' 这套层级, 而实际结构一直是
+  ;; `* 我想读的书单 > * 网文书单 > ** 书名' (拆完后又降了一级);
+  ;; 条目状态也早已写成 `:状态:' 属性, 没有 TODO 关键字可触发 rebucket。
+  ;; 所以 my/books-org-current-entry-context 恒返回 nil —— 不会误伤, 但也不干活。
+  ;; 要真做「读完了自动挪桶」, 得按 `:状态:' 属性 + 实际桶名重写, 由 Sean 定。
   (defun my/books-org-file-p ()
-    "Return non-nil when visiting the books collection file."
-    (and (buffer-file-name)
-         (file-equal-p (expand-file-name "~/org/notes/20260101T000024--书__index_read.org")
-                       (expand-file-name (buffer-file-name)))))
+    "Return non-nil when visiting a file under ~/org/roam/read/."
+    (and buffer-file-name
+         (string-prefix-p (expand-file-name "roam/read/" org-directory)
+                          (expand-file-name buffer-file-name))))
 
   (defun my/books-org-target-section-for-state (state)
     "Map TODO STATE to a books collection section name."
@@ -1636,23 +2822,33 @@ X11 色名: =org-agenda-structure= 是 =LightSkyBlue= (#87CEFA), =org-time-grid=
       (_ nil)))
 
   (defun my/books-org-current-entry-context ()
-    "Return plist for the current books entry, or nil when not applicable."
+    "Return plist for the current books entry, or nil when not applicable.
+2026-10-16: 书合并进 read.org 后层级下移一级 ——
+`* 书 > ** 待阅读 > *** TODO 书名`, 故条目层级是 3 (原来是 2)。"
     (save-excursion
       (org-back-to-heading t)
-      (when (= (org-outline-level) 2)
-        (let (section)
+      (when (= (org-outline-level) 3)
+        (let (section category)
           (save-excursion
             (when (org-up-heading-safe)
-              (setq section (org-get-heading t t t t))))
-          (when (member section '("待阅读" "阅读中" "已读完" "已放弃"))
+              (setq section (org-get-heading t t t t))
+              (when (org-up-heading-safe)
+                (setq category (org-get-heading t t t t)))))
+          (when (and (member section '("待阅读" "阅读中" "已读完" "已放弃"))
+                     (equal category "书"))
             (list :section section))))))
 
   (defun my/books-org-find-section-position (section)
-    "Return buffer position of SECTION in books.org."
+    "Return buffer position of SECTION under the 书 subtree in read.org.
+先定位 `* 书' 再在子树内找 SECTION, 避免误命中漫画等其它子树里的同名标题。"
     (save-excursion
       (save-restriction
+        (widen)
         (goto-char (point-min))
-        (when (re-search-forward (format "^\\* %s$" (regexp-quote section)) nil t)
+        (when (re-search-forward "^\\* 书$" nil t)
+          (org-narrow-to-subtree)
+          (goto-char (point-min)))
+        (when (re-search-forward (format "^\\*+ %s$" (regexp-quote section)) nil t)
           (line-beginning-position)))))
 
   (defun my/books-org-rebucket-current-entry ()
@@ -1752,7 +2948,22 @@ X11 色名: =org-agenda-structure= 是 =LightSkyBlue= (#87CEFA), =org-time-grid=
 #+end_src
 
 ** Org Sync
+跨平台：Windows 走 =org-sync-runner.ps1=，Linux 走 =org-sync-runner.sh=。
+两个脚本都随 =~/org= 仓库同步过来，逻辑一致（坚果云 pull → git 提交 → push）。
 #+begin_src emacs-lisp
+(defun my/org-sync-command ()
+  "Return the argv list that runs the org sync script for this platform."
+  (if (eq system-type 'windows-nt)
+      (list "powershell" "-NoProfile" "-File"
+            (expand-file-name "~/org/.src/org-sync-runner.ps1"))
+    (list (expand-file-name "~/org/.src/org-sync-runner.sh"))))
+
+(defun my/org-sync-available-p ()
+  "Return non-nil when this platform's org sync script exists."
+  (let ((script (car (last (my/org-sync-command)))))
+    (or (file-executable-p script)
+        (file-readable-p script))))
+
 ;; 1. 保存 org 文件后, 延迟触发一次同步 (防抖, 30s)
 (defvar my/org-sync-timer nil)
 (defun my/org-sync-debounced ()
@@ -1761,9 +2972,9 @@ X11 色名: =org-agenda-structure= 是 =LightSkyBlue= (#87CEFA), =org-time-grid=
         (run-with-idle-timer
          30 nil
          (lambda ()
-           (start-process "org-sync" "*org-sync*"
-                          "powershell" "-NoProfile" "-File"
-                          (expand-file-name "~/org/.src/org-sync-runner.ps1"))))))
+           (when (my/org-sync-available-p)
+             (apply #'start-process "org-sync" "*org-sync*"
+                    (my/org-sync-command)))))))
 
 (add-hook 'after-save-hook
           (lambda ()
@@ -1775,18 +2986,19 @@ X11 色名: =org-agenda-structure= 是 =LightSkyBlue= (#87CEFA), =org-time-grid=
 ;; 2. 退出 Emacs 时后台触发一次同步（不阻塞退出）
 (defun my/org-sync-on-exit ()
   (ignore-errors
-    (let ((proc (start-process "org-sync-exit" nil
-                               "powershell" "-NoProfile" "-File"
-                               (expand-file-name "~/org/.src/org-sync-runner.ps1"))))
-      (set-process-query-on-exit-flag proc nil))))
+    (when (my/org-sync-available-p)
+      (let ((proc (apply #'start-process "org-sync-exit" nil
+                        (my/org-sync-command))))
+        (set-process-query-on-exit-flag proc nil)))))
 (add-hook 'kill-emacs-hook #'my/org-sync-on-exit)
 
 ;; 3. 手动命令
 (defun my/org-sync-now ()
   (interactive)
-  (async-shell-command
-   (format "powershell -NoProfile -File %s"
-           (expand-file-name "~/org/.src/org-sync-runner.ps1"))))
+  (if (my/org-sync-available-p)
+      (apply #'async-shell-command (my/org-sync-command))
+    (message "org sync script not found: %s"
+             (car (last (my/org-sync-command))))))
 #+end_src
 
 ** Pcache compatibility (Emacs 31)
@@ -1830,14 +3042,9 @@ X11 色名: =org-agenda-structure= 是 =LightSkyBlue= (#87CEFA), =org-time-grid=
     ;; 注意: 每一步都要求上一步产出的文件为空才继续, 避免覆盖已有截图。
     "sh -c 'if command -v xclip >/dev/null 2>&1; then xclip -selection clipboard -t image/png -o > \"$1\" 2>/dev/null || true; fi; if [ ! -s \"$1\" ]; then if command -v wl-paste >/dev/null 2>&1; then wl-paste --no-newline --type image/png > \"$1\" 2>/dev/null || true; fi; fi; if [ ! -s \"$1\" ]; then if command -v flameshot >/dev/null 2>&1; then flameshot gui -r > \"$1\" 2>/dev/null || true; fi; fi; if [ ! -s \"$1\" ]; then if command -v gnome-screenshot >/dev/null 2>&1; then gnome-screenshot -a -f \"$1\"; fi; fi; if [ ! -s \"$1\" ]; then if command -v maim >/dev/null 2>&1; then maim -s \"$1\"; elif command -v grim >/dev/null 2>&1 && command -v slurp >/dev/null 2>&1; then grim -g \"$(slurp)\" \"$1\"; fi; fi' _ %s")))
 
-(defun my/org-download-denote-file-format (filename &optional keywords)
-  "Rewrite FILENAME to denote style: <id>--<slug>__<keywords><ext>.
-When KEYWORDS is non-nil, include them in the denote-style name."
-  (let* ((ext  (or (file-name-extension filename t) ""))
-         (base (or (file-name-sans-extension filename) ""))
-         (id   (format-time-string denote-date-identifier-format)))
-    (file-name-nondirectory
-     (denote-format-file-name "./" id keywords base ext nil))))
+;; 2026-10-17: 原 `my/org-download-denote-file-format' 改名为
+;; `my/org-file-name-format' 并去掉 denote 依赖，实现在文件前部的「文件名生成」块。
+;; 调用方（org-attach 命名、markdown DnD）已全部改成新名字。
 
 (defun my/org-paste-rich ()
   "Paste rich text (HTML with images) from clipboard as Org content."
@@ -1846,19 +3053,32 @@ When KEYWORDS is non-nil, include them in the denote-style name."
     (user-error "Please save the current buffer first"))
   (pcase system-type
     ('windows-nt
-     (let* ((img-dir (expand-file-name ".images" (file-name-directory buffer-file-name)))
+     ;; 2026-10-20: 跟 Linux 分支同构 —— 图落进当前 entry 的 org-attach 目录,
+     ;; 命名 <ts>--<slug>.ext, 链接写成 [[attachment:…]]。
+     ;; 脚本默认把链接写成硬编码的 `file:.images/…', 所以用 -LinkPrefix 覆盖成
+     ;; **绝对路径**, 回来再交给 `my/org-html--rename-extracted' 统一收拾。
+     ;; ⚠ 这里做不到 Linux 那种 lazy: 剪贴板内容是 PowerShell 那边才看得到的,
+     ;;    Emacs 侧要探测就得再起一次进程。代价是粘纯文本也会给 heading 发个 ID。
+     (let* ((img-dir (org-attach-dir-get-create))
             (script (expand-file-name "~/org/.src/clipboard-to-org.ps1"))
             (img-dir-win (replace-regexp-in-string "/" "\\\\" img-dir))
             (script-win (replace-regexp-in-string "/" "\\\\" script))
-            (cmd (format "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"%s\" -ImageDir \"%s\""
-                         script-win img-dir-win))
+            (link-prefix (concat "file:" (file-name-as-directory img-dir)))
+            (cmd (format "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"%s\" -ImageDir \"%s\" -LinkPrefix \"%s\""
+                         script-win img-dir-win link-prefix))
             (out-file (string-trim (shell-command-to-string cmd))))
        (if (and (not (string-blank-p out-file))
                 (file-exists-p out-file))
-           (progn
-             (insert-file-contents out-file)
+           (let* ((text (with-temp-buffer
+                          (let ((coding-system-for-read 'utf-8))
+                            (insert-file-contents out-file))
+                          (buffer-string)))
+                  (r (my/org-html--rename-extracted text img-dir)))
              (delete-file out-file)
-             (message "OK: rich text pasted"))
+             (insert (car r))
+             (my/org-display-images)
+             (message "OK: rich text pasted (%d image(s) -> %s)"
+                      (cdr r) (abbreviate-file-name img-dir)))
          (message "WARN: clipboard empty or conversion failed (out: %s)" out-file))))
     ('darwin
      (let* ((script (expand-file-name "~/org/.src/clipboard-to-org-macos.sh"))
@@ -1902,45 +3122,126 @@ When KEYWORDS is non-nil, include them in the denote-style name."
                   (shell-command-to-string "wl-paste --no-newline 2>/dev/null")))))
     (unless (string-blank-p s) s)))
 
+(defun my/org-html--captions (text)
+  "Pandoc 输出的 `#+CAPTION:` 与图片链接的配对表: ((文件名 . 说明) …)。
+只有 <figure><figcaption> 才有 caption; 光秃秃的 <img> 不在表里,
+调用方回落到 `image-N'。"
+  (let (out)
+    (with-temp-buffer
+      (insert text)
+      (goto-char (point-min))
+      (while (re-search-forward
+              "^[ \t]*#\\+CAPTION:[ \t]*\\(.+\\)[ \t]*\n[ \t]*\\[\\[\\(?:file:\\)?[^]]*/\\([^]/]+\\)\\]\\]"
+              nil t)
+        (push (cons (match-string-no-properties 2)
+                    (string-trim (match-string-no-properties 1)))
+              out)))
+    out))
+
+(defun my/org-html--slug (cap fallback)
+  "把 caption 文本 CAP 洗成能进文件名的 slug; 洗完是空就用 FALLBACK。
+CJK 保留 (本库附件名本来就是 CJK), 只替换文件系统和 shell 里会出事的那几个字符。
+截到 40 列宽: 时间戳 15 字符 + `--` + slug + 扩展名, 别顶到 ext4 的 255 字节上限。"
+  (let ((out (string-trim
+              (replace-regexp-in-string "[/\\\\:*?\"<>|\r\n\t]+" "-" (or cap "")))))
+    (if (string-blank-p out)
+        fallback
+      (truncate-string-to-width out 40 nil nil t))))
+
+(defun my/org-html--rename-extracted (text img-dir)
+  "重命名 IMG-DIR 里 pandoc 抽出的图, 并改写 TEXT 里的链接。
+pandoc 把内联图抽成 `<hash>.<ext>` 直接放在 IMG-DIR 下 —— 那个 hash 换
+pandoc 版本就变, 不能当长期名字。这里按本库约定改成 `<时间戳>--<slug>.<ext>`,
+链接整段换成 `[[attachment:<新名>]]` —— 不写死路径。
+返回 (新文本 . 重命名条数)。"
+  (let* ((prefix (regexp-quote (directory-file-name img-dir)))
+         (caps (my/org-html--captions text))
+         ;; 时间戳前缀由目录名拼回来: 目录是 <ID 前6>/<ID 余下>,
+         ;; 于是「目录名 == 文件名前缀」, 跟日记那批完全同构。
+         ;; ⚠ 不能在这里调 org-entry-get —— 本函数是在 pandoc 输出的
+         ;; **临时 buffer** 里跑的, 那里没有 entry, 取出来永远是 nil
+         ;; (2026-10-20 踩到: 所有图都落成当前时间而非 entry ID)。
+         (ts (let ((rel (file-relative-name (file-truename img-dir)
+                                            (file-truename org-attach-id-dir))))
+              (if (string-match-p "\\`[0-9]\\{6\\}/[^/]+\\'" rel)
+                  (replace-regexp-in-string "/" "" rel)
+                (format-time-string "%Y%m%dT%H%M%S"))))
+         (refs nil) (i 0) (n 0))
+    ;; 只认 text 里引用过的图 —— pandoc 只引用它自己抽出的媒体,
+    ;; 远程 http 图它不动, 因此不会进这张表。
+    (with-temp-buffer
+      (insert text)
+      (goto-char (point-min))
+      (while (re-search-forward
+              (concat "\\[\\[\\(?:file:\\)?" prefix "/\\([^]]+\\)\\]\\]") nil t)
+        (let ((ref (match-string-no-properties 1)))
+          (unless (assoc ref refs)
+            (push (cons ref (file-name-nondirectory ref)) refs)))))
+    (setq refs (nreverse refs))
+    (dolist (r refs)
+      (setq i (1+ i))
+      (let* ((ref (car r))
+             (name (cdr r))
+             (ext (or (file-name-extension name) "bin"))
+             (slug (my/org-html--slug (cdr (assoc name caps))
+                                      (format "image-%d" i)))
+             (new-name (format "%s--%s.%s" ts slug ext))
+             (old-path (expand-file-name name img-dir))
+             (new-path (expand-file-name new-name img-dir))
+             (k 1))
+        (while (file-exists-p new-path)   ; 同一秒粘了两次同样的图
+          (setq new-name (format "%s--%s-%d.%s" ts slug k ext))
+          (setq new-path (expand-file-name new-name img-dir))
+          (setq k (1+ k)))
+        (when (file-exists-p old-path)
+          (rename-file old-path new-path t)
+          (setq n (1+ n))
+          ;; ⚠ 必须整段 [[…]] 一起换, 不能只换中间的路径: pandoc 输出的链接
+          ;; 可能是 [[file:/abs/path/x.png]] 也可能是裸的 [[/abs/path/x.png]],
+          ;; 只换路径会留下 [[file:attachment:x.png]] 这种畸形链接
+          ;; (2026-10-20 踩到, 第一次单测只用了裸路径形态所以没暴露)。
+          ;; prefix 已经是 regexp-quote 过的。
+          (setq text (replace-regexp-in-string
+                      (concat "\\[\\[\\(?:file:\\)?" prefix "/" (regexp-quote ref) "\\]\\]")
+                      (concat "[[attachment:" new-name "]]")
+                      text t t)))))
+    (cons text n)))
+
 (defun my/org-html-to-org (html img-dir)
   "Convert HTML string to Org with pandoc, extracting images into IMG-DIR.
-Returns the Org text, or nil on failure."
+Returns the Org text, or nil on failure.
+
+2026-10-20 收口: IMG-DIR 由调用方传 `org-attach-dir-get-create' —— per-entry
+目录, 不再是笔记同级的 `.images/'。pandoc 抽出的 hash 名会被重命名成
+`<时间戳>--<slug>.<ext>`, 链接一律写成 `[[attachment:<新名>]]`。
+理由: 写死路径 = 锁定布局; hash 名换 pandoc 版本就变, 而且读不懂。"
   (unless (executable-find "pandoc")
-    (user-error "pandoc not found (sudo apt install pandoc)"))
-  (make-directory img-dir t)
+    (user-error "pandoc not found (Arch: pacman -S pandoc-cli; Debian: apt install pandoc)"))
+  (when img-dir (make-directory img-dir t))
   (let* ((tmp (make-temp-file "org-clip" nil ".html"))
          (out (concat (file-name-sans-extension tmp) ".org")))
     (unwind-protect
         (progn
           (let ((coding-system-for-write 'utf-8))
             (write-region html nil tmp nil 'silent))
-          (and (zerop (call-process "pandoc" nil nil nil
-                                    ;; auto_identifiers 会给每个标题加 :PROPERTIES: 抽屉, 关掉更干净
-                                    "-f" "html-auto_identifiers" "-t" "org"
-                                    "--wrap=none" (concat "--extract-media=" img-dir)
-                                    tmp "-o" out))
+          (and (zerop (apply #'call-process
+                             "pandoc" nil nil nil
+                             (append
+                              ;; auto_identifiers 会给每个标题加 :PROPERTIES: 抽屉, 关掉更干净
+                              (list "-f" "html-auto_identifiers" "-t" "org"
+                                    "--wrap=none")
+                              (when img-dir
+                                (list (concat "--extract-media=" img-dir)))
+                              (list tmp "-o" out))))
                (with-temp-buffer
                  (let ((coding-system-for-read 'utf-8))
                    (insert-file-contents out))
-                 ;; pandoc 抽出媒体时写的是绝对路径, 改成相对路径免得换机器就断链
+                 (org-mode)
                  (let ((text (string-trim (buffer-string))))
-                   (setq text (replace-regexp-in-string
-                               (regexp-quote (file-name-unquote img-dir))
-                               (file-relative-name img-dir default-directory)
-                               text t t))
-                   ;; ⚠️ pandoc 给图片输出的是裸路径 [[.images/x.jpg]]: 没有 file: 前缀时
-                   ;; org 把它解析成 **fuzzy** 链接(不是 file), 内联图片一张都不会显示
-                   ;; (2026-10-10 踩到: org-download 写的是 [[file:...]] 所以那边正常,
-                   ;;  粘贴过来的全都看不了)。这里统一补上 file:。
-                   ;; 用 [^][:] 排除含冒号的 http(s):/ 等带 type 的链接, 只动裸相对路径。
-                   (setq text (replace-regexp-in-string
-                               "\\[\\[\\([^][:]+\\.\\(?:png\\|jpe?g\\|gif\\|webp\\|tiff?\\|svgz?\\|bmp\\)\\)\\]\\]"
-                               "[[file:\\1]]"
-                               text t nil))
-                   ;; 有些站点(知乎)把图标存成 .svgz, 但内容其实是纯 SVG 文本而非 gzip:
-                   ;; Emacs 不认 .svgz 后缀 -> 这类图整批不显示。检测 magic number,
-                   ;; 不是真 gzip 就改成 .svg 后缀并同步修正链接。
-                   (dolist (old (directory-files img-dir t "\\.svgz\\'" t))
+                   ;; ── 1) svgz: 知乎把图标存成 .svgz, 但内容其实是纯 SVG 文本而非
+                   ;;    gzip -> Emacs 不认这个后缀, 整批不显示。检测 magic number 改后缀。
+                   (dolist (old (and img-dir
+                                     (directory-files img-dir t "\\.svgz\\'" t)))
                      (let ((new (concat (file-name-sans-extension old) ".svg")))
                        ;; 用 -literally 读: 普通的 insert-file-contents 会被
                        ;; auto-compression-mode 先解压, 那就永远读不到 gzip magic 了。
@@ -1954,16 +3255,33 @@ Returns the Org text, or nil on failure."
                                      (regexp-quote (file-name-nondirectory old))
                                      (file-name-nondirectory new)
                                      text t t)))))
+                   ;; ── 2) hash 名 -> <ts>--<slug>.<ext>, 链接 -> attachment:
+                   (let ((r (my/org-html--rename-extracted text img-dir)))
+                     (setq text (car r)))
+                   ;; ── 3) 剩下的裸相对路径(远程图, 没有 scheme) 补 file: 前缀 ——
+                   ;;    org 会把 [[x.png]] 当 **fuzzy** 链接, 内联图一张都不显示
+                   ;;    (2026-10-10 踩到)。用 [^][:] 排除 http(s): 这类带 type 的,
+                   ;;    再用 [^/:] 打头排除 // 协议相对 URL 和绝对路径。
+                   (setq text
+                         (replace-regexp-in-string
+                          "\\[\\[\\([^][:/][^][:]*\\.\\(?:png\\|jpe?g\\|gif\\|webp\\|tiff?\\|svgz?\\|bmp\\)\\)\\]\\]"
+                          "[[file:\\1]]"
+                          text t nil))
                    text))))
       (ignore-errors (delete-file tmp))
       (ignore-errors (delete-file out)))))
 
 (defun my/org-paste-rich-linux ()
   "Paste clipboard HTML as Org content (Linux / X11 + Wayland).
-Embedded images land in .images/ next to this file; remote http images stay
-links — materialize them with `my/org-image-download-link-at-point'."
-  (let* ((img-dir (expand-file-name ".images" (file-name-directory buffer-file-name)))
-         (html (my/org-clipboard-html)))
+内联图落到当前 entry 的附件目录 (`org-attach-dir-get-create'), 命名是
+`<时间戳>--<slug>.<ext>`, 链接写成 `[[attachment:…]]`。远程 http 图保持链接
+—— 想落地就用 `my/org-image-download-link-at-point'。"
+  (let* ((html (my/org-clipboard-html))
+         ;; lazy: 只有真有图才去建目录 / 给 heading 造 ID,
+         ;;       免得粘一段纯文本就给每个 heading 都发个 ID
+         (img-dir (and html
+                       (string-match-p "<img\\|data:image" html)
+                       (org-attach-dir-get-create))))
     (if (or (null html) (string-blank-p html))
         (insert (or (my/org-clipboard-text) ""))
       (let ((org-text (my/org-html-to-org html img-dir)))
@@ -1972,7 +3290,9 @@ links — materialize them with `my/org-image-download-link-at-point'."
         (insert org-text)
         (my/org-display-images)
         (message "OK: rich text pasted (images -> %s)"
-                 (file-relative-name img-dir default-directory))))))
+                 (if img-dir
+                     (abbreviate-file-name img-dir)
+                   "(none)"))))))
 
 (defvar my/org-dedupe-script "~/.local/bin/org-dedupe-images.py"
   "感知哈希去重脚本(需要 python 的 PIL)。见 `my/org-dedupe-inline-images'。")
@@ -2009,8 +3329,15 @@ links — materialize them with `my/org-image-download-link-at-point'."
   (use-package! org-download
     :commands (org-download-clipboard org-download-screenshot org-download-yank org-download-delete)
     :config
-    (add-hook 'org-mode-hook 'org-download-enable)
-    (setq org-download-method 'directory
+    ;; ⚠️ 不要 org-download-enable: 它会把 org-download-dnd 塞到
+    ;; dnd-protocol-alist 最前面 (且是 setq 不是 setq-local, 会盖掉 org-mode
+    ;; 自己在 org-setup-yank-dnd-handlers 里装的 handler), 拖放就绕过
+    ;; org-yank-dnd-method 了。org-download 的其它命令 (clipboard/screenshot/
+    ;; yank/delete) 不依赖这个 hook, 照样能用。
+    ;; (add-hook 'org-mode-hook 'org-download-enable)
+    (setq org-download-method 'attach     ; ← 统一收口: 落 org-attach-dir
+          ;; attach 模式下 org-download 自己会 (let ((org-download-image-dir
+          ;; (org-attach-dir t))) ...) 覆盖, 这行只是非 org buffer 的兜底
           org-download-image-dir (expand-file-name "data/" org-directory)
           org-download-heading-lvl nil
           org-download-timestamp ""
@@ -2019,12 +3346,11 @@ links — materialize them with `my/org-image-download-link-at-point'."
           org-download-image-org-width 0
           org-download-annotate-function (lambda (_link) "")
           org-download-screenshot-method (my/org-download-screenshot-command)
-          org-download-file-format-function #'my/org-download-denote-file-format
-          org-download-link-format-function
-          (lambda (filename)
-            (format "[[file:%s]]\n"
-                    (org-link-escape
-                     (file-relative-name filename default-directory)))))
+          ;; 命名跟 org-attach 走同一套 (可读名保留 / 机器名转 denote 名)
+          org-download-file-format-function #'my/org-attach-name-for-file)
+          ;; ⚠️ 原来这里覆盖了 org-download-link-format-function 写死 [[file:]]。
+          ;; attach 模式下必须去掉, 让默认的 org-download-link-format-function-default
+          ;; 吐出 [[attachment:name]], 否则又变成扁平 file: 链接。
 
     ;; Fix: org-download-dnd-fallback for Emacs 30+
     (when (fboundp 'dnd-handle-multiple-urls)
@@ -2078,12 +3404,11 @@ links — materialize them with `my/org-image-download-link-at-point'."
          (type (org-element-property :type context)))
     (unless (member type '("file" "attachment"))
       (user-error "Not on a file or attachment link"))
-    (let* ((path (org-element-property :path context))
-           (unescaped (org-link-unescape path))
-           (abspath (expand-file-name unescaped
-                                      (if (equal type "attachment")
-                                          (and (boundp 'org-attach-id-dir) org-attach-id-dir)
-                                        default-directory)))
+    ;; NOTE: 这里原来拿 org-attach-id-dir 当 attachment 的基准目录, 但真实目录是
+    ;; data/<ID前2位>/<ID余下>/, 结果 attachment 链接全被判成「文件已不存在」
+    ;; 而链接照样被删掉。统一走 my/org-link-file-at-point。
+    (let* ((abspath (or (my/org-link-file-at-point)
+                        (user-error "Cannot resolve the file at point")))
            (beg (org-element-property :begin context))
            (end (org-element-property :end context))
            (result (my/delete-file-link--try-delete abspath)))
@@ -2106,11 +3431,9 @@ links — materialize them with `my/org-image-download-link-at-point'."
          (path (when (member type '("file" "attachment"))
                  (org-element-property :path ctx))))
     (when path
-      (let ((file (expand-file-name (org-link-unescape path)
-                                    (if (equal type "attachment")
-                                        (and (boundp 'org-attach-id-dir) org-attach-id-dir)
-                                      default-directory))))
-        (when (and (file-regular-p file)
+      ;; attachment: 的基准目录是 (org-attach-dir), 不是 org-attach-id-dir
+      (let ((file (my/org-link-file-at-point)))
+        (when (and file (file-regular-p file)
                    (member (downcase (or (file-name-extension file) ""))
                            '("png" "jpg" "jpeg" "gif" "webp" "svg" "tiff" "bmp")))
           file)))))
@@ -2424,11 +3747,8 @@ With \\[universal-argument], prompt for the angle."
          (type (org-element-property :type context))
          (path (when (member type '("file" "attachment"))
                  (org-element-property :path context)))
-         (file (when path
-                 (expand-file-name (org-link-unescape path)
-                                   (if (equal type "attachment")
-                                       (and (boundp 'org-attach-id-dir) org-attach-id-dir)
-                                     default-directory))))
+         ;; attachment: 的基准目录是 (org-attach-dir), 不是 org-attach-id-dir
+         (file (when path (my/org-link-file-at-point)))
          (angle (cond ((numberp angle) angle)
                       ((not angle) 90)
                       (t (read-number "Rotation angle: " 90)))))
@@ -2446,10 +3766,10 @@ With \\[universal-argument], prompt for the angle."
            (my/org-redisplay-images))
        (magick (user-error "ImageMagick `mogrify` failed — check: magick mogrify -rotate 90 \"some.png\""))
        (py (user-error "Pillow rotation failed: %s" file))
-       (t (user-error "No ImageMagick and no Python+Pillow — try: sudo apt install imagemagick"))))))
+       (t (user-error "No ImageMagick and no Python+Pillow — try: pacman -S imagemagick / apt install imagemagick"))))))
 #+end_src
 
-** DnD: flat copy to data/ (Org)
+** DnD: 共享的 URI 解析与回退辅助（Org 已走内置 handler）
 #+begin_src emacs-lisp
 (defun my/dnd--local-path (uri)
   "Return the local file path for a dropped URI, or nil.
@@ -2480,33 +3800,11 @@ re-entering ourselves."
     (let ((dnd-protocol-alist (nreverse alist)))
       (dnd-handle-multiple-urls (selected-window) (list uri) action))))
 
-(defun my/org-dnd-copy-to-data (uri action)
-  "Copy locally-dropped file URI into ~/org/data/ with a denote-style name.
-Prompts for denote keywords interactively.  Outside org-mode, or when the
-URI is not a real local file, hand the drop back to the normal dispatch."
-  (let ((src (and (derived-mode-p 'org-mode) (my/dnd--local-path uri))))
-    (if (and src (file-regular-p src))
-        (let* ((keywords (denote-keywords-prompt))
-               (dest-dir  (expand-file-name "data/" org-directory))
-               (dest-name (my/org-download-denote-file-format
-                           (file-name-nondirectory src) keywords))
-               (width     (or (bound-and-true-p org-download-image-org-width) 800))
-               (dest      (expand-file-name dest-name dest-dir)))
-          (make-directory dest-dir t)
-          (copy-file src dest 1)
-          (unless (zerop width)
-            (insert (format "#+attr_org: :width %dpx\n" width)))
-          (insert (format "[[file:%s]]"
-                          (file-relative-name dest default-directory)))
-          'copy)
-      (my/dnd-fallback uri action #'my/org-dnd-copy-to-data))))
-
-(defun my/org-prepend-flat-dnd-handler ()
-  "Make our flat-data DnD handler win over Org's builtin file: handlers."
-  (setq-local dnd-protocol-alist
-              (cons '("^file:" . my/org-dnd-copy-to-data)
-                    dnd-protocol-alist)))
-(add-hook 'org-mode-hook #'my/org-prepend-flat-dnd-handler)
+;; ⚠️ 2026-10-13 删掉了 my/org-dnd-copy-to-data + my/org-prepend-flat-dnd-handler。
+;; org-mode 自己在 (org-setup-yank-dnd-handlers) 里就装了 buffer-local 的
+;; ^file: handler, 按 org-yank-dnd-method 走 —— 现在它是 'attach, 于是拖放
+;; 直接进 org-attach-attach, 命中统一收口的 advice。原来那套是第三条管道,
+;; 往扁平 data/ 写 [[file:]] 链接, 跟 org-attach 对不上。
 #+end_src
 
 ** Delete file link in Markdown
@@ -2536,14 +3834,14 @@ URI is not a real local file, hand the drop back to the normal dispatch."
 
 (defun my/markdown-dnd-copy-to-data (uri action)
   "Copy locally-dropped file URI into ~/org/data/ with denote-style name.
-Prompts for denote keywords interactively.  Outside markdown-mode, or when
+Prompts for keywords interactively.  Outside markdown-mode, or when
 the URI is not a real local file, hand the drop back to normal dispatch."
   (let ((src (and (derived-mode-p 'markdown-mode) (my/dnd--local-path uri))))
     (if (and src (file-regular-p src))
-        (let* ((keywords   (denote-keywords-prompt))
+        (let* ((keywords   (my/keywords-prompt))
                (dest-dir   (expand-file-name "data/" org-directory))
                (orig-name  (file-name-nondirectory src))
-               (dest-name  (my/org-download-denote-file-format orig-name keywords))
+               (dest-name  (my/org-file-name-format orig-name keywords))
                (dest       (expand-file-name dest-name dest-dir))
                (ext        (downcase (or (file-name-extension orig-name) "")))
                (rel        (file-relative-name dest default-directory))
@@ -2570,9 +3868,10 @@ the URI is not a real local file, hand the drop back to normal dispatch."
 ;; bails out to `dnd-open-local-file'.  That is why dropping an .epub opened
 ;; it in nov-mode instead of attaching it.  Both handlers decline cleanly via
 ;; `my/dnd-fallback' when the buffer is not theirs, so other modes are safe.
+;; ⚠️ 2026-10-13 去掉了 org 那条: org-mode 现在走内置 handler + org-yank-dnd-method
+;; = 'attach, 自己注册会抢在前面。markdown 那条保留。
 (setq-default dnd-protocol-alist
-              (append (list (cons "^file:" #'my/org-dnd-copy-to-data)
-                            (cons "^file:" #'my/markdown-dnd-copy-to-data))
+              (append (list (cons "^file:" #'my/markdown-dnd-copy-to-data))
                       (default-value 'dnd-protocol-alist)))
 #+end_src
 
@@ -2741,61 +4040,116 @@ the URI is not a real local file, hand the drop back to normal dispatch."
 #+end_src
 
 * Knowledge Base
-** Denote core
+
+** org-roam
 #+begin_src emacs-lisp
-(use-package! denote
-  :demand t
-  :init
-  ;; (make-directory (expand-file-name "denote/" org-directory) t)
-  :config
-  (setq denote-directory (expand-file-name "notes/" org-directory)
-        denote-file-type 'org
-        denote-known-keywords  '(;; 工作/生活分界
-                                 "work"
-                                 ;; 领域
-                                 "gamedev" "emacs" "ai" "pkm" "investment"
-                                 "health" "habit" "read" "hire"
-                                 ;; 跨域特殊标记
-                                 "idea" "memo" "tool" "project" "index"
-                                 ;; 形态标记
-                                 "journal" "document")
-        denote-infer-keywords nil
-        denote-sort-keywords t
-        denote-prompts '(title keywords)
-        denote-date-prompt-use-org-read-date t
-        denote-excluded-directories-regexp
-        (rx (or (seq bos ".")
-                (seq bos (or "data" "investment" "templates" "tmp") eos)))
-        denote-rename-confirmations nil
-        denote-dired-directories (list denote-directory)
-        denote-dired-directories-include-subdirectories t)
+;; org-roam —— 2026-10-18 启用（笔记库从「7 个主文件 + subtree」迁向「原子节点 + db」）。
+;; 安装 / 默认 UI / keybinds 由 Doom 的 `+roam' flag 负责（见 Bootstrap 的 init.el 块）；
+;; 这里只放 ~/org 拓扑相关的口径，这些东西 Doom 不知道。
+;;
+;; 迁移阶段：P1a 已产出 ~/org/roam/{investment,device,health}/ 共 30 个节点
+;; （脚本与校验在 ~/org/.agent/：migrate-p1.py 生成、verify-p1.py 独立复核）。
+;; 源主文件 finance/things/health 暂时保留且仍是权威副本，二者并存到切换那一刻。
+(after! org-roam
+  (setq org-roam-directory (expand-file-name "roam/" org-directory) ; = ~/org/roam
+        ;; db 放 Doom cache 而不是 ~/org：SQLite 每次 db-sync 都会变，
+        ;; 放在被同步的目录里等于给 R2 / git 链路制造日常抖动。
+        org-roam-db-location (expand-file-name "org-roam.db" doom-cache-dir)
+        ;; 2026-10-19 起 dailies 正式启用: 日记从单文件 ~/org/journal.org
+        ;; (日期是一级 heading) 拆成 ~/org/roam/daily/YYYY-MM-DD.org。
+        ;;
+        ;; ⚠️ 这里原来写过「dailies 不能用 + daily 被加密后 db 读密文失效」, 那是错的,
+        ;; 2026-10-19 实测推翻: `org-roam-with-file' (org-roam-utils.el:99) 只把
+        ;; `find-file-hook' / `auto-mode-alist' 置 nil, 而 epa 是靠
+        ;; `file-name-handler-alist' 接管 `insert-file-contents' —— **索引时照样解密**,
+        ;; buffer 里是明文。实测 21 个加密 daily 文件 force sync 全部正常建 node。
+        ;; 唯一的前提是路径要匹配 `epa-file-name-regexp' (已加 roam[\\/]daily 分支),
+        ;; 否则 dailies 建出来的文件是**明文**。
+        org-roam-dailies-directory (expand-file-name "daily/" org-roam-directory))
 
-  ;; Windows-safe replacement for `denote-dired-mode-in-directories'.
-  (defun my/denote-dired-mode-maybe ()
-    "Enable `denote-dired-mode' when current dired buffer is under a
-denote-dired directory, matching case-insensitively."
-    (when (derived-mode-p 'dired-mode)
-      (let ((dir (file-name-as-directory (expand-file-name default-directory))))
-        (when (seq-some
-               (lambda (root)
-                 (let ((root (file-name-as-directory (expand-file-name root))))
-                   (or (string-equal-ignore-case dir root)
-                       (and denote-dired-directories-include-subdirectories
-                            (eq t (compare-strings
-                                   root 0 nil
-                                   dir  0 (length root)
-                                   t))))))
-               denote-dired-directories)
-          (when (bound-and-true-p diredfl-mode)
-            (diredfl-mode -1))
-          (denote-dired-mode 1)
-          (font-lock-flush)))))
+  ;; dailies capture 模板。默认模板的 head 只有 `#+title:', **不带 :ID:** ——
+  ;; 而没有 ID 的文件不进 nodes 表 (实测 nodes=0), 搜不到也连不上反链。
+  ;; 硬约束: `:PROPERTIES:' 抽屉必须在 `#+title:' **之前**, 否则 roam 解析错。
+  ;; 不写 `#+filetags:' —— daily/ 目录本身已经表达了「这是日记」, 再加一层 tag
+  ;; 只是给 roam 的 tags 表添一个天天重复的维度。
+  (setq org-roam-dailies-capture-templates
+        '(("d" "default" entry
+           "* %<%H:%M>\n%?"
+           :target (file+head "%<%Y-%m-%d>.org"
+                              ":PROPERTIES:\n:ID:       %(org-id-new)\n:END:\n#+title: %<%Y-%m-%d %a>\n")
+           :empty-lines 1)))
 
-  (add-hook 'after-change-major-mode-hook #'my/denote-dired-mode-maybe t)
+  ;; 目录维度的过滤前缀让位给元标记（2026-10-19）。
+  ;; Doom 的 `org-roam-node-doom-type' 字段**本身就是目录** —— 它是
+  ;; `file-relative-name' + `directory-file-name' 算出来的「相对 roam 的路径」
+  ;; (lang/org/autoload/contrib-roam.el:59-80), 默认前缀是 `@'
+  ;; (lang/org/contrib/roam.el:76)。而同一次整理把元标记统一成了
+  ;; `@index @shorts @memo @idea @nsfw @skip @downloaded', 两者会撞:
+  ;; 敲 `@index' 时既匹配「目录名含 index 的节点」又匹配「打了 @index 的节点」。
+  ;; 解法是把目录的前缀改成 `d:' —— node-find 里 `d:emacs' 过滤目录、
+  ;; `@index' 过滤角色, 两套语义各走各的。
+  (setq org-roam-node-template-prefixes
+        (cons '("doom-type" . "d:")
+              (cl-remove-if (lambda (p) (equal (car p) "doom-type"))
+                            org-roam-node-template-prefixes)))
 
-  ;; Strip newlines from the complete filename.
-  (advice-add 'denote-format-file-name :filter-return
-              (lambda (filename) (replace-regexp-in-string "[\n\r]" "" filename))))
+  ;; ---- 新建节点必须带 :ID: (2026-10-21) --------------------------------
+  ;; 默认模板的 head 只有 `#+title:' 一行, 而 org-roam-capture 只在**内存里的 node
+  ;; 对象**上补 ID (org-roam-capture.el:404-405 `(or ... (org-id-new))'), **不落盘**
+  ;; —— head 里不写, 文件里就没有 :ID: → 该文件不进 nodes 表, node-find 搜不到、
+  ;; 反链连不上, 而且**不报错** (dailies 那条实测 nodes=0 是同一个坑)。
+  ;; 硬约束: `:PROPERTIES:' 抽屉必须在 `#+title:' **之前**, 否则 roam 解析错。
+  ;; 文件名模板与 org-roam 默认值一致 (`%<%Y%m%d%H%M%S>-${slug}.org'), 显式写出来
+  ;; 只为和 head 放一起看。`%(org-id-new)' 的产出形态由 org-id-method 决定 ——
+  ;; 本机已是 'ts + "%Y%m%dT%H%M%S", 与存量节点的「文件名时间戳」ID 口径一致。
+  ;; 不写 `#+filetags:': 领域 tag 由人决定, 建完自己加。
+  (setq org-roam-capture-templates
+        '(("d" "default" plain "%?"
+           :target (file+head "%<%Y%m%d%H%M%S>-${slug}.org"
+                              ":PROPERTIES:\n:ID:       %(org-id-new)\n:END:\n#+title: ${title}\n")
+           :unnarrowed t)))
+
+  ;; ---- heading → 独立节点: 给 org-roam-extract-subtree 补落点 (2026-10-21) ----
+  ;; 原生实现 (org-roam-node.el:990-1029) 最后一步是
+  ;;   (read-file-name "Extract node to:" (file-name-as-directory org-roam-directory)
+  ;;                  template nil template)
+  ;; dir 参数写死是 roam **根**, 预填名只有 `20261021T003635-slug.org' —— 直接回车
+  ;; 就落 `~/org/roam/xxx.org', 不属于任何领域: node-find 里显示成 `d:roam' 过滤不到。
+  ;; 库里那 3 个根直属文件就是这么来的。
+  ;; 解法: 先选一级领域目录, let-bind `org-roam-extract-new-file-path' 把目录名拼进
+  ;; 预填值 —— 它只是 minibuffer 的 default/initial, 不进全局变量; 剪子树 / promote /
+  ;; 写 ID 那些逻辑一行没重写, 全走原生 `org-roam-extract-subtree'。
+  ;; 目录列表排除 `daily/': 日记不是抽取目的地。
+  (defun my/org-roam-extract-to-domain ()
+    "抽取当前 subtree 成 roam 节点, 落点先选 ~/org/roam 下的一级领域目录。"
+    (interactive)
+    (let* ((dirs (seq-filter
+                  (lambda (f)
+                    (and (file-directory-p f)
+                         (not (equal (file-relative-name f org-roam-directory) "daily"))))
+                  (directory-files org-roam-directory t "^[^.]")))
+           (dir (completing-read
+                 "领域目录: "
+                 (mapcar (lambda (f) (file-relative-name f org-roam-directory)) dirs)
+                 nil t)))
+      (let ((org-roam-extract-new-file-path
+             (concat dir "/%<%Y%m%d%H%M%S>-${slug}.org")))
+        (call-interactively #'org-roam-extract-subtree))))
+
+  ;; ---- 刻意不做的两件事（要改之前先想清楚）----
+  ;; 1. 不要把 org-roam-directory 塞进 org-agenda-files：roam 里的 TODO 绝大多数是
+  ;;    记录条目的伪状态（media 628 + read 234 条的"看过/读过"），整目录进 agenda
+  ;;    会瞬间毁掉任务视图。agenda 保持显式列表不变。
+  ;;    2026-10-18 退役后已解: refile 现在显式指向 roam/ (见 my/org-roam-node-files
+  ;;    与 my/org-roam-bulk-files), roam 是唯一写入目的地。
+  ;; 2. 附件池**仍**维持 ~/org/data/ 平铺: 当初卡在这里的前提 (roam 节点与源主文件
+  ;;    会对同一张图指向两个位置) 随退役消失了, per-node 化技术上随时可做。
+  ;;    没做的理由是性价比 —— 见 .agent/p3-retire-report.org。要点: 全池 137 个 /
+  ;;    536MB, 且 20260425T000524--染色体检查报告.pdf 被两个 roam 节点同时引用,
+  ;;    per-node 下一条必然断。而收益只是「org-attach 知道图属于哪个 heading」,
+  ;;    这个库本来就得靠扫 subtree 链接回答该问题。真要切, 先解掉那个共享附件
+  ;;    (复制成两份, 或那条改用 file: 硬路径)。
+  )
 #+end_src
 
 ** Dirvish
@@ -2806,51 +4160,72 @@ denote-dired directory, matching case-insensitively."
         :n "/" #'dirvish-narrow))
 #+end_src
 
-** denote-org & denote-markdown
+** markdown-ts-appear
 #+begin_src emacs-lisp
-(use-package! denote-org
-  :after (denote org))
+;; markdown-ts-appear —— markdown-ts-mode 的渲染增强: "Rendered while reading. Source when editing."
+;; 依赖: Emacs 31 内置 markdown-ts-mode (本机 31.1, API 已验证兼容) + markdown-table-wrap
+;; 生效范围: 仅 markdown-ts-mode 缓冲区。.md 默认仍走 Doom 的 markdown-mode
+;; (DnD handler 等既有 hook 不动), 需要时 M-x markdown-ts-mode 手动切换。
+;; 是否让 .md 默认用 markdown-ts-mode 打开, 等 Sean 拍板, 先不动 auto-mode-alist。
+(use-package! markdown-ts-appear
+  :hook (markdown-ts-mode . markdown-ts-appear-mode))
 
-(use-package! denote-markdown
-  :after (denote markdown-mode)
-  :commands (denote-markdown-convert-links-to-file-paths
-             denote-markdown-convert-links-to-denote-type
-             denote-markdown-convert-links-to-obsidian-type
-             denote-markdown-convert-obsidian-links-to-denote-type))
+;; Evil 集成 (Sean 用 evil +everywhere): 只在插入态显示源码, normal 态保持渲染视图。
+;; 这是 README 为 evil 用户推荐的用法; 删掉本段即恢复上游默认 (point 进元素即显源码)。
+(defun my/markdown-appear-evil ()
+  "Reveal Markdown source only in Evil insert state."
+  (if markdown-ts-appear-mode
+      (progn
+        (add-hook 'evil-insert-state-entry-hook #'markdown-ts-appear-start nil t)
+        (add-hook 'evil-insert-state-exit-hook #'markdown-ts-appear-stop nil t)
+        (unless (eq (bound-and-true-p evil-state) 'insert)
+          (markdown-ts-appear-stop)))
+    (remove-hook 'evil-insert-state-entry-hook #'markdown-ts-appear-start t)
+    (remove-hook 'evil-insert-state-exit-hook #'markdown-ts-appear-stop t)))
+
+(add-hook 'markdown-ts-appear-mode-hook #'my/markdown-appear-evil)
+
+;; 可选视觉/预览选项 (注释掉的即上游默认值, 按需取消注释):
+;; (setopt markdown-ts-appear-heading-bullets '("◉" "○" "▸" "•"))  ; ATX 标题按层级循环符号
+;; (setopt markdown-ts-appear-link-icon "🔗")                      ; 普通链接前图标
+;; (setopt markdown-ts-appear-code-fence-style 'connected)         ; 带语言标签的连通围栏
+;; (setopt markdown-ts-appear-table-style 'wrapped)                ; 宽度感知表格 (默认值)
+;; 数学预览: 需 MELPA mathjax 包 + node (本机 v26.8.2 ✓) + Emacs SVG 支持:
+;; (setopt markdown-ts-appear-enable-math-preview t)
+;; Mermaid 预览: 需 mmdc (npm i -g @mermaid-js/mermaid-cli) + Chrome, 本机未装:
+;; (setopt markdown-ts-appear-enable-mermaid-preview t)
 #+end_src
 
 ** consult-notes
 #+begin_src emacs-lisp
-(defun my/consult-notes-files-newest-first ()
-  "Return denote files sorted newest-first by their filename timestamp (denote ID)."
-  (sort (denote-directory-files)
-        (lambda (a b)
-          (string> (file-name-nondirectory a)
-                   (file-name-nondirectory b)))))
-
+;; 2026-10-17: denote 已卸载, 原来按文件名时间戳排序 denote 文件的
+;; `my/consult-notes-files-newest-first' 一并删除 —— 笔记库只有根目录 7 个
+;; 主文件, 搜索入口是下面这个 org-headings 源。
 (use-package! consult-notes
-  :after (consult denote)
+  :after (consult org)
   :commands (consult-notes consult-notes-search-in-all-notes)
   :config
-  ;; 只保留 Denote 源覆盖 ~/org/notes/，删掉 "Notes" 目录源，避免同一篇笔记出现两次
-  (setq consult-notes-file-dir-sources nil)
-
-
+  ;; 2026-10-18 退役: 六个根主文件已并入 ~/org/roam/。改成递归收 roam 全部
+  ;; 节点 + 根目录残存的 inbox/journal —— 这样新增 roam 节点不用回来改表。
+  ;; journal.org 是加密的, consult-notes 读不进去 (只会被当成乱码),
+  ;; 和 agenda / 孤儿扫描一样不列入。
+  ;; 2026-10-21 五改: **排除 roam/daily/** (用 my/org-daily-file-p 而不是内联正则,
+  ;;   这个块在 2538 行之后求值, 谓词已经定义好了)。理由两条:
+  ;;   1. daily 是 GPG 密文, `consult-notes--org-headings' 用 org-map-entries
+  ;;      逐个打开读 -> 236 个文件全是二进制, 候选区一堆乱码;
+  ;;   2. `consult-notes-search-in-all-notes' 的 ripgrep 目录**就是**这个变量
+  ;;      (见 consult-notes.el:321), 所以这里排掉了 = 全文搜索也一并排掉。
+  ;;      日记的跨天全文检索走 `my/journal-search' (SPC n n J), 它才认密文。
+  ;;   注意: 只排 daily, **保留 media/ read/** —— 搜书名影名是刚需。
   (setq consult-notes-org-headings-files
-        (list (expand-file-name "inbox.org"       org-directory)
-              (expand-file-name "append-note.org" org-directory)))
-  (consult-notes-org-headings-mode)
-
-  (when (locate-library "denote")
-    (consult-notes-denote-mode))
-
-  ;; 笔记列表顺序：按文件名时间戳（denote ID）排序，新的在最上面
-  (setq consult-notes-denote-files-function #'my/consult-notes-files-newest-first))
+        (append (list (expand-file-name "inbox.org" org-directory))
+                (seq-remove #'my/org-daily-file-p
+                            (directory-files-recursively
+                             (expand-file-name "roam/" org-directory) "\\.org\\'"))))
+  (consult-notes-org-headings-mode))
 
 (after! consult-notes
   (consult-customize consult-notes :sort nil)
-  ;; 确保 denote 源也是新在前（与 :config 一致，避免 eval 顺序问题）
-  (setq consult-notes-denote-files-function #'my/consult-notes-files-newest-first)
   ;; 文件名筛选不区分大小写
   (setq completion-ignore-case t)
   ;; 全文搜索不区分大小写 (ripgrep)
@@ -2935,14 +4310,35 @@ denote-dired directory, matching case-insensitively."
   ;; EPG at the full Git-for-Windows gnupg instead (same ~/.gnupg homedir).
   (when (file-executable-p "c:/Users/yuan_/scoop/apps/git/current/usr/bin/gpg.exe")
     (setq epg-gpg-program "c:/Users/yuan_/scoop/apps/git/current/usr/bin/gpg.exe"))
-  ;; Remember the passphrase for the whole Emacs session, so opening/saving a
-  ;; journal entry does not prompt every single time.  Cleared on restart.
-  (setq epa-file-cache-passphrase-for-symmetric-encryption t
-        password-cache-expiry nil)
-  ;; Keep Denote Journal filenames as .org so denote-journal and its calendar
-  ;; commands continue to work; encrypt only the file contents on disk.
+  ;; Journal 文件名保持 .org（journal.org），只加密磁盘上的文件内容。
+  ;;
+  ;; 这里走的是**公钥加密**（epa-file-encrypt-to指定了公钥 ID），所以
+  ;; `epa-file-cache-passphrase-for-symmetric-encryption' 和
+  ;; `password-cache-expiry' 这类"记住口令"的设置对它一概无效 ——
+  ;; 那两个只作用于 org-crypt-symmetric t 的对称加密路径。曾在这里配置过
+  ;; 它们却依然每次被问密码，就是这个原因，故已移除。
+  ;;
+  ;; 现在改为让密钥本身不设口令（加密子密钥 cv25519 43A3B8E05F342057
+  ;; 已去除保护），解密因此无需口令，Emacs 也就不会再弹 pinentry。
+  ;; 备份见 ~/.gnupg.backup-20261011-205326.tar.gz。
+  ;; 2026-10-16 二次改: 日记文件当时落在 ~/org/journal.org (与 inbox.org 同级),
+  ;; 不再位于 journal/ 目录下 —— 旧正则按目录匹配, 会漏掉它 → 明文落盘。
+  ;; 2026-10-19 三次改: journal 拆成 org-roam-dailies (一天一文件), 现在是「三选一」:
+  ;;   1) ~/org/journal/**/*.org         journal/ 下的任何 .org (归档 + 备份)
+  ;;   2) ~/org/roam/daily/*.org         每天的日记 (新形态)
+  ;;   3) ~/org/journal.org              根目录的单文件日记 (历史形态,
+  ;;                                     2026-10-19 拆完已移进 journal/_orig-20261019/)
+  ;; 第 1 条不能省: _orig-20261016/ 里的旧日记同样是密文,
+  ;; 不匹配就打不开 (只看到乱码)。
+  ;; 注意别写成 ~.*\.org~: 那会把 notes/ 下的明文笔记也当成加密文件, 保存时
+  ;; 全库笔记都会被加密。
+  ;;
+  ;; 2026-10-19 加第三条 `roam[\\/]daily': journal 已拆成 org-roam-dailies 的
+  ;; 「一天一文件」(~/org/roam/daily/YYYY-MM-DD.org)。少了这一条，新建的日记
+  ;; 会明文落盘 —— 这是本次迁移唯一不可逆的风险点。
+  ;; 仍然**不能**放宽成按内容/按目录任意匹配，见上面 ~.*\.org~ 那条。
   (setq epa-file-name-regexp
-        ".*[\\\\/]journal[\\\\/].*__journal\\.org\\'"
+        ".*[\\\\/]\\(journal\\|roam[\\\\/]daily\\)\\([\\\\/].*\\)?\\.org\\'"
         epa-file-encrypt-to "CE8EA11D470516F3220E9BA11EE5F16F26111AD1"
         epa-file-select-keys 'silent)
   (epa-file-name-regexp-update)
@@ -2985,34 +4381,96 @@ Otherwise defer to `epa-file-insert-file-contents'."
               #'my/epa-file-insert-file-contents-advice))
 #+end_src
 
-** denote-journal
+** journal（单文件定位与 capture）
 #+begin_src emacs-lisp
-(use-package! denote-journal
-  :after denote
-  :hook (calendar-mode . denote-journal-calendar-mode)
-  :init
-  (with-eval-after-load 'calendar
-    (define-key calendar-mode-map (kbd "f") #'denote-journal-calendar-find-file)
-    (define-key calendar-mode-map (kbd "n") #'denote-journal-calendar-new-or-existing)
-    (with-eval-after-load 'evil
-      (evil-define-key '(normal motion emacs) calendar-mode-map
-        (kbd "F") #'denote-journal-calendar-find-file
-        (kbd "N") #'denote-journal-calendar-new-or-existing)))
-  :config
-  (setq denote-journal-directory (expand-file-name "journal/" org-directory)
-        denote-journal-keyword "journal"
-        denote-journal-title-format 'day-date-month-year))
+;; calendar 里 f / n / F / N 跳到对应日期的日记 heading。
+;; 原来挂在 denote-journal 的 :init 里, 2026-10-17 卸载 denote-journal 后独立出来。
+;; (denote-journal 的「一天一文件」假设在单文件 journal.org 下根本不成立。)
+(with-eval-after-load 'calendar
+  (define-key calendar-mode-map (kbd "f") #'my/journal-calendar-goto)
+  (define-key calendar-mode-map (kbd "n") #'my/journal-calendar-goto)
+  (with-eval-after-load 'evil
+    (evil-define-key '(normal motion emacs) calendar-mode-map
+      (kbd "F") #'my/journal-calendar-goto
+      (kbd "N") #'my/journal-calendar-goto)))
+
+;;; --- journal 定位 (2026-10-19 起: org-roam-dailies 一天一文件) --------
+;; 日记形态第三次变更:
+;;   一天一文件 (denote) → 一年一文件 → 单文件 journal.org (2026-10-16)
+;;   → ~/org/roam/daily/YYYY-MM-DD.org (2026-10-19, roam 节点 + GPG 加密)
+;;
+;; 回到「一天一文件」不是绕圈 —— 这次每天的文件是 roam 节点 (db / 双链 / 反链),
+;; 而且 10-16 的冲突实证支持这个形状: .stversions 里 5 个冲突全是共写单文件的
+;; append-note, journal 是 0 —— 一天一文件天然不冲突。
+;;
+;; 加密不再靠文件名, 靠 `epa-file-name-regexp' 的 roam[\\/]daily 分支 ——
+;; 读写都经 epa handler, 磁盘上是密文, buffer 里是明文。
+;; 日期 heading 取消了: 文件名就是日期, 原 `** HH:MM' 整体上移成 `* HH:MM'。
+
+(defun my/journal--effective-time ()
+  "当前时间。03:00 前算前一天 (熬夜写日记不跨到新的一天)。"
+  (let ((now (decode-time)))
+    (if (< (nth 2 now) 3)
+        (time-subtract (current-time) (seconds-to-time 86400))
+      (current-time))))
+
+(defun my/journal-file-for (&optional time)
+  "TIME (默认今天) 那天日记的文件路径, 形如 roam/daily/2026-10-19.org。"
+  (expand-file-name (format-time-string "%Y-%m-%d.org" (or time (my/journal--effective-time)))
+                    (or (and (boundp 'org-roam-dailies-directory) org-roam-dailies-directory)
+                        (expand-file-name "roam/daily/" org-directory))))
+
+(defun my/journal-date-heading (time)
+  "TIME 对应的日期文本, 形如 `2026-10-16 Fri'。"
+  (format-time-string "%Y-%m-%d %a" time))
+
+(defun my/journal--ensure-file-header (file time)
+  "确保 daily 文件 FILE 有 roam 要求的头。文件不存在时才写, 返回是否新建。
+
+必须在这里写而不是指望 capture 模板: 模板 j 走的是**普通** org-capture,
+不经过 org-roam 的头注入。少了 `:ID:', 这个文件就不进 nodes 表
+(2026-10-19 实测: 没 ID 的文件 nodes=0), 搜不到、也连不上反链。
+
+硬约束: `:PROPERTIES:' 抽屉必须在 `#+title:' 之前。
+写入走 `write-region' → epa handler, 落盘自动是密文。"
+  (let ((new (not (file-exists-p file))))
+    (when new
+      (make-directory (file-name-directory file) t)
+      (with-temp-file file
+        (insert (format ":PROPERTIES:\n:ID:       %s\n:END:\n#+title: %s\n\n"
+                        (org-id-new) (my/journal-date-heading time)))))
+    new))
+
+(defun my/journal-goto-time (time &optional create)
+  "打开 TIME 那天日记。CREATE 非 nil 时文件不存在也打开。"
+  (let ((file (my/journal-file-for time)))
+    (when (or (file-exists-p file) create)
+      (my/journal--ensure-file-header file time)
+      (find-file file)
+      t)))
 
 (defun my/journal-capture-target ()
-  "Return path to today's denote-journal entry for `org-capture'.
-Before 03:00 falls back to the previous day."
-  (let* ((now  (decode-time))
-         (hour (nth 2 now))
-         (time (if (< hour 3)
-                   (time-subtract (current-time) (seconds-to-time 86400))
-                 (current-time))))
-    (denote-journal-path-to-new-or-existing-entry
-     (format-time-string "%Y-%m-%d" time))))
+  "org-capture 用: 定位到今天日记文件的末尾。
+
+返回 point (org-capture function target 约定)。"
+  (let* ((time (my/journal--effective-time))
+         (file (my/journal-file-for time)))
+    (my/journal--ensure-file-header file time)
+    (set-buffer (org-capture-target-buffer file))
+    (goto-char (point-max))
+    ;; 文件末尾没有换行时, 直接 insert 会把 `* HH:MM' 接到上一行屁股上
+    (unless (bolp) (insert "\n"))
+    (point)))
+
+(defun my/journal-calendar-goto ()
+  "从 calendar 光标处的日期跳到那天的日记。"
+  (interactive)
+  (let* ((d (calendar-cursor-to-date t))   ; (month day year)
+         (time (encode-time 0 0 0 (nth 1 d) (nth 0 d) (nth 2 d)))
+         (file (my/journal-file-for time)))
+    (if (file-exists-p file)
+        (find-file file)
+      (message "这天没有日记: %s" (my/journal-date-heading time)))))
 #+end_src
 
 ** Weather (wttr.in) — async
@@ -3078,126 +4536,187 @@ Before 03:00 falls back to the previous day."
         (funcall callback (cdr my/weather--cache))
       (my/weather--fetch callback))))
 
-(defun my/journal--insert-weather (buffer text)
-  "在 BUFFER 的 front matter 之后插入 `* 天气' 标题 + TEXT。
+(defun my/journal--today-weather-p (&optional buffer)
+  "今天那篇日记 (一个 daily 文件) 里是否已经有天气条目。
 
-已有天气标题时不重复插入, 返回是否插入。"
-  (with-current-buffer buffer
-    (let ((m (point-marker))
-          inserted)
-      (set-marker-insertion-type m t)
-      (save-excursion
-        (goto-char (point-min))
-        (unless (re-search-forward "^\\*+ 天气[ \t]*$" nil t)
-          (goto-char (point-min))
-          ;; ⚠️ 两个 while 都必须同时检查 `forward-line' 是否真的前进了。
-          ;; 新建 journal 的 buffer 就是「front-matter 后面啥都没有」，
-          ;; `looking-at-p "^[ \t]*$"' 在 eob 处一直为真，而 `forward-line'
-          ;; 到 eob 后不再移动 point —— 死循环：Emacs 吃满一个核、
-          ;; emacsclient 全部无响应，calendar 里新建 journal 必卡。
-          ;; `not (eobp)' + 前进量守卫，任何内容都能退出。
-          (let ((moved nil))
-            (while (and (looking-at-p "^#\\+")
-                        (not (eobp))
-                        (progn (setq moved (point))
-                               (forward-line 1)
-                               (/= moved (point))))
-              nil))
-          (let ((moved nil))
-            (while (and (looking-at-p "^[ \t]*$")
-                        (not (eobp))
-                        (progn (setq moved (point))
-                               (forward-line 1)
-                               (/= moved (point))))
-              nil))
-          (insert "* 天气\n" text "\n\n")
-          (setq inserted t)))
-      (goto-char m)
-      inserted)))
-
-(defun my/denote-journal-auto-weather ()
-  "新建 journal 时异步在顶部插入天气, 不阻塞新建流程。
-
-关键点: 只改新建 note 的 buffer。此时内容在内存里仍是明文, 保存时才
-按 `epa-file-name-regexp' 加密。旧实现是 curl 回来后 `find-file-noselect'
-读文件——那时文件多半已经落盘成密文, 读它等于在异步哨兵里解密,
-要么静默失败, 要么等口令把 Emacs 卡住。journal 全量加密一上 (9 月),
-天气就基本不再出现了, 时间线对得上。"
-  (when (and (buffer-file-name)
-             (string-match-p "__journal" (buffer-file-name)))
-    (let ((buffer (current-buffer))
-          (file (buffer-file-name)))
-      (my/weather--get
-       (lambda (text)
-         (if (buffer-live-p buffer)
-             (with-current-buffer buffer
-               (when (my/journal--insert-weather buffer text)
-                 (save-buffer)))
-           ;; buffer 已关: 磁盘上仍是明文才补写; 已加密的文件不碰,
-           ;; 免得又要口令。
-           (when (and (file-exists-p file)
-                      (not (my/file-pgp-data-p file)))
-             (with-current-buffer (find-file-noselect file)
-               (when (my/journal--insert-weather (current-buffer) text)
-                 (save-buffer))))))))))
-
-(defun my/journal-insert-weather ()
-  "手动给当前日记补一条顶部天气 (新建时网络失败就用这个)。"
-  (interactive)
-  (my/weather--get
-   (lambda (text)
-     (when (my/journal--insert-weather (current-buffer) text)
-       (save-buffer)
-       (message "天气已插入: %s" text)))))
-
-(add-hook 'denote-after-new-note-hook #'my/denote-journal-auto-weather)
-
-(defun my/denote-journal--today-file-p (file)
-  "FILE 是不是今天的日记。"
-  (and file
-       (string-match-p "__journal" file)
-       (string-prefix-p (format-time-string "%Y%m%d")
-                        (file-name-nondirectory file))))
-
-(defun my/denote-journal--has-weather-p (&optional buffer)
-  "BUFFER 里是否已经有 `* 天气' 标题。"
+2026-10-19 改: 一个文件 = 一天, 于是可以直接全文件搜 —— 不再需要先算
+「今天 heading 的边界」。旧的 `my/journal--today-bounds' / `my/journal--today-heading-re'
+是单文件模型的产物 (要在整个文件里圈出今天那一区), 已删。
+连带修掉的旧 bug: 过去整个文件里任何一条天气都会命中, 于是「今天」
+永远被认为已经有天气。"
   (with-current-buffer (or buffer (current-buffer))
     (save-excursion
-      (goto-char (point-min))
-      (re-search-forward "^\\*+ 天气[ \t]*$" nil t))))
+      (save-restriction
+        (widen)
+        (goto-char (point-min))
+        (re-search-forward "^\\*+[ \t]+天气[ \t]*$" nil t)))))
 
-(defun my/denote-journal-ensure-weather (&rest _args)
-  "打开当天日记时, 发现还没天气就补一条。
+(defun my/journal--insert-today-weather (buffer text)
+  "在 BUFFER 里插入 `* 天气' + TEXT。已经有了就不插, 返回是否插入。
 
-`denote-journal-new-or-existing-entry' 只在新文件上跑
-`denote-after-new-note-hook'。新建当天日记之后再次打开 (追加内容) 走的是
-\"existing\" 分支, hook 不触发, 天气就永远不会补上——所以这里再兜一层。
-只补当天: 翻旧日记不该被塞一条今天的天气。"
-  (let ((file (buffer-file-name))
-        (buffer (current-buffer)))
-    (when (and (my/denote-journal--today-file-p file)
-               (not (my/denote-journal--has-weather-p buffer)))
+插入点是第一个 heading 之前 —— 天气是当天最上面一条。层级从 `**' 降为 `*':
+2026-10-19 起日期 heading 取消, 当天条目整体上移一级。
+不在这里跳空行: 刚建好的日记文件往往末尾跟着一串空行, 跳过去等于把
+天气插到空行之后, 而且那个 `while (looking-at-p '^[ \t]*$')' 在文件
+末尾是个死循环 (旧代码就栽在这, Emacs 吃满一个核)。"
+  (with-current-buffer buffer
+    (save-excursion
+      (save-restriction
+        (widen)
+        (let (inserted)
+          (when (not (my/journal--today-weather-p buffer))
+            (goto-char (point-min))
+            (if (re-search-forward "^\\*+ " nil t)
+                (goto-char (match-beginning 0))   ; 第一个 heading 的行首
+              (goto-char (point-max)))
+            (insert "* 天气\n" text "\n\n")
+            (setq inserted t))
+          inserted)))))
+
+(defun my/journal--live-buffer ()
+  "日记文件的 base buffer —— 在内存里是明文, 可以直接改。没打开返回 nil。
+
+取 base buffer 是为了绕开 org-capture 的 indirect buffer: 它跟 base 共享
+文本但有自己的 narrowing, 在它里面 `insert' 会插进 capture 正在编辑的内容。"
+  (let ((buf (get-file-buffer (my/journal-file-for))))
+    (when (and buf (buffer-live-p buf))
+      (or (buffer-base-buffer buf) buf))))
+
+(defun my/journal--file-p (&optional file)
+  "FILE (默认当前 buffer 的文件) 是不是日记文件。"
+  (let ((file (or file (buffer-file-name))))
+    (and file
+         (string= (expand-file-name file)
+                  (expand-file-name (my/journal-file-for))))))
+
+(defun my/journal-ensure-today-weather (&rest _args)
+  "今天那条日记还没有天气时, 异步补一条。
+
+2026-10-16 日记合并进单个 `journal.org' 之后, 旧逻辑三条路全断:
+1. `denote-after-new-note-hook' 里判断文件名含 `__journal' —— 不再有按天
+   denote 文件, 永远不匹配;
+2. 旧 `my/journal--insert-weather' 在整个文件里搜 `^*+ 天气' —— 234 条
+   旧日记里任何一条天气都会命中, 于是「今天」永远被认为已经有天气;
+3. 插到文件顶部 —— 单文件下那是 2026-03 那条日记的头, 不是今天。
+
+现在改成: 先定位今天的日期 heading, 只在那条日记的范围内判断和插入。
+
+只在日记 buffer 已经在内存里 (明文) 时动手, 绝不在这里
+`find-file-noselect' 加密文件 —— 异步哨兵里解密会弹口令框把 Emacs 卡住。
+buffer 没开就不补, 下一条 hook 会兜住。"
+  (let ((buffer (my/journal--live-buffer)))
+    (when (and buffer
+               (not (my/journal--today-weather-p buffer)))
       (my/weather--get
        (lambda (text)
-         (when (buffer-live-p buffer)
+         (when (and (buffer-live-p buffer)
+                    (my/journal--insert-today-weather buffer text))
            (with-current-buffer buffer
-             (when (and (not (my/denote-journal--has-weather-p buffer))
-                        (my/journal--insert-weather buffer text))
-               (save-buffer)
-               (message "已补当天天气: %s" text)))))))))
+             (save-buffer))
+           (message "已补当天天气: %s" text))))
+      t)))
 
-(advice-add 'denote-journal-new-or-existing-entry :after
-            #'my/denote-journal-ensure-weather)
+(defun my/journal-insert-weather ()
+  "手动给今天的日记补一条天气 (自动补失败 / 网络挂了时用)。"
+  (interactive)
+  (unless (my/journal--live-buffer)
+    (find-file (my/journal-file-for)))
+  (if (my/journal--today-weather-p)
+      (message "今天的日记已经有天气了")
+    (my/journal-ensure-today-weather)
+    (message "正在取天气…")))
 
-;; 真正的日记入口是 org-capture: `SPC n n j' → (org-capture nil "j"), 模板用
-;; (file my/journal-capture-target)。它既不走 denote 的 hook, 也不经过上面
-;; 的 advice。capture 打开目标文件必然经过 find-file, 所以兜底挂在
-;; `find-file-hook' 上, denote 新建、capture 追加、手动打开三条路都覆盖。
-(add-hook 'find-file-hook #'my/denote-journal-ensure-weather)
+;; 手动打开日记 / calendar 跳转 / capture 定位目标文件, 都必经 find-file,
+;; 挂这里覆盖大部分场景。
+(add-hook 'find-file-hook #'my/journal-ensure-today-weather)
 
-;; 当天的日记 buffer 早就开着时, capture 不会重新 find-file, 上面这条就不触发。
-;; 再在 capture 落盘前补一次: 此时当前 buffer 就是日记文件本身。
-(add-hook 'org-capture-before-finalize-hook #'my/denote-journal-ensure-weather)
+;; 写日记的主入口其实是 org-capture (`SPC n n j' → 模板 j)。capture 期间
+;; 目标文件是 narrowed 的 indirect buffer, 在那里插入会污染正在编辑的
+;; 内容 —— 所以等 finalize 之后 (当天的文件已写好并落盘) 再补。
+(add-hook 'org-capture-after-finalize-hook #'my/journal-ensure-today-weather)
+
+(defun my/journal-today ()
+  "打开今天的日记 (文件不存在就建)。"
+  (interactive)
+  (my/journal-goto-time (my/journal--effective-time) t))
+
+;;; --- 跨天全文检索 (dailies 缺的能力, 自己补) -------------------------
+;; 「一天一文件 + 全文件加密」拆掉了旧的全文检索: org-roam 的 db 不索引正文
+;; (2026-10-19 实测), 而 `rg' / `grep' 读的是磁盘上的密文。org-journal 有
+;; 现成的 `j s y', dailies 什么都没有 —— 这是选 dailies 唯一实打实的代价。
+;;
+;; 补法是遍历 roam/daily/, 用 `insert-file-contents' 逐个读: 它走
+;; `file-name-handler-alist' 里的 epa handler, 读进来的就是明文。
+;; 明文只存在于临时 buffer, 从不落盘、也不建 buffer 访问文件
+;; (所以不会触发 find-file-hook, 不会误插天气)。
+;;
+;; 代价: 236 个文件逐个解密, 实测约 40s。用 `C-u' 前缀可只搜最近 90 天。
+;; gpg-agent 缓存过期时中途会弹口令框 —— 这是加密日记的固有成本。
+
+(defvar my/journal-search-history nil)
+
+(defun my/journal--daily-files (&optional since-days)
+  "roam/daily/ 下的日记文件。SINCE-DAYS 非 nil 时只要最近这些天的。"
+  (let* ((dir (or (and (boundp 'org-roam-dailies-directory)
+                       org-roam-dailies-directory)
+                  (expand-file-name "roam/daily/" org-directory)))
+         (files (directory-files dir t "\\.org\\'")))
+    (if since-days
+        (let ((cut (format-time-string
+                    "%Y-%m-%d"
+                    (time-subtract (current-time)
+                                   (seconds-to-time (* 86400 since-days))))))
+          (cl-remove-if (lambda (f) (string< (file-name-base f) cut))
+                        files))
+      files)))
+
+(defun my/journal-search--collect (query since-days)
+  "搜 QUERY, 返回 ((文件 行号) . 显示串) 列表。QUERY 是正则。"
+  (let* ((files (sort (my/journal--daily-files since-days) #'string<))
+         (n (length files))
+         (i 0)
+         (out nil))
+    (dolist (f files)
+      (setq i (1+ i))
+      (message "搜日记 %d/%d %s…" i n (file-name-base f))
+      (with-temp-buffer
+        (ignore-errors (insert-file-contents f))
+        (goto-char (point-min))
+        (while (re-search-forward query nil t)
+          (let ((line (line-number-at-pos))
+                (text (string-trim
+                       (buffer-substring-no-properties
+                        (line-beginning-position) (line-end-position)))))
+            (push (cons (list f line)
+                        (format "%s:%d: %s" (file-name-base f) line text))
+                  out)))))
+    (nreverse out)))
+
+(defun my/journal-search (query &optional since-days)
+  "在所有日记里搜 QUERY (正则), 选中一条直接跳过去。
+
+SINCE-DAYS 限制只搜最近这些天。交互下 `C-u' 前缀 = 最近 90 天。"
+  (interactive
+   (list (read-regexp "搜日记 (regexp)" nil 'my/journal-search-history)
+         (when current-prefix-arg 90)))
+  (let ((cands (my/journal-search--collect query since-days)))
+    (unless cands
+      (user-error "日记里没有匹配: %s" query))
+    (let* ((choice (if (require 'consult nil t)
+                       (consult--read (mapcar #'cdr cands)
+                                      :prompt "跳到: "
+                                      :sort nil
+                                      :require-match t
+                                      :history 'my/journal-search-history)
+                     (completing-read "跳到: " (mapcar #'cdr cands)
+                                      nil t nil 'my/journal-search-history)))
+           (target (car (rassoc choice cands))))
+      (when target
+        (find-file (nth 0 target))
+        (goto-char (point-min))
+        (forward-line (1- (nth 1 target)))
+        (org-reveal)
+        (message "%s" (nth 0 target))))))
 #+end_src
 
 * Calendar (cal-china-x)
@@ -3373,14 +4892,20 @@ Before 03:00 falls back to the previous day."
   ;; 决定是否 (require 'org-noter-djvu)，放进 :config 已经晚了。
   (setq org-noter-supported-modes '(doc-view-mode pdf-view-mode nov-mode))
   :config
-  (setq org-noter-notes-search-path '("~/org/notes/")
+  ;; 2026-10-18 退役: ~/org/notes/ 随 denote 时代一起废弃 (该目录早已清空,
+  ;; 且不在 agenda / consult-notes / roam 的任何扫描范围内 —— 笔记写进去等于失踪)。
+  ;; PDF 笔记改成 roam/ref/ 下的 roam 节点, 复用全库同一套 ID 与 slug 生成器。
+  (setq org-noter-notes-search-path (list (expand-file-name "roam/ref/" org-directory))
         org-noter-default-notes-file-names '("notes.org")
         org-noter-auto-save-last-location t
-        org-noter-notes-window-location 'horizontal-split
         org-noter-highlight-selected-text t)
 
-  (defun my/org-noter-create-session-in-references (&optional arg document-file-name)
-    "Create org-noter session, always placing notes in ~/org/notes/."
+  (defun my/org-noter-create-session-in-roam (&optional arg document-file-name)
+    "Create an org-noter session whose notes file is a proper roam node.
+文件落在 =roam/ref/<id>--<slug>.org=, 头格式遵循 org-roam 的一条硬约束:
+**:PROPERTIES: 抽屉必须在 `#+title:' 之前** —— 否则 `org-roam-db-insert-file-node'
+在 point 1 判不到 `org-id-get', 文件不会被当成 file node (血泪参见
+`org-roam-node-format.md')。"
     (let* ((document-file-name (or (run-hook-with-args-until-success
                                     'org-noter-get-buffer-file-name-hook major-mode)
                                    document-file-name))
@@ -3388,16 +4913,37 @@ Before 03:00 falls back to the previous day."
                               (error "This buffer does not seem to be visiting any file")))
            (document-name (file-name-nondirectory document-path))
            (document-base (file-name-base document-name))
-           (notes-dir (expand-file-name "~/org/notes/"))
-           (notes-file (expand-file-name (concat document-base ".org") notes-dir)))
+           (notes-dir (expand-file-name "roam/ref/" org-directory))
+           ;; 2026-10-18: 全库 :ID: 已统一为 UUID（org-id 默认形态），
+           ;; 文件名也走 org-roam 默认模板格式 %<%Y%m%d%H%M%S>-${slug}.org。
+           ;; 时间戳只用于文件名前缀，身份一律交给 :ID:。
+           (id (org-id-new))
+           (notes-file (expand-file-name
+                        (concat (format-time-string "%Y%m%d%H%M%S") "-"
+                                (org-roam-node-slug
+                                 (org-roam-node-create :title document-base))
+                                ".org")
+                        notes-dir)))
       (make-directory notes-dir t)
       (unless (file-exists-p notes-file)
         (with-temp-file notes-file
-          (insert (format "#+title: %s\n#+filetags: :ref:\n#+created: %s\n\n* %s\n:PROPERTIES:\n:NOTER_DOCUMENT: %s\n:END:\n"
-                          document-base
-                          (format-time-string "[%Y-%m-%d %a]")
-                          document-base
-                          (expand-file-name document-path)))))
+          (insert (format
+                   (concat ":PROPERTIES:\n"
+                           ":ID:       %s\n"
+                           ":CUSTOM_ID: %s\n"
+                           ":END:\n"
+                           "#+title:      %s\n"
+                           "#+filetags:   :ref:\n"
+                           "#+created:    %s\n\n"
+                           "* %s\n"
+                           ":PROPERTIES:\n"
+                           ":NOTER_DOCUMENT: %s\n"
+                           ":END:\n")
+                   id id
+                   document-base
+                   (format-time-string "[%Y-%m-%d %a]")
+                   document-base
+                   (expand-file-name document-path)))))
       (with-current-buffer (find-file-noselect notes-file)
         (goto-char (point-min))
         (re-search-forward (org-re-property org-noter-property-doc-file) nil t)
@@ -3405,7 +4951,7 @@ Before 03:00 falls back to the previous day."
         (org-noter))))
 
   (setq org-noter-create-session-from-document-hook
-        '(my/org-noter-create-session-in-references)))
+        '(my/org-noter-create-session-in-roam)))
 #+end_src
 
 ** epub-reader (yibie)
@@ -4817,7 +6363,31 @@ identical to what `doom.ps1' does on Windows."
   :after elfeed
   :config
   (elfeed-org)
-  (setq rmh-elfeed-org-files (list (expand-file-name "~/org/notes/20260101T000013--elfeed__emacs_index.org"))))
+  ;; 2026-10-18 退役: notes.org 已并入 roam, elfeed 订阅独立成 roam 节点
+  ;; (roam 节点 ID 20260101T000013, 84 条订阅, 逐条 diff 过与退役前一一对应 ——
+  ;;  迁移时漏过一条 `***` 跳级的播客 feed, 已补回)。
+  ;; elfeed-org 只认「标题以 URL 开头」的 heading; 全库 84 条全部在这一个文件里,
+  ;; 所以直接指定它, 而不是递归 roam/ (media/read 里也有 URL, 扫进去会误收)。
+  ;; 注意: 别在其他 roam 节点里写「标题以 http 开头」的普通笔记, 会被当成订阅源。
+  ;;
+  ;; ⚠ 2026-10-21 修复「M-x elfeed 打不开」:
+  ;;   这里原本写死文件名 `20260101T000013--elfeed-subscriptions.org`, 但 10-19 那次
+  ;;   全库 roam 重命名(去掉 `T` 分隔符、`--` 改 `_`、标题空格改下划线)之后, 实际文件
+  ;;   已经是 `20260101000013-elfeed_subscriptions.org`。写死的路径随之失效, 而
+  ;;   `rmh-elfeed-org-check-configuration-file` 对不存在的文件是直接 (error ...),
+  ;;   它又被 `rmh-elfeed-org-process-advice` 挂在 `elfeed` 的 :before 上 ——
+  ;;   结果就是**每次 M-x elfeed 都在启动前抛错, 界面根本出不来**。
+  ;;   改成按文件名模式在 roam/ 下查, 不再依赖具体文件名, 下次重命名不会再炸。
+  (defun my/elfeed-org-subscription-file ()
+    "Locate the single org file that holds elfeed subscriptions.
+Matched by filename pattern under `org-directory'/roam, so a roam file
+rename (like the 2026-10-19 whole-library rename) cannot break elfeed again."
+    (or (car (directory-files-recursively
+              (expand-file-name "roam" org-directory)
+              "elfeed.*subscriptions?\\.org\\'"))
+        (expand-file-name "roam/emacs/20260101000013-elfeed_subscriptions.org"
+                          org-directory)))
+  (setq rmh-elfeed-org-files (list (my/elfeed-org-subscription-file))))
 
 (after! elfeed-goodies
   (setq elfeed-goodies/entry-pane-position 'right
@@ -4834,59 +6404,6 @@ identical to what `doom.ps1' does on Windows."
 
 (use-package! elfeed-tube-mpv
   :after elfeed-tube)
-#+end_src
-
-** Agent-shell
-=my/athenai-api-key= 由 =secrets.el= 提供; 缺失时 agent-shell 配置静默跳过。
-#+begin_src emacs-lisp
-(when (boundp 'my/athenai-api-key)
-  (require 'acp)
-  (require 'agent-shell)
-
-  (setq agent-shell-preferred-agent-config
-        (agent-shell-anthropic-make-claude-code-config))
-
-  (setq agent-shell-anthropic-authentication
-        (agent-shell-anthropic-make-authentication
-         :api-key (lambda () my/athenai-api-key)))
-
-  (setq agent-shell-anthropic-claude-environment
-        (agent-shell-make-environment-variables
-         "ANTHROPIC_BASE_URL" "https://athenai.mihoyo.com/v1"
-         "ANTHROPIC_MODEL" "claude-sonnet-4-6"
-         "ANTHROPIC_SMALL_FAST_MODEL" "claude-sonnet-4-6"))
-
-  ;; 统一 transcript 存储位置, 无论在哪个 project 下都存到 ~/.agent-shell/
-  (setq agent-shell-dot-subdir-function
-        (lambda (subdir)
-          (expand-file-name subdir "~/.agent-shell")))
-
-  ;; Buffer-local Evil-friendly bindings
-  ;; NOTE: comint-mode-map 绑了 RET → comint-send-input，shell-maker-mode-map 又用 <remap>
-  ;; 转成 shell-maker-submit。evil-define-key 'insert 在 insert state 下不一定能拦截到 RET
-  ;; （insert state 设计透明，大部分键穿透到 mode map 链）。
-  ;;
-  ;; 解法：直接在 agent-shell-mode-map 上绑 RET → newline 截断穿透链；normal state 下
-  ;; 用 evil-define-key 单独绑 RET → shell-maker-submit。
-  (after! agent-shell
-    (define-key agent-shell-mode-map (kbd "RET")   #'newline)
-    (define-key agent-shell-mode-map (kbd "S-RET") #'shell-maker-submit)
-    (evil-define-key 'normal agent-shell-mode-map
-      (kbd "RET") #'shell-maker-submit
-      "q"         #'quit-window)
-    (evil-define-key 'normal agent-shell-mode-map
-      (kbd "gr") #'agent-shell-send-dwim)
-    (evil-define-key 'visual agent-shell-mode-map
-      (kbd "gr") #'agent-shell-send-dwim))
-
-  ;; Diff buffer auto enters emacs-state
-  (add-hook 'diff-mode-hook
-            (lambda ()
-              (when (string-match-p "\\*agent-shell-diff\\*" (buffer-name))
-                (evil-emacs-state))))
-  ;; Viewport auto emacs-state
-  (with-eval-after-load 'evil
-    (evil-set-initial-state 'agent-shell-viewport-view-mode 'emacs)))
 #+end_src
 
 * Languages
@@ -4971,10 +6488,12 @@ identical to what `doom.ps1' does on Windows."
 #+begin_src emacs-lisp
 ;;; Email (mu4e + mbsync)
 ;;
-;; 外部依赖（系统级，必须 sudo 装，Doom 装不了）：
-;;   sudo apt install isync maildir-utils
+;; 外部依赖（系统级，必须用 root 装，Doom 装不了）：
+;;   Arch/Omarchy:  sudo pacman -S isync  &&  yay -S mu
+;;                  （mu 不在官方仓库，只有 AUR；isync 提供 mbsync）
+;;   Debian/Ubuntu: sudo apt install isync maildir-utils
 ;;     isync          → mbsync，负责 IMAP 双向同步
-;;     maildir-utils  → mu（索引/查询）+ mu4e（Emacs 界面 elisp）
+;;     mu / maildir-utils → mu（索引/查询）；mu4e（Emacs 界面 elisp）由 Doom 装
 ;;
 ;; 数据流：  邮件服务器 --mbsync--> ~/.mail/{gmail,outlook} (Maildir)
 ;;                                  --mu index--> Xapian 索引 --mu4e--> Emacs
@@ -5104,8 +6623,6 @@ identical to what `doom.ps1' does on Windows."
       (:prefix ("o" . "open")
        :desc "Elfeed"           "e" #'elfeed
        :desc "Eshell here"      "E" #'my/eshell-here
-       :desc "Claude Code"      "s" #'agent-shell-anthropic-start-claude-code
-       :desc "Codex"            "c" #'agent-shell-openai-start-codex
        :desc "Daily agenda"     "d" (cmd! (org-agenda nil "d"))
        :desc "Weekly agenda"    "w" (cmd! (org-agenda nil "w"))
        :desc "GTD review"       "g" (cmd! (org-agenda nil "g"))
@@ -5114,26 +6631,15 @@ identical to what `doom.ps1' does on Windows."
        :desc "Mail (mu4e)"      "m" #'mu4e
        :desc "Compose mail"     "M" #'mu4e-compose-new)
 
-      ;; Notes / Denote
+      ;; Notes（denote 前缀 2026-10-17 删除，journal 两个键收进这里）
       (:prefix ("n" . "notes")
        :desc "Consult notes (pick)"   "s" #'consult-notes
        :desc "Consult notes (search)" "S" #'consult-notes-search-in-all-notes
-       (:prefix ("d" . "denote")
-        :desc "New note"                       "n" #'denote
-        :desc "New note (choose type)"         "N" #'denote-type
-        :desc "New note in subdir"             "D" #'denote-subdirectory
-        :desc "Open or create"                 "f" #'denote-open-or-create
-        :desc "Insert link"                    "i" #'denote-link-or-create
-        :desc "Insert link (region → title)"   "I" #'denote-link
-        :desc "Add links (search)"             "L" #'denote-add-links
-        :desc "Backlinks"                      "b" #'denote-backlinks
-        :desc "Rename file"                    "r" #'denote-rename-file
-        :desc "Rename from front-matter"       "R" #'denote-rename-file-using-front-matter
-        :desc "Add keywords"                   "k" #'denote-keywords-add
-        :desc "Remove keywords"                "K" #'denote-keywords-remove
-        :desc "Dired in denote dir"            "d" #'denote-dired
-        :desc "Today's journal"                "j" #'denote-journal-new-or-existing-entry
-        :desc "Insert weather · 补天气"        "W" #'my/journal-insert-weather)
+       :desc "org-QL find (org-dir)" "q" #'org-ql-find-in-org-directory
+       :desc "Today's journal"         "j" #'my/journal-today
+       :desc "Insert weather · 补天气" "W" #'my/journal-insert-weather
+       ;; C-u 前缀 = 只搜最近 90 天 (全量要解密 236 个文件, 实测 ~40s)
+       :desc "Search journal · 搜日记"  "J" #'my/journal-search
        (:prefix ("i" . "investment · 投资")
         :desc "Beancount buy · 买入"                  "b" #'my/beancount-record-buy
         :desc "Beancount sell · 卖出"                 "s" #'my/beancount-record-sell
@@ -5167,7 +6673,20 @@ identical to what `doom.ps1' does on Windows."
          :desc "动漫·看完"  "A" (cmd! (org-capture nil "mA")))
         (:prefix ("b" . "books · 书")
          :desc "书·待读"    "b" (cmd! (org-capture nil "bb"))
-         :desc "书·阅读中"  "B" (cmd! (org-capture nil "bB")))))
+         :desc "书·阅读中"  "B" (cmd! (org-capture nil "bB")))
+        ;; 2026-10-18: Doom 官方把 roam 键位绑在 org-mode-map 的 localleader（`SPC m m`），
+        ;; 只在 org 文件里有效；在 dashboard / scratch / 任何非 org buffer 里会是
+        ;; "SPC m m is undefined"。这里补一组**全局** leader 键位，任何地方都能唤起。
+        (:prefix ("r" . "roam · 知识网")
+         :desc "Find node · 找节点"   "f" #'org-roam-node-find
+         :desc "Insert link · 插链接" "i" #'org-roam-node-insert
+         :desc "Backlinks · 反链"     "b" #'org-roam-buffer-toggle
+         :desc "Capture · 新建节点"   "c" #'org-roam-capture
+         :desc "Graph · 图谱"         "g" #'org-roam-graph
+         :desc "Sync db · 重建索引"   "s" #'org-roam-db-sync
+         ;; 2026-10-21 补: Doom 的 +roam 没给 org-roam-extract-subtree 绑键
+         ;; (实测 where-is-internal 为空), 只能 M-x。这里挂自家的落点补丁版本。
+         :desc "Extract · heading 成节点" "x" #'my/org-roam-extract-to-domain)))
 
       ;; Toggle / utilities
       (:prefix ("t" . "toggle")
@@ -5184,7 +6703,10 @@ identical to what `doom.ps1' does on Windows."
       :map org-mode-map
       :localleader
       (:prefix ("i" . "image")
-       :desc "Toggle inline"  "t" #'org-toggle-inline-images
+       :desc "Preview near point" "t" #'my/org-preview-images-near-point
+       :desc "Attach menu"    "a" #'my/org-attach-menu
+       ;; p / s 走 org-download, 但 org-download-method = 'attach, 所以
+       ;; 一样落到 org-attach 目录 + [[attachment:]] 链接
        :desc "Paste clipboard" "p" #'org-download-clipboard
        :desc "Screenshot"     "s" #'org-download-screenshot
        :desc "Yank"           "y" #'org-download-yank
@@ -5202,26 +6724,16 @@ identical to what `doom.ps1' does on Windows."
        :desc "Number captions" "n" #'my/org-caption-number-mode)
       ;; NOTE: Doom 自带 (:prefix ("d" . "date/deadline"))，带描述的 :prefix 会
       ;; 清空该前缀原有键，所以 date 那几个键必须在这里显式补回来。
-      (:prefix ("d" . "date/denote")
+      ;; 2026-10-17: denote 那 6 个键 + dblock 子组随包一起删除, 前缀改名 date/id。
+      ;; `I' 是大文件体系下加 heading CUSTOM_ID 的命令, 跟 denote 无关, 保留。
+      (:prefix ("d" . "date/id")
        ;; org date/deadline（原 Doom 默认，勿删）
        :desc "Schedule"               "s" #'org-schedule
        :desc "Deadline"               "d" #'org-deadline
        :desc "Timestamp"              "t" #'org-time-stamp
        :desc "Inactive timestamp"     "T" #'org-time-stamp-inactive
-       ;; denote
-       :desc "Insert link"            "i" #'denote-link-or-create
-       :desc "Backlinks"              "b" #'denote-backlinks
-       :desc "Add keywords"           "k" #'denote-keywords-add
-       :desc "Rename (front-matter)"  "r" #'denote-rename-file-using-front-matter
-       :desc "Link to heading"        "h" #'denote-org-link-to-heading
-       :desc "Backlinks for heading"  "H" #'denote-org-backlinks-for-heading
-       :desc "Extract subtree to note" "x" #'denote-org-extract-org-subtree
-       (:prefix ("o" . "dblock")
-        :desc "Links (by regexp)"     "l" #'denote-org-dblock-insert-links
-        :desc "Backlinks"             "b" #'denote-org-dblock-insert-backlinks
-        :desc "Missing links"         "m" #'denote-org-dblock-insert-missing-links
-        :desc "Files"                 "f" #'denote-org-dblock-insert-files
-        :desc "Files as headings"     "F" #'denote-org-dblock-insert-files-as-headings))
+       ;; 大文件体系下的 heading 级 ID (C-u 前缀 = 同时加进顶部导航)
+       :desc "Set heading CUSTOM_ID"  "I" #'my/org-heading-id)
       ;; org-transclusion
       (:prefix ("T" . "transclusion")
        :desc "Add at point"    "a" #'org-transclusion-add
@@ -5237,17 +6749,10 @@ identical to what `doom.ps1' does on Windows."
 
 ** Markdown localleader
 #+begin_src emacs-lisp
+;; 2026-10-17: denote 前缀整组删除（7 个键），只剩 image 组。
 (map! :after markdown-mode
       :map markdown-mode-map
       :localleader
-      (:prefix ("d" . "denote")
-       :desc "Insert link"              "i" #'denote-link-or-create
-       :desc "Backlinks"                "b" #'denote-backlinks
-       :desc "Rename (front-matter)"    "r" #'denote-rename-file-using-front-matter
-       :desc "denote: → file path"      "f" #'denote-markdown-convert-links-to-file-paths
-       :desc "file path → denote:"      "F" #'denote-markdown-convert-links-to-denote-type
-       :desc "denote: → Obsidian"       "o" #'denote-markdown-convert-links-to-obsidian-type
-       :desc "Obsidian → denote:"       "O" #'denote-markdown-convert-obsidian-links-to-denote-type)
       (:prefix ("i" . "image")
        :desc "Delete file link" "d" #'my/markdown-delete-file-link-at-point))
 #+end_src
@@ -5325,9 +6830,14 @@ identical to what `doom.ps1' does on Windows."
     ;; wires do-set to -c / -o; do-get is derived from the same binary.
     (sis-ism-lazyman-config "1" "2" 'fcitx5)
 
-    ;; Poll once a second so switches made outside Emacs (e.g. Super+Space)
-    ;; are still picked up. No imm32-style race here, unlike Windows.
-    (setq sis-auto-refresh-seconds 1)
+    ;; 不轮询。sis 的 refresh 读的是 fcitx5 的**全局**状态 —— fcitx5-remote
+    ;; 无参数时查的是当前焦点 IC, 而 Emacs 失焦时那是**别的窗口**的状态。
+    ;; sis 拿到这个状态会按它 set 回去, 于是"不打字也会自己切英文":
+    ;; 每秒一次读 + 写, 外部窗口的英文状态被反复灌进 fcitx5。
+    ;; (实测: 30 秒里 21 次 State + 4 次 Deactivate, 全部来自这个 idle timer。)
+    ;; 与 Windows 分支保持一致 (那里早就设 nil, 见上方)。
+    ;; 代价: Emacs 不再自动感知外部切换 (如 Super+Space), 需手动切一次。
+    (setq sis-auto-refresh-seconds nil)
 
     (sis-global-cursor-color-mode t)
     (when (fboundp 'modus-themes-get-color-value)
