@@ -337,6 +337,10 @@ Loaded early so downstream config (org-gcal …) sees the credentials.
 ;; so-long-mode: 智能处理超长单行 (minified JS / 单行大 JSON 等)
 ;; 比按文件大小一刀切禁用 font-lock 更聪明: 只有"行过长"才介入
 (global-so-long-mode 1)
+
+;; fontification 推迟到空闲再做：j/k 滚到未 fontify 区域时不再同步阻塞。
+;; 2026-11-06 起全局生效 —— 此前只写在下面的 Windows 分支里，Linux 实测是 nil。
+(setq jit-lock-defer-time 0.05)
 #+end_src
 
 ** Encoding
@@ -484,8 +488,7 @@ VC, process creation, file I/O, rendering. 大文件渲染已交给 so-long-mode
   (setq inhibit-compacting-font-caches t
         w32-get-true-file-attributes nil)
 
-  ;; Rendering (only what Doom doesn't set)
-  (setq jit-lock-defer-time 0.05)
+  ;; Rendering: jit-lock-defer-time 已提到上方全局设置 (2026-11-06)，此处不再重复。
 
   ;; Long lines (Emacs 29+)
   (when (boundp 'long-line-threshold)
@@ -1328,6 +1331,61 @@ ALPHA 一律表示「离背景多远」(= 有多显眼): 1 = 纯语义色, 0 = �
   (use-package! ace-pinyin
     :config
     (ace-pinyin-global-mode +1)))
+
+  ;; ---- 大 org 文件显示层护栏 (2026-11-06，notes.org 卡顿实测后落盘) ----
+  ;; 试用品在 .agent/notes-perf-tune.el，Sean 体感确认有效后固化到这里。
+  ;; 背景：notes.org = 716KB / 19907 行 / 1604 heading / 774 行表格 / 折叠态 2539
+  ;; 个 overlay。实测 post-command-hook 全部函数加起来 <0.2ms/次 —— 瓶颈不在
+  ;; elisp 钩子，而在 redisplay / fontification 层：
+  ;;   - valign: `valign--org-cycle-refontify' 在 all 状态会 jit-lock-refontify
+  ;;     整个 buffer；`valign--flag-region-advice' advice 了 org-flag-region，
+  ;;     每次折叠把区域 fontified 置 nil。valign 源码注释自认
+  ;;     "valign is pretty bad at large Org files anyway"。
+  ;;   - pangu-spacing: jit-lock-register 给全库中文边界挂 overlay。
+  ;;   - display-line-numbers / line-spacing 3 / visual-fill-column: redisplay 叠码。
+  ;; ⚠ 只对 >300KB 的 org 文件生效；journal.org（人的领地）显式排除，永不触碰。
+  ;; ⚠ 保留 visual-line-mode —— 关掉会破坏 j/k 按视觉行移动的手感。
+  ;; ⚠ 不动全局 `org-fold-core-style'：Org 9.8 在 Emacs>=29 默认 overlays 是为
+  ;;   第三方包兼容，且必须在 Org 加载前设置。这里只用 buffer-local 的官方大文件
+  ;;   开关 `org-fold-core--optimize-for-huge-buffers' (org-fold-core.el:307)。
+  (after! org
+    (defvar my/org-large-file-threshold 300000
+      "超过此字符数的 org 文件启用显示层护栏。")
+
+    (defun my/org-large-file-p ()
+      "当前 buffer 是否是该关掉显示层的大 org 文件。"
+      (and (derived-mode-p 'org-mode)
+           buffer-file-name
+           ;; 日记是人的领地，无论长到多大都不碰
+           (not (string= (file-name-nondirectory
+                          (file-truename buffer-file-name))
+                         "journal.org"))
+           (> (buffer-size) my/org-large-file-threshold)))
+
+    (defun my/org-large-file--trim-display ()
+      "关掉巨型 org buffer 上开销最大的显示层。"
+      (when (my/org-large-file-p)
+        (dolist (m '(valign-mode org-appear-mode pangu-spacing-mode
+                     display-line-numbers-mode hl-line-mode visual-fill-column-mode))
+          (when (and (boundp m) (symbol-value m) (fboundp m))
+            (funcall m -1)))
+        ;; spacious-padding 的 3px 行距：2 万行 = 6 万像素行高重算
+        (setq-local line-spacing 0)
+        ;; Org 官方大文件开关，文档原话：use it if moving point across folded
+        ;; regions becomes slow。safe-local-variable，只影响本 buffer。
+        (setq-local org-fold-core--optimize-for-huge-buffers '(grab-invisible))))
+
+    ;; 两个 hook 都要挂，缺一不可：
+    ;;   - org-mode-hook DEPTH 90：跑在 valign / org-appear / visual-fill-column
+    ;;     的 :hook 注册之后，否则它们还没启用、关不掉。
+    ;;   - find-file-hook DEPTH 90：globalized minor mode（pangu-spacing、
+    ;;     display-line-numbers 等）走 `after-change-major-mode-hook'，比
+    ;;     org-mode-hook 更晚；实测该 hook 里有
+    ;;     `global-pangu-spacing-mode-enable-in-buffer'，只挂 org-mode-hook 时
+    ;;     重启后 pangu-spacing 会自己回来。find-file-hook 在所有 major-mode
+    ;;     hook 之后，用来兜底。两次调用幂等（已关的 mode 会跳过）。
+    (add-hook 'org-mode-hook #'my/org-large-file--trim-display 90)
+    (add-hook 'find-file-hook #'my/org-large-file--trim-display 90))
 
   ;; ---- orderless 拼音匹配 (2026-10-22 引入, 2026-10-25 加护栏) ----
   ;; 让 minibuffer 里打 `jj' 就能命中「基金」, 全程不用切输入法、不用上屏。
@@ -2266,7 +2324,10 @@ C-u: 从整个 ~/org/data/ 池子里挑 (引用别处已有的文件)。"
 2026-10-24 晚: 日记取消加密 + 明文化, 引用的附件不再因 GPG 密文被 epa 正则跳过
 (历史: 当天白天日记还在 ~/org/journal/ 且全 GPG 密文 → 附件成孤儿, 取消加密后消失)。
 2026-11-01: 日记整体迁到 org/journal/ (按年合并), 不在 notes/ 递归扫描内,
-故在 `my/org-attach--scan-files' 里单独把 journal/ 递归加回来, 附件链接照常算数。")
+故在 `my/org-attach--scan-files' 里单独把 journal/ 递归加回来, 附件链接照常算数。
+2026-11-06: 日记合并成根目录单文件 ~/org/journal.org 并恢复 GPG 加密 →
+scan-files 改成直接列这个文件; 且 `--linked-names' 里对它有专门的解密读分支,
+否则 42 条 attachment: 链接会重新变成「孤儿」误报 (2026-10-24 前的老坑)。")
 
   (defun my/org-attach--scan-files ()
     "Every Org file that might link into the attachment pool."
@@ -2279,12 +2340,11 @@ C-u: 从整个 ~/org/data/ 池子里挑 (引用别处已有的文件)。"
       (dolist (f (directory-files-recursively
                   (expand-file-name "notes/" org-directory) "\\.org\\'"))
         (push f files))
-      ;; 2026-11-01: 日记迁到 org/journal/ (按年合并, 一年一文件), 虽不在
-      ;; org-roam-directory / agenda 扫描树内, 但其 attachment: 链接仍指向 data/,
-      ;; 必须纳入孤儿扫描, 否则日记附件会被误报成孤儿。
-      (dolist (f (directory-files-recursively
-                  (expand-file-name "journal/" org-directory) "\\.org\\'"))
-        (push f files))
+      ;; 2026-11-06: 日记合并成根目录单文件 ~/org/journal.org (GPG 密文), 虽不在
+      ;; org-roam-directory / agenda 扫描树内, 但 42 条 attachment: 链接仍指向 data/,
+      ;; 必须纳入孤儿扫描 —— `--linked-names' 里对它走解密读分支 (见下)。
+      (when (file-exists-p my/journal-file)
+        (push my/journal-file files))
       ;; 归档出去的条目还留着链接, 不扫会误报
       (dolist (f (file-expand-wildcards
                   (expand-file-name ".archive/*.org" org-directory)))
@@ -2299,9 +2359,16 @@ C-u: 从整个 ~/org/data/ 池子里挑 (引用别处已有的文件)。"
           (enc (or (bound-and-true-p epa-file-name-regexp) "\\`\\'")))
       (with-temp-buffer
         (dolist (f (my/org-attach--scan-files))
-          ;; 密文读进来只剩二进制, 而且会连带触发一遍解密 —— 直接跳过
-          (unless (string-match-p enc f)
-            (ignore-errors (insert-file-contents f))))
+          (cond
+           ;; 日记单文件虽是 GPG 密文, 但必须读 —— 42 条 attachment: 链接在里面。
+           ;; epa handler 会在 `insert-file-contents' 时透明解密 (加密子密钥已去
+           ;; 口令, 不弹 pinentry)。2026-10-24 前「一律跳过密文」正是附件被
+           ;; 误报成孤儿的根源, 这里单独开一个分支把它修掉。
+           ((equal f my/journal-file)
+            (ignore-errors (insert-file-contents f)))
+           ;; 其它匹配 epa 正则的历史密文文件仍然跳过
+           ((string-match-p enc f) nil)
+           (t (ignore-errors (insert-file-contents f)))))
         (goto-char (point-min))
         (while (re-search-forward
                 "\\[\\[\\(?:attachment\\|file\\):\\([^]|]+\\)" nil t)
@@ -2318,9 +2385,9 @@ C-u: 从整个 ~/org/data/ 池子里挑 (引用别处已有的文件)。"
 旁路进来的(手机 / shell 拷贝, 不走 `org-attach-attach'), 它就永远留在池子里没人
 知道 —— 还得跟着 rclone 双向同步到 R2。
 
-注: 2026-10-24 晚起日记已取消加密、改明文; 2026-11-01 又迁到 org/journal/
-(按年合并), 在 `my/org-attach--scan-files' 里单独递归加回, 故这里列出的孤儿
-仍是**真孤儿**, 没有「日记附件被误报」的历史噪音。"
+注: 2026-11-06 起日记合并成根目录 ~/org/journal.org 单文件并恢复 GPG 加密;
+`my/org-attach--scan-files' 直接列它, `--linked-names' 对它走解密读分支,
+故 42 条日记附件链接照常被计入, 下面列出的孤儿仍是**真孤儿**。"
     (interactive)
     (let* ((dir   (file-name-as-directory org-attach-id-dir))
            (table (my/org-attach--linked-names))
@@ -2339,8 +2406,8 @@ C-u: 从整个 ~/org/data/ 池子里挑 (引用别处已有的文件)。"
           (insert (format ";; %d / %d files in %s are referenced by no org link.\n"
                           (length rows) (length all) dir))
           (insert (format ";; total %s\n" (file-size-human-readable (or total 0))))
-          (insert ";; (journal notes are plain text under org/journal/ since 2026-11-01,\n")
-          (insert ";;  scanned separately in `my/org-attach--scan-files'; orphans below are genuine.)\n\n")
+          (insert ";; (journal.org is GPG ciphertext since 2026-11-06, decrypted on read\n")
+          (insert ";;  in `my/org-attach--linked-names'; orphans below are genuine.)\n\n")
           (dolist (row rows)
             (insert (format "%8s  %s\n"
                             (file-size-human-readable (car row))
@@ -2507,46 +2574,19 @@ WAIT / 裸 TODO), 每个 block 自带 overriding-header。没有任何外部包�
 (after! org
   (setq org-agenda-inhibit-startup t
         org-agenda-tags-column 'auto
-        ;; 2026-10-18 退役: notes/things/finance/health/media/read 六个根主文件
-        ;; 已并入 ~/org/notes/。这里递归收 notes/ 里的**任务型**节点:
-        ;; notes/media/ 下 10 个分类文件与 notes/read/ 下的书单/读书笔记是记录库,
-        ;; 它们的伪 TODO 已转成 :状态: 属性 (实测 TODO 关键字 = 0), 这里继续
-        ;; 排除 —— 仍是 Sean 拍板的「记录不该当任务扫」语义, 不是性能取舍。
-        ;; 2026-10-18 二次改: media.org 拆成 roam/media/ 下 9 个文件, 排除判据从
-        ;; 「文件名 = media.org」改成「在 roam/media/ 目录下」。漏改会让 9 个记录库
-        ;; 文件 (尤其 Top250 的 420 个 heading) 全进 agenda。
-        ;; 2026-10-19 四改: read.org 拆成 roam/read/ 下 17 个文件 (8 书单 +
-        ;; 8 本书笔记 + 1 index), 判据同样从文件名改成目录前缀。
-        ;; 2026-10-23 六改: literature/ (网页存档) 也是记录库, 同上排除。
-        ;; 2026-11-02: media 域合并进根目录单文件 ~/org/media.org (11 篇 →
-        ;; 11 个一级 heading)。notes/media/ 目录已不存在, 该分支改判 media.org。
-        ;; media.org 在 ~/org/ 根目录, 本来就不在 `directory-files-recursively
-        ;; "~/org/notes"' 的扫描树内 → 天然不进 agenda; 这里保留显式判据是为了
-        ;; 将来若把 media.org 挪进 notes/ 时不会被漏扫进来。
-        ;; ⚠️ 判据必须**内联**在这里, 不能改成调用
-        ;; `my/org-record-library-file-p': 那个函数定义在本文件更靠后的块里,
-        ;; 而 `org-agenda-files' 是**加载期**求值的, 调用它必报 void-function。
-        ;; 2026-11-01 改: 日记从 notes/journal/ 整体迁出到 ~/org/journal/ (按年合并,
-        ;; 一年一文件 YYYY.org), 落在 `org-roam-directory' (= ~/org/notes) 之外。
-        ;; 于是 `directory-files-recursively "~/org/notes"' 根本扫不到日记,
-        ;; 「journal 不进 agenda」现在由拓扑保证 —— 下面不再需要 journal 的
-        ;; 内联排除分支 (已删除)。「journal 不进 agenda」仍是铁律, 只是判据从
-        ;; 「显式排除」变成「根本不在扫描树内」。
-        org-agenda-files (append '("~/org/inbox.org" "~/org/.calendar")
-                                 (seq-remove
-                                  (lambda (f)
-                                    (let ((f (expand-file-name f)))
-                                      (or (string-equal
-                                           (expand-file-name "media.org" org-directory)
-                                           f)
-                                          (string-prefix-p
-                                           (expand-file-name "notes/read/" org-directory)
-                                           f)
-                                          (string-prefix-p
-                                           (expand-file-name "notes/literature/" org-directory)
-                                           f))))
-                                  (directory-files-recursively
-                                   "~/org/notes" "\\.org\\'")))
+        ;; ⚠ 2026-11-05 收敛: agenda 只扫 inbox.org + .calendar/ 两个来源。
+        ;; 历史: 10-18 ~ 11-02 一直是「inbox + .calendar + notes/ 递归(内联排除
+        ;; 记录库/日记)」; 11-02/11-03 各域合并进根目录单文件后 notes/ 只剩 6 篇
+        ;; 残留, 其中 5 篇被排除判据滤掉, 实际只有 zettel 1 篇进 agenda ——
+        ;; Sean 决定连这 1 篇也去掉, agenda 回归「待办 + 日历」。
+        ;; ⚠ 必须是**字面值**, 别调用后面才定义的 `my/notes-*' 谓词:
+        ;; `org-agenda-files' 在**加载期**求值, 调用必报 void-function。
+        ;; ⚠ 与搜索通道分家: `my/org-ql-files' / consult-notes 仍按全库节点扫。
+        ;; ⚠ `my/org-gcal-dedup-after-fetch' 用 `(org-agenda-files t)' 收集
+        ;; :entry-id: 去重, 范围随之缩小 (4633 行); 当前 notes/ 下 0 个
+        ;; :entry-id:, 无实际影响。若日后日历条目重复拉取, 给那个函数补
+        ;; `my/org-ql-files' 作额外来源, 别把文件塞回 agenda。
+        org-agenda-files '("~/org/inbox.org" "~/org/.calendar")
         org-default-notes-file "~/org/inbox.org")
 
   ;; Archive
@@ -3085,24 +3125,25 @@ ARGS 是原参数表 (FILES SILENT)。返回改过 FILES 的新参数表。"
           (end-of-line)
           (insert (format "\n%s- [[#%s][%s]]" indent id title))))))
 
-  ;; 2026-10-18 退役: 六个根主文件已并入 ~/org/notes/, refile 跟着改。
-  ;; refile 是**写入通道**, 必须能到达记录库 (把 inbox 里的「想看这部」refile
-  ;; 进 notes/media/ 是刚需), 所以它**包含** media/read —— 与
-  ;; org-agenda-files 刻意不同 (agenda 是扫描通道, 不该看记录)。
-  ;; 三条 target 按「文件里装多少层」分工:
-  ;;   inbox        :maxlevel 1 —— 收件箱, 不往深层塞
-  ;;   file-node    :maxlevel 2 —— notes 的 97 个 file-per-node 节点
-  ;;   media/read   :maxlevel 3 —— 两个记录库目录内部的分类层 (** 想看 / ** 看完 等)
-  ;; 2026-10-18 三改: media.org 拆成 roam/media/ 下 9 个文件。记录库从「两个大文件」
-  ;; 变成「两个目录」, 判据统一成 my/org-record-library-file-p。
-  ;; 2026-10-19 四改: read.org 也拆成 roam/read/ (17 个文件), 判据里去掉 read.org
-  ;; 文件名特例, 换成目录前缀 —— 漏改会让 17 个记录库文件全落进
-  ;; my/notes-node-files, refile 时 maxlevel 从 3 掉到 2 (书单条目挂不上)。
-  ;; 2026-10-23 五改: literature/ (网页存档) 也是记录库, 同上。
-  ;; 2026-10-24 七改: roam/ 整体改名 notes/ (97 个节点文件); 上述历史行里的
-  ;; roam/ 路径今天都叫 notes/。media 10 个 + read 34 个文件, 数量仍会变。
-  ;; 2026-11-02: media 域合并进根目录单文件 ~/org/media.org, notes/media/ 目录
-  ;; 已删除 → 判据从「目录前缀」改成「文件名相等」。
+  ;; ⚠ 2026-11-05 收敛 (替代 10-18 ~ 11-02 的七次演变注释, 那套「三来源」设计退役):
+  ;; refile 目的地**只有一个文件**。11-05 是根目录 7 个收纳文件;
+  ;; ⚠ 2026-11-06 再收敛: 7 个收纳文件已全部合并进 ~/org/notes.org 单文件,
+  ;; 所以现在**只有 ~/org/notes.org 一个**, 别的一个都不要 (含 inbox.org)。
+  ;; 背景: 11-02/11-03 把 device/health/investment/media/software 各域从
+  ;; notes/<域>/ 合并进根目录单文件后, 旧的 (inbox + node files + bulk files)
+  ;; 会把 notes/ 下的残留节点、日记、read/literature 分篇全捞进候选,
+  ;; 既吵又指向已经不再使用的落点。
+  ;;
+  ;; ⚠ 只改 `org-refile-targets' (写入通道)。下面这些 `my/notes-*' 函数仍被
+  ;; `my/org-ql-files'、`my/org-org-notes-files' 使用, 一个都不能删 ——
+  ;; 它们与 refile **不再同源**, 与 `org-agenda-files' 也不再同源 (2026-11-05
+  ;; agenda 收敛成 inbox + .calendar 两个字面值)。
+  ;;
+  ;; ⚠ Doom org 模块默认把 `(nil :maxlevel . 3)' 与
+  ;; `(org-agenda-files :maxlevel . 3)' 塞进 `org-refile-targets'
+  ;; (~/.emacs.d/sources/doom+/modules/lang/org/config.el:131), 前者会把
+  ;; 「当前 buffer」也变成候选。下面的 setq 是**全量覆盖**, 必须晚于 Doom 求值
+  ;; (user config.el 在模块之后加载), 否则「其他的不要」会漏。
   (defun my/org-record-library-file-p (f)
     "F 是记录库文件吗? media.org 单文件 + notes/ 下 read|literature 两个目录。"
     (let ((f (expand-file-name f)))
@@ -3111,45 +3152,48 @@ ARGS 是原参数表 (FILES SILENT)。返回改过 FILES 的新参数表。"
           (string-prefix-p (expand-file-name "notes/literature/" org-directory) f))))
 
   (defun my/org-daily-file-p (f)
-    "F 是某天的日记吗? ~/org/journal/<年份>.org 里的一个「* YYYY-MM-DD %a」heading。
+    "F 是日记单文件 ~/org/journal.org 吗?
 
-2026-11-01 起日记整体迁到 ~/org/journal/ (按年合并, 一年一文件 YYYY.org),
-落在 org-roam-directory (= ~/org/notes) 之外 —— 既不进 roam db, 也不在
-agenda 扫描树内。本函数改用 `my/journal-directory' 判据, 与 `my/journal--file-p'
+2026-11-06 起 3 个按年文件合并成根目录单文件 (GPG 密文), 落在
+org-roam-directory (= ~/org/notes) 之外 —— 既不进 roam db, 也不在
+agenda 扫描树内。判据就是「路径等于 `my/journal-file'」, 与 `my/journal--file-p'
 同源。
 
 历史: 2026-10-24 晚日记取消加密 + 迁进 notes/journal/ 改用 denote-journal 命名
-(一天一文件); 2026-11-01 又合并成按年文件并迁出 notes/。无论哪种形态, 它都有
-两个特殊性质, 决定了它要跟其它节点分开对待:
-  1. **不进 agenda** —— 「journal 不是待处理队列」是铁律; 现在由拓扑保证
-     (不在 notes/ 递归扫描内), 不需要任何显式排除。
+(一天一文件); 2026-11-01 合并成按年文件并迁出 notes/; 2026-11-06 再合并成
+单文件并恢复加密。无论哪种形态, 它都有两个特殊性质, 决定了它要跟其它节点分开对待:
+  1. **不进 agenda** —— 「journal 不是待处理队列」是铁律; 2026-11-05 起
+     agenda 只认 inbox + .calendar 两个字面值, 日记天然不在其中。
   2. **不是 refile 目的地** —— 往回流的方向是反的: 日记里「脱离今天仍有
-     独立价值」的东西应该 refile **出去** 到 notes, 而不是往某一天里塞;
+     独立价值」的东西应该 refile **出去** 到 ~/org/notes.org, 而不是往某一天里塞;
      再说几百个候选会把 refile 列表淹掉。"
     (let ((f (expand-file-name f)))
-      (string-prefix-p my/journal-directory f)))
+      (equal f my/journal-file)))
 
   (defun my/notes-node-files ()
     "notes/ 下的独立节点文件 (file-per-node), 不含 media/read 记录库, 也不含 journal。
 
-排除 journal 的理由见 `my/org-daily-file-p' —— 这里是最关键的一处: 这份列表
-同时喂给 `org-refile-targets' 与 `my/org-org-notes-files', 漏掉的话
-237 个加密日记文件会被 org-ql 逐个当成 org 文件读进去。"
+2026-11-05 起**不再喂给 `org-refile-targets'** (refile 已收敛成 ~/org/notes.org
+单文件)。现在的使用者是 `my/org-ql-files' 与 `my/org-org-notes-files'。
+
+排除 journal 的理由见 `my/org-daily-file-p' —— 漏掉的话
+237 个日记文件会被 org-ql 逐个当成 org 文件读进去。"
     (seq-remove (lambda (f) (or (my/org-record-library-file-p f)
                                 (my/org-daily-file-p f)))
                 (directory-files-recursively
                  (expand-file-name "notes/" org-directory) "\\.org\\'")))
 
   ;; 2026-11-02: media 域合并进根目录单文件 ~/org/media.org (11 篇 → 11 个
-  ;; 一级 heading)。media 不再是目录, 改成直接列这一个文件。
-  ;; media.org 内部是 `* 电影记录 > ** 想看 > *** 片名` 三层 → :maxlevel 3 依然对。
+  ;; 一级 heading)。media 不再是目录, 这里直接列这一个文件。
   (defun my/notes-bulk-files ()
     "记录型大文件: media.org 单文件 + notes/read/ + notes/literature/ 下的。
-media.org 内部是 `* 类别 > ** 桶 > *** 条目` 三层, 所以 :maxlevel 仍要 3。
+
+2026-11-05 起只服务于 `my/org-ql-files' 等搜索通道, **不再是 refile 目的地**
+(refile 只认 ~/org/notes.org 单文件, 见下面的 `org-refile-targets')。
 
 ⚠️ 目录用 `file-directory-p' 守卫 —— 记录库目录
 可以是空的甚至还没建 (`directory-files' 对不存在的目录直接 (error \"Opening
-directory\")), 而这份列表在**每次 refile** 时都会被求值, 一炸就是 refile 全挂。"
+directory\")), 而这份列表在**每次全库搜索**时都会被求值, 一炸就是搜索全挂。"
     (append (list (expand-file-name "media.org" org-directory))
             (apply #'append
                    (mapcar
@@ -3158,10 +3202,20 @@ directory\")), 而这份列表在**每次 refile** 时都会被求值, 一炸就
                     (mapcar (lambda (d) (expand-file-name d org-directory))
                             '("notes/read/" "notes/literature/"))))))
 
+  ;; 2026-11-06: 全库收拢成 ~/org/notes.org 单文件 (原 7 个根目录收纳文件
+  ;; 合并: Software / Hardware / Books / Games / Media / Investment / Health,
+  ;; 19292 行 / 1566 heading / 最深 7 级)。refile 目的地**只有这一个**。
+  ;; ⚠ 静态字面值, 零函数依赖 —— 候选集合不随目录内容变化。
+  ;; ⚠ :maxlevel . 4 —— 覆盖到「条目级」(`**** 条目`, 带 :ID:/tag), 与旧 7 文件
+  ;;   的 `:3' 语义对齐 (合并后整棵树深一级: `* 域 > ** 分类 > *** 桶 > **** 条目`)。
+  ;;   层级分布 1/2/3/4/5/6/7 = 7/31/80/124/911/391/22 → :4 共 242 个 heading;
+  ;;   `org-refile-use-outline-path 'file' 再补 1 个「文件级」落点 (desc = "notes.org"),
+  ;;   daemon 实测 `org-refile-get-targets' 返回 243 条。
+  ;;   只要顶层域改 :1; 全捞改 :7 (1566 个 heading, 但每次 refile 全扫 19292 行
+  ;;   且 org-refile-use-cache 为 nil, 会明显变慢)。
+  ;; ⚠ 新增/改名收纳文件时, 只改这一处。
   (setq org-refile-targets
-        '(("~/org/inbox.org" :maxlevel . 1)
-          (my/notes-node-files :maxlevel . 2)
-          (my/notes-bulk-files :maxlevel . 3)))
+        '(("~/org/notes.org" :maxlevel . 4)))
   (setq org-refile-use-outline-path 'file
         org-outline-path-complete-in-steps nil
         org-refile-allow-creating-parent-nodes 'confirm
@@ -4911,18 +4965,18 @@ heading 级 node 转交 `org-set-tags-command'。"
 ;;   `journal/20240702T090000--tuesday-2-july-2024__journal.org'），
 ;;   所以本函数在「形态」的意义上也是回到最初，只是这次不借第三方包的手。
 (defun my/journal--new-file (time)
-  "确保 TIME 所在年份日记文件存在 (按年合并模型), 返回其路径。已存在原样返回。
+  "确保日记单文件 ~/org/journal.org 存在, 返回其路径。已存在原样返回。
 
-2026-11-01 起日记按年合并: 不再「一天一个文件」, 而是「一年一个 YYYY.org」,
-每次 capture 往里追加一个「* YYYY-MM-DD %a ...」heading。这里只保证年份文件就位,
-当天 heading 由 capture 模板 (`SPC n n j') 或 `my/journal--goto-day-heading' 负责。
+2026-11-06 起 3 个按年文件合并成根目录**单文件** (GPG 密文), 不再按年份拆分。
+每次 capture 往里追加一个「* YYYY-MM-DD %a ...」heading —— 与按年文件时期一致。
 
-文件头与存量年份文件一致:
-    #+title: 2026 Journal
+文件头:
+    #+title: Journal
     #+filetags: :journal:
 
-真正建文件的是 `my/journal--ensure-year-file' (定义在 goto 块, 本函数只是转发)。"
-  (my/journal--ensure-year-file time))
+真正建文件的是 `my/journal--ensure-file' (定义在 goto 块, 本函数只是转发)。
+TIME 参数保留仅为接口兼容, 单文件下不再按年份分文件。"
+  (my/journal--ensure-file time))
 #+end_src
 
 #+begin_src emacs-lisp
@@ -5129,8 +5183,9 @@ slug 段用 `my/sluggify-title' 重算。
     (expand-file-name "literature/" (expand-file-name "notes/" org-directory))
     "Literature 笔记的落点 ~/org/notes/literature/。
 
-跟 media/ read/ 一样按**记录库**对待: 不进 agenda, 但是 refile 目的地
-(maxlevel 3)。动这个目录要连带改三处: `org-agenda-files' 的内联排除判据、
+跟 media/ read/ 一样按**记录库**对待: 不进 agenda, 仍进 org-ql 全库搜索。
+2026-11-05 起**不再是 refile 目的地** (refile 只认 ~/org/notes.org 单文件)。
+动这个目录要连带改两处 (2026-11-05 起 agenda 已无排除判据):
 `my/org-record-library-file-p'、`my/notes-bulk-files'。")
 
   (defvar my/literature-curl-switches
@@ -5469,8 +5524,8 @@ URL 和标题通常要手填 (URL 拿剪贴板里的纯文本预填)。
 ** consult-notes
 #+begin_src emacs-lisp
 ;; 2026-10-17: denote 已卸载, 原来按文件名时间戳排序 denote 文件的
-;; `my/consult-notes-files-newest-first' 一并删除 —— 笔记库只有根目录 7 个
-;; 主文件, 搜索入口是下面这个 org-headings 源。
+;; `my/consult-notes-files-newest-first' 一并删除 —— 当时笔记库只有根目录
+;; 7 个主文件, 搜索入口是下面这个 org-headings 源。
 (use-package! consult-notes
   ;; ⚠ 2026-10-27: 把 `org-roam' 加进 :after —— 下面开了 roam 节点源，它在
   ;; org-roam 未加载时调 `consult-notes-org-roam-mode' 会 void-function。
@@ -5494,6 +5549,12 @@ URL 和标题通常要手填 (URL 拿剪贴板里的纯文本预填)。
   ;; org-map-entries 逐个打开读 → 238 个二进制文件, 候选区一堆乱码。
   ;; 现在日记是明文, 可以正常读了 —— 所以**纳入**搜索范围。
   ;; (保留 media/ read/ 是老规矩: 搜书名影名是刚需。)
+  ;;
+  ;; ⚠ 2026-11-06 当前状态: 上面这段「纳入」说的是 2026-10-24 的 notes/journal/
+  ;; 时代。2026-11-01 日记迁出 notes/ 后, 它**本来就不在这个列表里** (列表只收
+  ;; inbox + notes/ 递归); 2026-11-06 合并成根目录 ~/org/journal.org 且恢复 GPG
+  ;; 加密, 更不该进 —— rg 会把密文刷成 "binary file matches"。
+  ;; 搜日记用 `my/journal-search' (SPC n n J), 它走 epa 透明解密。
   (setq consult-notes-org-headings-files
         (append (list (expand-file-name "inbox.org" org-directory))
                 (directory-files-recursively
@@ -5539,7 +5600,8 @@ URL 和标题通常要手填 (URL 拿剪贴板里的纯文本预填)。
 (defun my/org-ql-files ()
   "org-ql 搜索的文件列表: inbox + notes 节点 + media/read 记录库, 不含 journal。
 
-与 `org-refile-targets' 的三个来源**同源** —— 复用 `my/notes-node-files' 与
+2026-11-05 起与 `org-refile-targets' **分家**: refile 只认 ~/org/notes.org 单文件,
+这里仍按全库节点 + 记录库扫。复用 `my/notes-node-files' 与
 `my/notes-bulk-files', 那两个函数都用 `my/org-daily-file-p' 过滤过, 所以
 这里天然继承 daily 排除, 不用再写一遍正则。
 
@@ -5674,9 +5736,15 @@ org-ql 是三个入口里**唯一支持结构化查询**的: `todo: NEXT' / `tag
 #+end_src
 
 * Journal
-** Journal encryption —— 已取消（2026-10-24 晚）
+** Journal encryption —— 2026-11-06 恢复（根目录单文件 ~/org/journal.org）
 ;;
-;; Sean 决定**取消日记加密**：238 篇 GPG 密文全部解密成明文，日记改用
+;; ⚠ 当前状态（2026-11-06，以此为准）：
+;;   日记 3 个按年文件 (2024/2025/2026.org) 合并成根目录单文件 ~/org/journal.org，
+;;   文件名保持 .org，磁盘内容是 GPG 公钥密文（收件人 CE8EA11D47…1AD1）。
+;;   读写都走 epa-file 透明加解密；加密子密钥已去口令，不弹 pinentry。
+;;   下面按时间堆叠的注释里「2026-10-24 取消加密」那一段已被本次推翻，留作史料。
+;;
+;; Sean 曾决定**取消日记加密**：238 篇 GPG 密文全部解密成明文，日记改用
 ;; denote-journal 的命名（<ID>--<title>__journal.org）并迁进 ~/org/notes/journal/。
 ;;
 ;; 为什么能取消而不损失功能：
@@ -5740,8 +5808,11 @@ org-ql 是三个入口里**唯一支持结构化查询**的: `todo: NEXT' / `tag
   ;; 无条件 `(string-match epa-file-name-regexp file)', **没有 nil 保护** ——
   ;; 设 nil 后**任何** `find-file' 都抛 (wrong-type-argument stringp nil),
   ;; 整个 Emacs 打不开任何文件 (2026-10-24 晚实测定位, 见 journal.md)。
-  ;; 只匹配 .gpg 既满足「日记明文」, 又保住 .gpg 的透明加解密。
-  (setq epa-file-name-regexp "\\.gpg\\(~\\|\\.~[0-9]+~\\)?\\'"
+  ;; 只匹配 .gpg 既满足「日记明文」, 又保住 .gpg 的透明加解密。  [2026-10-24 的决定]
+  ;; ⚠ 2026-11-06 推翻: 日记重新加密成根目录单文件 ~/org/journal.org, 故在 .gpg
+  ;; 族之外**加回 journal.org 分支**。只匹配「路径末尾文件名为 journal.org」的,
+  ;; 绝不能放宽成 .*\.org —— 那会把 notes/ 下的明文笔记也一并加密 (历史踩过)。
+  (setq epa-file-name-regexp "\\.gpg\\(~\\|\\.~[0-9]+~\\)?\\'\\|[\\/]journal\\.org\\'"
         epa-file-encrypt-to "CE8EA11D470516F3220E9BA11EE5F16F26111AD1"
         epa-file-select-keys 'silent)
   (epa-file-name-regexp-update)
@@ -5797,20 +5868,17 @@ Otherwise defer to `epa-file-insert-file-contents'."
       (kbd "F") #'my/journal-calendar-goto
       (kbd "N") #'my/journal-calendar-goto)))
 
-;;; --- journal 定位 (2026-10-19 起: org-roam-dailies 一天一文件) --------
-;; 日记形态第三次变更:
+;;; --- journal 定位 (2026-11-06 起: 根目录单文件 ~/org/journal.org) ----
+;; 日记形态变更史:
 ;;   一天一文件 (denote) → 一年一文件 → 单文件 journal.org (2026-10-16)
-;;   → ~/org/journal/YYYY-MM-DD.org (2026-10-24 起挪出 notes/, 靠 org-id 保链接)
+;;   → 一天一文件 (roam dailies) → notes/journal/ 明文 (2026-10-24)
+;;   → ~/org/journal/YYYY.org 按年合并明文 (2026-11-01)
+;;   → **根目录单文件 ~/org/journal.org + GPG 全文件加密 (2026-11-06, 当前)**
 ;;
-;; 回到「一天一文件」不是绕圈 —— 这次每天的文件是 roam 节点 (db / 双链 / 反链),
-;; 而且 10-16 的冲突实证支持这个形状: .stversions 里 5 个冲突全是共写单文件的
-;; append-note, journal 是 0 —— 一天一文件天然不冲突。
-;;
-;; 加密不再靠文件名, 靠 `epa-file-name-regexp' 的 roam[\\/]daily 分支 ——
-;; 读写都经 epa handler, 磁盘上是密文, buffer 里是明文。
-;; 日期 heading 取消了: 文件名就是日期, 原 `** HH:MM' 整体上移成 `* HH:MM'。
-;; (2026-10-25 再改: 时间戳本身也取消了, capture 模板从 `* %<%H:%M>' 变成 `* %?',
-;;  标题由 Sean 自己写 —— 见 org-capture-templates 的 j 模板。)
+;; 当前形态: 244 个「* YYYY-MM-DD %a」heading 全在一个文件里, 每个带 :ID:,
+;; 磁盘是 GPG 公钥密文, 读写都经 epa handler 透明加解密 (见 Journal encryption 块)。
+;; 定位某天 = 打开这个单文件 + 跳到当天 heading。
+;; capture 模板 (`SPC n n j') 追加「* %<%Y-%m-%d %a> %?」+ :ID:, 与按年文件时期一致。
 
 (defun my/journal--effective-time ()
   "当前时间。03:00 前算前一天 (熬夜写日记不跨到新的一天)。"
@@ -5819,38 +5887,39 @@ Otherwise defer to `epa-file-insert-file-contents'."
         (time-subtract (current-time) (seconds-to-time 86400))
       (current-time))))
 
-(defvar my/journal-directory
-  (expand-file-name "journal/" org-directory)
-  "日记目录。2026-11-01 起从 ~/org/notes/journal/ 迁出, 改为「按年合并」:
-   每年一个 YYYY.org (~/org/journal/2024.org ...), 每天一个「* YYYY-MM-DD %a」heading。
-   落在 org-roam-directory (= ~/org/notes) 之外, 因此既不进 roam db, 也不在 agenda 扫描树内。")
+(defvar my/journal-file
+  (expand-file-name "journal.org" org-directory)
+  "日记单文件 ~/org/journal.org。2026-11-06 起 3 个按年文件 (2024/2025/2026.org)
+合并成这一个文件: 244 个「* YYYY-MM-DD %a」heading, 每个带 :ID:。
+磁盘内容是 GPG 公钥密文 (epa-file 透明加解密), 文件名保持 .org。
+落在 org-roam-directory (= ~/org/notes) 之外, 既不进 roam db, 也不在 agenda 扫描树内。
+⚠ 本变量被前面 3087 行 `my/org-daily-file-p' 与 2286 行 attach 扫描引用 ——
+  和原来的 `my/journal-directory' 一样是「后面定义、前面运行时调用」, 没问题。")
 
-(defun my/journal--find-file (time)
-  "TIME 所在年份的日记文件路径 (~/org/journal/YYYY.org), 不存在返回 nil。
+(defun my/journal--find-file (&optional _time)
+  "日记单文件路径 (~/org/journal.org), 不存在返回 nil。
 
-2026-11-01 起日记按年合并到单个 YYYY.org, 不再有「一天一文件」。
-定位某天 = 打开年份文件 + 跳到当天 heading (见 `my/journal--goto-day-heading')。"
-  (let ((file (expand-file-name (format-time-string "%Y.org" time) my/journal-directory)))
-    (and (file-exists-p file) file)))
+2026-11-06 起全部日记合并进这一个文件, 不再按年份分文件。
+TIME 参数保留仅为接口兼容 (`my/journal-goto-time' / `my/journal-goto-day' 等仍传它)。
+定位某天 = 打开这个单文件 + 跳到当天 heading (见 `my/journal--goto-day-heading')。"
+  (and (file-exists-p my/journal-file) my/journal-file))
 
 (defun my/journal-file-for (&optional time)
-  "TIME (默认今天) 所在年份日记文件路径, 不存在返回 nil。
-按年合并后「今天的日记」就是今年这份 YYYY.org (当天 heading 在里面)。"
-  (my/journal--find-file (or time (my/journal--effective-time))))
+  "日记单文件路径, 不存在返回 nil。TIME 保留兼容接口, 单文件下忽略。"
+  (my/journal--find-file time))
 
 (defun my/journal-date-heading (time)
   "TIME 对应的日期文本, 形如 `2026-10-16 Fri'。"
   (format-time-string "%Y-%m-%d %a" time))
 
-(defun my/journal--ensure-year-file (time)
-  "确保 TIME 所在年份日记文件存在 (含 #+title), 返回其路径。"
-  (let ((file (expand-file-name (format-time-string "%Y.org" time) my/journal-directory)))
-    (unless (file-exists-p file)
-      (make-directory my/journal-directory t)
-      (with-temp-file file
-        (insert (format "#+title: %s Journal\n#+filetags: :journal:\n\n"
-                        (format-time-string "%Y" time)))))
-    file))
+(defun my/journal--ensure-file (&optional _time)
+  "确保日记单文件 ~/org/journal.org 存在 (含 #+title), 返回其路径。
+
+⚠ `with-temp-file' 写 journal.org 时会命中 epa 正则 → 新建即密文, 不会明文落盘。"
+  (unless (file-exists-p my/journal-file)
+    (with-temp-file my/journal-file
+      (insert "#+title: Journal\n#+filetags: :journal:\n\n")))
+  my/journal-file)
 
 (defun my/journal--day-heading-re (time)
   "匹配 TIME 那天日记 heading 的正则: `^* YYYY-MM-DD %a'。
@@ -5867,9 +5936,9 @@ Otherwise defer to `epa-file-insert-file-contents'."
     nil))
 
 (defun my/journal-goto-time (time &optional create)
-  "打开 TIME 那天日记 (按年合并后 = 年份文件 + 当天 heading)。CREATE 非 nil 时文件不存在也建。"
-  (let ((file (or (my/journal--find-file time)
-                  (and create (my/journal--ensure-year-file time)))))
+  "打开 TIME 那天日记 (单文件 + 当天 heading)。CREATE 非 nil 时文件不存在也建。"
+  (let ((file (or (my/journal--find-file)
+                  (and create (my/journal--ensure-file)))))
     (if (not file)
         nil
       (find-file file)
@@ -5877,12 +5946,11 @@ Otherwise defer to `epa-file-insert-file-contents'."
       t)))
 
 (defun my/journal-capture-target ()
-  "org-capture 用: 定位到今年日记文件末尾, 准备追加当天 heading。返回 point。
+  "org-capture 用: 定位到日记单文件末尾, 准备追加当天 heading。返回 point。
 
-按年合并模型: 每年一份 YYYY.org, 每次 capture 往末尾追加一个
+单文件模型: 每次 capture 往 ~/org/journal.org 末尾追加一个
 「* YYYY-MM-DD %a ...」heading (模板见 `SPC n n j')。"
-  (let* ((time (my/journal--effective-time))
-         (file (my/journal--ensure-year-file time)))
+  (let ((file (my/journal--ensure-file)))
     (set-buffer (org-capture-target-buffer file))
     (goto-char (point-max))
     ;; 文件末尾没有换行时, 直接 insert 会把新 heading 接到上一行屁股上
@@ -5890,11 +5958,11 @@ Otherwise defer to `epa-file-insert-file-contents'."
     (point)))
 
 (defun my/journal-calendar-goto ()
-  "从 calendar 光标处的日期跳到那天的日记 (年份文件 + 当天 heading)。"
+  "从 calendar 光标处的日期跳到那天的日记 (单文件 + 当天 heading)。"
   (interactive)
   (let* ((d (calendar-cursor-to-date t))   ; (month day year)
          (time (encode-time 0 0 0 (nth 1 d) (nth 0 d) (nth 2 d)))
-         (file (my/journal--find-file time)))
+         (file (my/journal--find-file)))
     (if file
         (progn (find-file file)
                (my/journal--goto-day-heading time))
@@ -6023,15 +6091,12 @@ heading」的正则会命中自己, 把上限截到当天 heading 行尾, 其下
       (or (buffer-base-buffer buf) buf))))
 
 (defun my/journal--file-p (&optional file)
-  "FILE (默认当前 buffer 的文件) 是不是日记文件。
+  "FILE (默认当前 buffer 的文件) 是不是日记单文件 ~/org/journal.org。
 
-2026-10-24 晚: 判据从「等于今天那篇的路径」改成「在日记目录里」。
-日记改成 denote-journal 命名后文件名不再可预测 (一天可能多篇), 而
-「在 org/journal/ 下」才是稳定特征 —— 自动补天气的 hook 就靠它判断
-当前 buffer 是不是日记。"
+2026-11-06 起全部日记合并成单个文件 (GPG 密文), 判据回到最简单的「路径相等」。
+自动补天气的 hook (`my/journal-ensure-today-weather') 就靠它判断当前 buffer。"
   (let ((file (or file (buffer-file-name))))
-    (and file
-         (string-prefix-p my/journal-directory (expand-file-name file)))))
+    (and file (equal (expand-file-name file) my/journal-file))))
 
 (defvar-local my/journal--weather-in-progress nil
   "该日记 buffer 是否正在异步取天气。
@@ -6097,11 +6162,11 @@ buffer 没开就不补; 同一 buffer 已经在取天气就直接跳过, 避免�
 (add-hook 'org-capture-after-finalize-hook #'my/journal-ensure-today-weather)
 
 (defun my/journal-today ()
-  "打开/新建今天的日记。年份文件不存在则建; 当天 heading 不存在则在末尾创建
+  "打开/新建今天的日记。单文件不存在则建; 当天 heading 不存在则在末尾创建
 「* YYYY-MM-DD %a」+ :ID: 抽屉。新建后顺带异步补一条当天天气 (与 capture 行为一致)。"
   (interactive)
   (let ((time (my/journal--effective-time)))
-    (find-file (my/journal--ensure-year-file time))
+    (find-file (my/journal--ensure-file))
     (unless (my/journal--goto-day-heading time)
       ;; 当天 heading 还不存在 → 在末尾创建 (今天永远是最新, 末尾即正确位置)
       (goto-char (point-max))
@@ -6144,7 +6209,7 @@ buffer 没开就不补; 同一 buffer 已经在取天气就直接跳过, 避免�
            (quit nil))))
   (unless time
     (setq time (my/journal--effective-time)))
-  (if (my/journal--find-file time)
+  (if (my/journal--find-file)
       (my/journal-goto-time time)
     (message "这天没有日记: %s" (my/journal-date-heading time))
     nil))
@@ -6154,27 +6219,24 @@ buffer 没开就不补; 同一 buffer 已经在取天气就直接跳过, 避免�
 ;; (2026-10-19 实测), 而 `rg' / `grep' 读的是磁盘上的密文。org-journal 有
 ;; 现成的 `j s y', dailies 什么都没有 —— 这是选 dailies 唯一实打实的代价。
 ;;
-;; 补法是遍历 ~/org/journal/ (按年合并后的 YYYY.org 集合), 用 `insert-file-contents' 逐个读。
+;; 补法是用 `insert-file-contents' 在临时 buffer 里读: epa handler 会透明解密,
 ;; 明文只存在于临时 buffer, 从不落盘、也不建 buffer 访问文件
 ;; (所以不会触发 find-file-hook, 不会误插天气)。
 ;;
-;; 2026-10-24 晚: 日记取消加密后, 这个「全文件加密」特有的痛点也一起没了 ——
-;; 不再需要 epa handler 透明解密, 不再 236 篇逐个解密 (~40s), 也不会中途弹
-;; 口令框。现在是纯文本 I/O。
+;; 2026-11-06: 日记恢复加密, 但只剩**一个**文件 ~/org/journal.org (86KB 密文),
+;; 解密一次即可 —— 不再是 2026-10-24 前「236 篇逐个解密 ~40s」那种开销。
+;; 加密子密钥已去口令, 全程不弹 pinentry。
 
 (defvar my/journal-search-history nil)
 
-(defun my/journal--daily-files (&optional since-days)
-  "日记目录下的日记文件。按年合并后是 `~/org/journal/YYYY.org' 集合。
+(defun my/journal--daily-files (&optional _since-days)
+  "日记单文件列表: 只含 ~/org/journal.org。
 
-SINCE-DAYS 参数保留接口兼容 (`SPC n n J' 的 `C-u' 仍传 90), 但按年合并后
-单文件跨整年, 无法在文件级做天数过滤; 而全库只有个位数年文件, 直接全搜即可,
-故这里忽略 SINCE-DAYS、列出目录下全部 *.org。
-
-2026-11-01 起日记按年合并: 文件是 `YYYY.org', 不再有
-`<ID>--<title>__journal.org' 单日文件, 故这里直接 `directory-files' 收 *.org。"
-  (sort (directory-files my/journal-directory t "\\.org\\'")
-        #'string<))
+2026-11-06 起 3 个按年文件合并成这一个文件 (GPG 密文)。
+SINCE-DAYS 参数保留接口兼容 (`SPC n n J' 的 `C-u' 仍传 90), 但单文件无法在
+文件级做天数过滤, 直接全搜即可 (86KB 密文, 一次解密 ~0.1s)。
+`my/journal-search--collect' 用 `insert-file-contents' 读它, epa handler 会透明解密。"
+  (list my/journal-file))
 
 (defun my/journal-search--collect (query since-days)
   "搜 QUERY, 返回 ((文件 行号) . 显示串) 列表。QUERY 是正则。"
@@ -8215,7 +8277,7 @@ identical to what `doom.ps1' does on Windows."
   ;; (roam 节点 ID 20260101T000013, 84 条订阅, 逐条 diff 过与退役前一一对应 ——
   ;;  迁移时漏过一条 `***` 跳级的播客 feed, 已补回)。
   ;; elfeed-org 只认「标题以 URL 开头」的 heading; 全库 84 条全部在这一个文件里,
-  ;; 所以直接指向 misc/ 下的它 (media/read 也有 URL, 但我们现在只扫 misc/, 不会误收)。
+  ;; 所以直接指向 .src/ 下的它 (media/read 也有 URL, 但我们现在只扫 .src/, 不会误收)。
   ;; 注意: 别在其他 roam 节点里写「标题以 http 开头」的普通笔记, 会被当成订阅源。
   ;;
   ;; ⚠ 2026-10-21 修复「M-x elfeed 打不开」:
@@ -8228,10 +8290,15 @@ identical to what `doom.ps1' does on Windows."
   ;;   改成按文件名模式在 notes/ 下查, 不再依赖具体文件名, 下次重命名不会再炸。
   (defun my/elfeed-org-subscription-file ()
     "Locate the single org file that holds elfeed subscriptions.
-Matched by filename pattern under `org-directory'/misc, so a rename
+Matched by filename pattern under `org-directory'/.elfeed, so a rename
 cannot break elfeed again."
     (or (car (directory-files-recursively
-              (expand-file-name "misc" org-directory)
+              (expand-file-name ".elfeed" org-directory)
+              ;; 2026-11-06 二次迁移: 订阅文件 .src/ -> .elfeed/（与 elfeed-db-directory
+              ;;   同处，配置数据跟运行时数据放一起）。glob 基目录 misc -> .src -> .elfeed；
+              ;;   递归会进 data/ 子目录，但正则只认含 elfeed+subscription 的 .org,
+              ;;   不会误收 db 文件。坚果云 pull 只管 inbox.org + 空 SHARED_FILES、
+              ;;   R2 只管 data/，都碰不到 .elfeed/ 下的 .org，不会被覆盖。
               ;; 2026-10-27 改: 订阅文件从 notes/software/ 移到顶层 misc/ (它不属于
               ;;   知识笔记, 归入 ~/org/misc/ 收容处, 见 AGENTS.md v7)。glob 基目录从
               ;;   notes 换成 misc; misc/ 里仅 3 个文件, 正则只命中 elfeed 这一个, 无误收。
@@ -8243,11 +8310,15 @@ cannot break elfeed again."
               ;; 的 :before advice 上 => **M-x elfeed 打不开** (复刻 10-21 事故)。
               ;; 放宽成 `subscription.*\.org\'', keywords 段插在中间也认。
               "elfeed.*subscription.*\\.org\\'"))
-        ;; 2026-10-27 改: 订阅文件已移到顶层 misc/, 兜底路径同步搬过来。
-        ;; 上面那个 glob 递归扫 misc/, 命中就用不到它; 这行只是「万一 glob 扑空
+        ;; 2026-11-06 改: 兜底换成 .elfeed/ 下的**真实文件名**。原兜底写的是
+        ;;   `misc/20260101T000013--elfeed_subscriptions__emacs.org', 该文件从来
+        ;;   不存在(实际叫 elfeed_subscriptions.org), 一旦 glob 扑空就会喂给
+        ;;   rmh-elfeed-org-check-configuration-file 一个不存在的文件 -> error
+        ;;   -> M-x elfeed 打不开。改成真实路径, 兜底才真的兜得住。
+        ;; 上面那个 glob 递归扫 .elfeed/, 命中就用不到它; 这行只是「万一 glob 扑空
         ;; (比如文件改名成不叫 elfeed_subscriptions 了) 的兜底」。
         (expand-file-name
-         "misc/20260101T000013--elfeed_subscriptions__emacs.org"
+         ".elfeed/elfeed_subscriptions.org"
          org-directory)))
   (setq rmh-elfeed-org-files (list (my/elfeed-org-subscription-file)))
   ;; 2026-10-25 修: elfeed-org 的 ignore tag 默认是 "ignore", 而订阅文件里一律用
@@ -8594,6 +8665,7 @@ cannot break elfeed again."
        ;; 236 个 daily 密文刷屏。自家版用文件列表, 覆盖一致但排除 daily。
        ;; (2026-10-24 晚: 日记已取消加密, 但仍排除 —— 用 my/journal-search
        ;;  专门搜日记更快, 见下面 J。)
+       ;; (2026-11-06: 日记恢复加密, 更该排除 —— rg 扫密文会刷 "binary file matches"。)
        :desc "Consult notes (search)" "S" #'my/consult-notes-search-in-all-notes
        ;; 2026-10-22 换自家版本: 上游 `org-ql-find-in-org-directory' 不递归,
        ;; 实测只搜到 ~/org/inbox.org 一个文件。自家版走 `my/org-ql-files'。
@@ -8609,6 +8681,7 @@ cannot break elfeed again."
        ;; C-u 前缀 = 只搜最近 90 天
        ;; (2026-10-24 晚: 原注释说「全量要解密 236 个文件, 实测 ~40s」——
        ;;  日记取消加密后是纯文本 I/O, 毫秒级, 全量搜也不卡了)
+       ;; (2026-11-06: 恢复加密, 但只剩 1 个 86KB 文件, 解密一次 ~0.1s, 依旧不卡)
        :desc "Search journal · 搜日记"  "J" #'my/journal-search
        ;; 2026-10-27 三改: `SPC n N/E/L' 改绑自研 pass-through。
        ;; denote-journal 包已退役，但日记的三个动作要保留手感:
