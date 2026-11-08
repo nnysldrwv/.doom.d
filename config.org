@@ -1063,6 +1063,24 @@ fontconfig 匹配到 Nerd Font 版本，显式写全名更稳）。
   (set-fontset-font t 'mathematical (font-spec :family my/symbol-font))
   ;; emoji: Windows 用 Segoe UI Emoji, Linux 用 Noto Color Emoji (均已装, 彩色渲染)
   (set-fontset-font t 'emoji (font-spec :family (if (eq system-type 'windows-nt) "Segoe UI Emoji" "Noto Color Emoji"))))
+
+;; ---- org 表格：让 `C-c C-c' 的空格对齐在视觉上成立 (2026-11-07) ----
+;; 直接读 TTF/TTC 的 hmtx 实测：
+;;   JetBrainsMono Nerd Font : ASCII / 空格 = 0.600em
+;;   my/cjk-font (Linux "Noto Sans Mono CJK SC" / Windows "Sarasa Mono SC")
+;;                          : ASCII = 0.500em, 汉字 = 1.000em（自身 2:1 完美）
+;; `org-table-align' 按 `string-width' 假设 1 汉字 = 2 空格 = 2*0.600 = 1.200em，
+;; 而混排时汉字走 CJK 字体只有 1.000em -> 每个汉字少 0.200em (16.7%)，
+;; 中文越多的行越短，竖线左右漂移。以前靠 valign 的真实像素测量掩盖；
+;; 关掉 valign 保性能后，改成「让表格里的 ASCII 和汉字来自同一个 2:1 字体」。
+;; ⚠ 只改 `org-table' face：不动全局字体、不碰 `my/reading-fonts'，
+;;   不引入 jit-lock / 像素测量，零常驻开销。
+;; ⚠ 必须在 org-faces 加载后设，否则会被 defface 覆盖，故用 `after! org'。
+;; ⚠ 用 `my/cjk-font' / `my/doom-font-size' 而不是硬编码，Linux + Windows 同步生效。
+(after! org
+  (set-face-attribute
+   'org-table nil :font
+   (font-spec :family my/cjk-font :size my/doom-font-size)))
 #+end_src
 
 * Editor Enhancements
@@ -6904,6 +6922,153 @@ Use FILE arg, current buffer's file (if .epub), or prompt."
                          keep " ")
               " }"))))
 
+;;; ---- 查词自动进生词本 (2026-11-08) ----------------------------------
+;; C-c t 查词成功后，把「查过的英文单词」追加到
+;;   ~/org/notes.org → * Languages → ** 单词本；已有词（忽略大小写）不重复写。
+;;
+;; 挂点选 gt-render 的 :then 槽，而不是给命令套 advice —— 见 gt-core.el 的
+;; gt-output :around：它只在 state=3（所有 task 结果都解析完）时以 translator
+;; 为参数回调。翻译失败不触发，段落 / 中文 / 非单词还会被 my/gt-vocab--word-p
+;; 再挡一层，所以误触、整段翻译都不会污染生词本。
+;; 代价：离线词典查不到的词不会被记录（ECDICT 收词 77 万，实际很少遇到）。
+;;
+;; notes.org 是收纳主文件，这里由 Emacs 在运行时自己写：用 find-file-noselect
+;; 复用已有 buffer、绝不 revert，避免冲掉 Sean 未保存的编辑；写入前先比对
+;; visited-file-modtime，磁盘版本更新时宁可跳过也不弹框 / 不覆盖。
+;; 自动条目带 :AUTO: t，方便日后把 sdcv 释义批量补成标准 IPA + 例句。
+(eval-when-compile (require 'eieio)) ; oref / with-slots 编译期可见，保住 83 警告基线
+
+(defvar my/gt-vocab-file (expand-file-name "~/org/notes.org")
+  "生词本所在的 org 文件。")
+
+(defvar my/gt-vocab-parent "Languages"
+  "生词本所在的一级 heading 标题。")
+
+(defvar my/gt-vocab-heading "单词本"
+  "生词本的二级 heading 标题。")
+
+(defvar my/gt-vocab-auto-record-p t
+  "非 nil 时，gt 查词成功后自动写进生词本。临时关掉设为 nil 即可。")
+
+(defvar my/gt-vocab-detail 'brief
+  "自动条目的详细程度：
+`brief'     写 sdcv 释义 + 音标（剔除词典名 / 词头 / 词形 / 词频元数据）
+`word-only' 只写词条标题与属性抽屉，正文留空待补全")
+
+(defun my/gt-vocab--word-p (s)
+  "S 是否是一个值得记的英文单词（排除中文、数字、句子、超长串）。"
+  (and (stringp s)
+       (<= 2 (length s) 40)
+       (not (null (string-match-p "\\`[A-Za-z][A-Za-z'-]*\\'" s)))))
+
+(defun my/gt-vocab--clean-result (word result)
+  "把 sdcv 多行结果 RESULT 整理成条目正文；WORD 用于剔除词头行。"
+  (if (eq my/gt-vocab-detail 'word-only)
+      ""
+    (let ((key (downcase word))
+          (phonetic nil)
+          (defs nil))
+      (dolist (raw (split-string (substring-no-properties (or result "")) "\n" t))
+        (let ((l (string-trim (substring-no-properties raw))))
+          (cond
+           ((string-empty-p l))
+           ((string-match-p "^简明英汉" l))                     ; ECDICT bookname
+           ((string= (downcase l) key))                          ; 词头
+           ((string-match-p "^\\[原型\\]" l))                   ; 词形
+           ((string-match-p "^[（(].*[0-9]+/[0-9]+[）)]$" l)) ; 词频 / 难度
+           ((string-match "^\\*\\(\\[.+\\]\\)" l)               ; 音标 *[...]
+            (setq phonetic (concat "/" (substring (match-string 1 l) 1 -1) "/")))
+           ((< (length l) 300) (push l defs)))))                ; 挡住异常长行
+      (concat (mapconcat #'identity (nreverse defs) "\n")
+              (if phonetic (concat "\n" phonetic) "")
+              "\n"))))
+
+(defun my/gt-vocab--region (buffer)
+  "返回 BUFFER 里生词本正文的 (BEG . END)；找不到 heading 时返回 nil。"
+  (with-current-buffer buffer
+    (save-excursion
+      (goto-char (point-min))
+      (when (and (re-search-forward
+                  (concat "^\\* " (regexp-quote my/gt-vocab-parent) "\\s-*$") nil t)
+                 (re-search-forward
+                  (concat "^\\*\\* " (regexp-quote my/gt-vocab-heading) "\\s-*$") nil t))
+        (cons (line-end-position)
+              (if (re-search-forward "^\\*\\{1,2\\} " nil t)
+                  (match-beginning 0)
+                (point-max)))))))
+
+(defun my/gt-vocab--existing-p (buffer region key)
+  "BUFFER 的 REGION 内是否已有 KEY（忽略大小写）这个词条。"
+  (with-current-buffer buffer
+    (save-restriction
+      (narrow-to-region (car region) (cdr region))
+      (save-excursion
+        (goto-char (point-min))
+        (let ((found nil)
+              (k (downcase key)))
+          (while (and (not found)
+                      (re-search-forward "^\\*\\*\\* +\\(.+\\)\\s-*$" nil t))
+            (let ((title (string-trim (match-string-no-properties 1))))
+              (setq title (replace-regexp-in-string
+                           " +:[A-Za-z0-9_@#%:]+: *\\'" "" title))
+              (when (string= (downcase title) k)
+                (setq found t))))
+          found)))))
+
+(defun my/gt-vocab--add (word result)
+  "把 WORD（附 sdcv 结果 RESULT）追加进生词本；已有则不动。
+返回 :added / :exists / :skipped。"
+  (let ((key (downcase word))
+        (buf (find-file-noselect my/gt-vocab-file)))
+    (with-current-buffer buf
+      (save-restriction
+        (widen)
+        (if (not (verify-visited-file-modtime buf))
+            (progn
+              (message "[gt-vocab] notes.org 磁盘版本比 buffer 新，本次跳过记录")
+              :skipped)
+          (let ((region (my/gt-vocab--region buf)))
+            (unless region
+              (error "[gt-vocab] 在 %s 里找不到 %s → %s"
+                     my/gt-vocab-file my/gt-vocab-parent my/gt-vocab-heading))
+            (if (my/gt-vocab--existing-p buf region key)
+                :exists
+              (let ((inhibit-read-only t))
+                (save-excursion
+                  (goto-char (cdr region))
+                  (let ((prev-blank (save-excursion
+                                      (forward-line -1)
+                                      (looking-at-p "^[ \t]*$")))
+                        (entry (concat
+                                "*** " key "\n"
+                                ":PROPERTIES:\n"
+                                ":SOURCE_LANG: en\n"
+                                ":TARGET_LANG: zh\n"
+                                ":LOOKED_UP: " (format-time-string "%Y-%m-%d %H:%M") "\n"
+                                ":AUTO: t\n"
+                                ":END:\n"
+                                (my/gt-vocab--clean-result word result)
+                                "\n")))
+                    (insert (if prev-blank "" "\n") entry)))
+                (save-buffer)
+                (message "[gt-vocab] 已记生词：%s" key)
+                :added))))))))
+
+(defun my/gt-vocab-record (translator)
+  "gt 渲染完成后的 :then 回调：把本次查的单词记进生词本。"
+  (when my/gt-vocab-auto-record-p
+    (condition-case err
+        (let* ((texts (oref translator text))
+               (word (and (= 1 (length texts))
+                          (string-trim
+                           (substring-no-properties (car texts)))))
+               (res (cl-loop for task in (oref translator tasks)
+                             for r = (oref task res)
+                             when r return (car (ensure-list r)))))
+          (when (and (my/gt-vocab--word-p word) (stringp res))
+            (my/gt-vocab--add word res)))
+      (error (message "[gt-vocab] 记录失败（不影响查词）：%s" (cadr err))))))
+
 (use-package! gt
   :commands (gt-translate gt-setup gt-speak gt-delete-render-overlays)
   :config
@@ -6912,25 +7077,31 @@ Use FILE arg, current buffer's file (if .epub), or prompt."
         ;;   → 中文压成单行贴在词后 (不打断阅读, 断网也能查)。
         ;;   sdcv 0.5.5 已装 (extra 仓库)。
         ;;   :rfmt 把多行词条压单行, 否则 nov 长段落会被换行符劈断 (见上方函数)。
+        ;;   :then 查词成功后自动进生词本 (见上方 my/gt-vocab-*)。
         gt-default-translator
         (gt-translator
          :taker   (gt-taker :text 'word :langs '(en zh))
          :engines (gt-stardict-engine)
-         :render  (gt-overlay-render :type 'after :rfmt #'my/gt-stardict-brief))
+         :render  (gt-overlay-render :type 'after
+                                     :rfmt #'my/gt-stardict-brief
+                                     :then #'my/gt-vocab-record))
         ;; 另外几套, M-x gt-setup 里选
         gt-preset-translators
         `((youdao . ,(gt-translator        ; 在线兜底: 离线词典没收的词 / 想看例句
                      :taker   (gt-taker :text 'word :langs '(en zh))
                      :engines (gt-youdao-dict-engine)
-                     :render  (gt-overlay-render :type 'after)))
+                     :render  (gt-overlay-render :type 'after
+                                                 :then #'my/gt-vocab-record)))
           (posframe . ,(gt-translator
                         :taker   (gt-taker :text 'word :langs '(en zh))
                         :engines (gt-youdao-dict-engine)
-                        :render  (gt-posframe-pop-render)))
+                        :render  (gt-posframe-pop-render
+                                  :then #'my/gt-vocab-record)))
           (paragraph . ,(gt-translator
                          :taker   (gt-taker :text 'buffer :pick 'paragraph :langs '(en zh))
                          :engines (gt-bing-engine)
-                         :render  (gt-buffer-render))))))
+                         :render  (gt-buffer-render
+                                   :then #'my/gt-vocab-record))))))
 
 ;; 键位: 全局 evil normal 态, nov / elfeed-show / 普通 buffer 都能按。
 ;; 用 C-c t 而不是单字母 —— evil 的 emulation map 优先级高于 major mode map,
