@@ -2854,21 +2854,14 @@ todo block。**顺序是 Sean 定的**: 进行中 → 下一步 → 待安排 �
 ** Capture templates
 #+begin_src emacs-lisp
 (after! org
-  ;; 2026-10-23: `我想读的书单' 一分为四 (网文/小说/非虚构/理财各自成 file-per-node)。
-  ;; 定位书单桶文件**不要写死 roam 文件名** —— 2026-10-21 elfeed 事故定的铁律:
-  ;; 全库重命名后写死的路径会静默失效。这里是「已知路径优先 → roam db 按节点 ID
-  ;; 反查 → 报错」三级: 文件被改名 / 挪走之后自动从 db 捞回来, db 也没有就响出来。
-  (defun my/notes-bucket-file (id fallback)
-    "返回书单桶文件的绝对路径: 先看 FALLBACK, 再按 roam 节点 ID 反查, 都没有就报错。"
-    (let ((fb (expand-file-name fallback)))
-      (cond ((file-exists-p fb) fb)
-            ;; 2026-10-24: org-roam 退役, `org-roam-node-from-id' 换成 org 原生
-            ;; `org-id-find' —— 返回 (FILE . POSITION), 取 car 即文件。
-            ;; 密文日记也认: epa 的 file-name-handler 让 org-id 透明解密。
-            ((let ((loc (ignore-errors (org-id-find id))))
-               (and loc (car loc))))
-            (t (error "roam: 找不到书单桶 %s —— %s 不存在, db 里也没有该节点" id fallback)))))
-
+  ;; 2026-11-09: 删掉 my/notes-bucket-file。「写死文件路径 → org-id 反查 → 报错」
+  ;; 三级定位随 11-02 read 域合并彻底失效: notes/read/*.org 全部并进根目录收纳文件
+  ;; (11-06 再并进 notes.org), 小说书单现在只是 `* Books > ** 书单 > *** 小说 >
+  ;; **** 小说书单' 这个 4 级 heading, 原文件级 :ID: 20261017T210002 在合并时
+  ;; 也没保留 (原件在 .archive/read-migration-20261102/)。
+  ;; fallback 路径不存在 + org-id-find 查不到 → cond 最后一分支报错, 这就是
+  ;; `SPC n n b b' / `SPC n n b B' 报 "roam: 找不到书单桶" 的全部原因。
+  ;; 现在两个书籍模板直接走 file+olp 指向 heading, 不再找文件。
   (setq org-capture-templates
         '(          ("a" "Append Note" entry (file "~/org/inbox.org")
            "* %?"
@@ -2888,64 +2881,61 @@ todo block。**顺序是 Sean 定的**: 进行中 → 下一步 → 待安排 �
            "* %<%Y-%m-%d %a> %?\n:PROPERTIES:\n:ID:       %(org-id-new)\n:END:\n"
            :empty-lines 1 :jump-to-captured t)
           ("m" "Media")
-          ;; 2026-11-02 改: media 域合并进根目录单文件 ~/org/media.org
-          ;; (11 篇 → 11 个一级 heading), notes/media/ 目录已不存在。
-          ;; 合并后结构是 `* 电影记录 > ** 想看 > *** 片名` —— 类别成了文件里的
-          ;; 一级 heading, 桶是二级, 条目是三级。
-          ;;   → file+olp 的目标文件改成 ~/org/media.org, olp 补上**类别一级**
-          ;;     (原文件里类别是文件名, olp 只剩一级桶名)。
-          ;;   → 模板层级从 `**' 回到 `***' (原来拆文件时降过一级, 现在补回来)。
+          ;; 2026-11-09 二改: 11-02 并进的 ~/org/media.org 又在 11-06 并进
+          ;; ~/org/notes.org, media.org 已删除 —— 这 6 个模板的 file+olp 全部
+          ;; 指向不存在的文件 (和 bb/bB 的「找不到书单桶」是同一批迁移遗留)。
+          ;; notes.org 现状: `* Media > ** Movies|Drama|Anime > *** 电影记录|
+          ;; 电视剧记录|动漫记录 > **** 想看|看完 > ***** 片名'。六条 olp 已逐条
+          ;; 用 org-find-olp 实测命中 (2026-11-09)。
+          ;;   → 目标文件改 ~/org/notes.org, olp 补上 Media + 英文类别两级;
+          ;;   → 模板层级从 `***' 补到 `*****' (与 `***** 捕风追影' 同级)。
           ;;   1) 状态写 :状态: 属性, 不写 TODO 关键字 —— P3 已把 media 的全部
-          ;;      伪 TODO 迁成属性 (未开始/已完成/进行中/已放弃); 模板继续写
-          ;;      `*** TODO 片名' 会让新条目用第二套状态机制, agenda 与抽屉
+          ;;      伪 TODO 迁成属性 (未开始/已完成/进行中/已放弃); 模板写
+          ;;      `***** TODO 片名' 会让新条目用第二套状态机制, agenda 与抽屉
           ;;      里的 :状态: 互不认账。
           ;;   2) 必须带 :ID: —— 没有 ID 的 heading 不会进 org-roam 的 nodes 表,
           ;;      capture 出来的片子搜不到、也连不上 backlinks。
           ("mm" "电影 · 想看" entry
-           (file+olp "~/org/media.org" "电影记录" "想看")
-           "*** %^{片名}\n:PROPERTIES:\n:ID:       %(org-id-new)\n:状态: 未开始\n:添加时间: %U\n:END:\n%?"
+           (file+olp "~/org/notes.org" "Media" "Movies" "电影记录" "想看")
+           "***** %^{片名}\n:PROPERTIES:\n:ID:       %(org-id-new)\n:状态: 未开始\n:添加时间: %U\n:END:\n%?"
            :empty-lines 1 :jump-to-captured t)
           ("mM" "电影 · 看完" entry
-           (file+olp "~/org/media.org" "电影记录" "看完")
-           "*** %^{片名}\n:PROPERTIES:\n:ID:       %(org-id-new)\n:状态: 已完成\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
+           (file+olp "~/org/notes.org" "Media" "Movies" "电影记录" "看完")
+           "***** %^{片名}\n:PROPERTIES:\n:ID:       %(org-id-new)\n:状态: 已完成\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
            :empty-lines 1 :jump-to-captured t)
           ("mt" "电视剧 · 想看" entry
-           (file+olp "~/org/media.org" "电视剧记录" "想看")
-           "*** %^{片名}\n:PROPERTIES:\n:ID:       %(org-id-new)\n:状态: 未开始\n:添加时间: %U\n:END:\n%?"
+           (file+olp "~/org/notes.org" "Media" "Drama" "电视剧记录" "想看")
+           "***** %^{片名}\n:PROPERTIES:\n:ID:       %(org-id-new)\n:状态: 未开始\n:添加时间: %U\n:END:\n%?"
            :empty-lines 1 :jump-to-captured t)
           ("mT" "电视剧 · 看完" entry
-           (file+olp "~/org/media.org" "电视剧记录" "看完")
-           "*** %^{片名}\n:PROPERTIES:\n:ID:       %(org-id-new)\n:状态: 已完成\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
+           (file+olp "~/org/notes.org" "Media" "Drama" "电视剧记录" "看完")
+           "***** %^{片名}\n:PROPERTIES:\n:ID:       %(org-id-new)\n:状态: 已完成\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
            :empty-lines 1 :jump-to-captured t)
           ("ma" "动漫 · 想看" entry
-           (file+olp "~/org/media.org" "动漫记录" "想看")
-           "*** %^{片名}\n:PROPERTIES:\n:ID:       %(org-id-new)\n:状态: 未开始\n:添加时间: %U\n:END:\n%?"
+           (file+olp "~/org/notes.org" "Media" "Anime" "动漫记录" "想看")
+           "***** %^{片名}\n:PROPERTIES:\n:ID:       %(org-id-new)\n:状态: 未开始\n:添加时间: %U\n:END:\n%?"
            :empty-lines 1 :jump-to-captured t)
           ("mA" "动漫 · 看完" entry
-           (file+olp "~/org/media.org" "动漫记录" "看完")
-           "*** %^{片名}\n:PROPERTIES:\n:ID:       %(org-id-new)\n:状态: 已完成\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
+           (file+olp "~/org/notes.org" "Media" "Anime" "动漫记录" "看完")
+           "***** %^{片名}\n:PROPERTIES:\n:ID:       %(org-id-new)\n:状态: 已完成\n:完成日期: %<[%Y-%m-%d]>\n:END:\n%?"
            :empty-lines 1 :jump-to-captured t)
           ("b" "Books")
-          ;; 2026-10-19 二改: read.org 拆成 roam/read/ 下 17 个文件。原 olp
-          ;; ("书" "待阅读" / "阅读中") 本来就指向不存在的标题 (这套模板从没被用过,
-          ;; 全库 0 个 :来源:-by-capture 条目), 拆完后连文件都没了。
-          ;; 2026-10-23 三改: `我想读的书单' 本身又拆成 4 个文件, 桶抬升成文件级
-          ;; 节点 (`20261017210001/2/3/4-*书单.org'), 条目从 `**' 降成 `*'。
-          ;; 于是: 模板层级跟着降一级 (** → *), 目标文件也跟着换。
-          ;; 桶的选择仍旧只能写死一个 (capture 的 target 在 `%^{类型}' 求值之前
-          ;; 就解析完了), 这里默认落 `小说书单'; 要按类型自动分桶就得开 4 个键位,
-          ;; 由 Sean 定。
+          ;; 2026-11-09 四改: read 域 11-02 并进根目录单文件、11-06 再并进 notes.org。
+          ;; 现状 `* Books > ** 书单 > *** 小说 > **** 小说书单 > ***** 书名'
+          ;; (notes.org:4788-4792), 桶不再是独立文件:
+          ;;   → target 从 (file lambda) 换成 file+olp 四级 heading 路径 (实测
+          ;;     org-find-olp 命中 notes.org:148023);
+          ;;   → 模板层级从 `*' 补到 `*****', 与桶内现存 `***** 瓦尔登湖' 同级;
+          ;;   → :ID: 保留 (没有 ID 的 heading 不进 org-roam nodes 表)。
+          ;; 桶仍默认落「小说书单」—— capture target 在 `%^{类型}' 求值之前就解析完;
+          ;; 要按类型自动分桶得开多个键位, 由 Sean 定 (10-23 起挂着的待决项)。
           ("bb" "书 · 待阅读" entry
-           (file (lambda ()
-                   (my/notes-bucket-file "20261017T210002"
-                                            "~/org/notes/read/20261017T210002--小说书单__read.org")))
-           "* %^{书名}\n:PROPERTIES:\n:ID:       %(org-id-new)\n:状态: 未开始\n:作者: %^{作者}\n:类型: %^{类型|小说|非虚构|理财|网文|漫画|其他}\n:来源: %^{来源|微信读书|豆瓣|Z-Library|实体书|其他}\n:添加时间: %U\n:END:\n%?"
+           (file+olp "~/org/notes.org" "Books" "书单" "小说" "小说书单")
+           "***** %^{书名}\n:PROPERTIES:\n:ID:       %(org-id-new)\n:状态: 未开始\n:作者: %^{作者}\n:类型: %^{类型|小说|非虚构|理财|网文|漫画|其他}\n:来源: %^{来源|微信读书|豆瓣|Z-Library|实体书|其他}\n:添加时间: %U\n:END:\n%?"
            :empty-lines 1 :jump-to-captured t)
           ("bB" "书 · 阅读中" entry
-           (file (lambda ()
-                   (my/notes-bucket-file "20261017T210002"
-                                            "~/org/notes/read/20261017T210002--小说书单__read.org")))
-           "* %^{书名}\n:PROPERTIES:\n:ID:       %(org-id-new)\n:状态: 在读\n:作者: %^{作者}\n:类型: %^{类型|小说|非虚构|理财|网文|漫画|其他}\n:来源: %^{来源|微信读书|豆瓣|Z-Library|实体书|其他}\n:添加时间: %U\n:END:\n%?"
+           (file+olp "~/org/notes.org" "Books" "书单" "小说" "小说书单")
+           "***** %^{书名}\n:PROPERTIES:\n:ID:       %(org-id-new)\n:状态: 在读\n:作者: %^{作者}\n:类型: %^{类型|小说|非虚构|理财|网文|漫画|其他}\n:来源: %^{来源|微信读书|豆瓣|Z-Library|实体书|其他}\n:添加时间: %U\n:END:\n%?"
            :empty-lines 1 :jump-to-captured t)
           ("pl" "Protocol: Read later" entry (file "~/org/inbox.org")
            "* TODO %:annotation\n:PROPERTIES:\n:CREATED: %U\n:END:\n%i\n"
@@ -3162,11 +3152,13 @@ ARGS 是原参数表 (FILES SILENT)。返回改过 FILES 的新参数表。"
   ;; (~/.emacs.d/sources/doom+/modules/lang/org/config.el:131), 前者会把
   ;; 「当前 buffer」也变成候选。下面的 setq 是**全量覆盖**, 必须晚于 Doom 求值
   ;; (user config.el 在模块之后加载), 否则「其他的不要」会漏。
+  ;; 2026-11-08: media.org 已在 11-06 合并进 ~/org/notes.org 并删除。
+  ;; 这个判据不再列任何根目录文件 —— notes.org 在 org-roam-directory 之外,
+  ;; 不会被 `my/notes-node-files' 的递归扫描捞到, 无需排除。
   (defun my/org-record-library-file-p (f)
-    "F 是记录库文件吗? media.org 单文件 + notes/ 下 read|literature 两个目录。"
+    "F 是 notes/ 下 read|literature 记录库目录里的文件吗?"
     (let ((f (expand-file-name f)))
-      (or (string-equal (expand-file-name "media.org" org-directory) f)
-          (string-prefix-p (expand-file-name "notes/read/" org-directory) f)
+      (or (string-prefix-p (expand-file-name "notes/read/" org-directory) f)
           (string-prefix-p (expand-file-name "notes/literature/" org-directory) f))))
 
   (defun my/org-daily-file-p (f)
@@ -3201,24 +3193,28 @@ agenda 扫描树内。判据就是「路径等于 `my/journal-file'」, 与 `my/
                 (directory-files-recursively
                  (expand-file-name "notes/" org-directory) "\\.org\\'")))
 
-  ;; 2026-11-02: media 域合并进根目录单文件 ~/org/media.org (11 篇 → 11 个
-  ;; 一级 heading)。media 不再是目录, 这里直接列这一个文件。
+  ;; 2026-11-08: media.org / read.org 等 7 个根目录收纳文件已于 11-06 全部
+  ;; 合并进 ~/org/notes.org 并删除, 硬编码 media.org 会让 org-ql 拿到不存在的
+  ;; 文件 (`SPC n q' 报 "Not a readable file")。这里换成 notes.org, 同时把
+  ;; 主体收纳文件**补回**全库搜索 —— 合并后它一直不在这份列表里。
   (defun my/notes-bulk-files ()
-    "记录型大文件: media.org 单文件 + notes/read/ + notes/literature/ 下的。
+    "收纳/记录型大文件: ~/org/notes.org + notes/read/ + notes/literature/ 下的。
 
-2026-11-05 起只服务于 `my/org-ql-files' 等搜索通道, **不再是 refile 目的地**
+2026-11-08 起只服务于 `my/org-ql-files' 等搜索通道, **不再是 refile 目的地**
 (refile 只认 ~/org/notes.org 单文件, 见下面的 `org-refile-targets')。
 
-⚠️ 目录用 `file-directory-p' 守卫 —— 记录库目录
-可以是空的甚至还没建 (`directory-files' 对不存在的目录直接 (error \"Opening
-directory\")), 而这份列表在**每次全库搜索**时都会被求值, 一炸就是搜索全挂。"
-    (append (list (expand-file-name "media.org" org-directory))
-            (apply #'append
-                   (mapcar
-                    (lambda (d)
-                      (and (file-directory-p d) (directory-files d t "\\.org\\'")))
-                    (mapcar (lambda (d) (expand-file-name d org-directory))
-                            '("notes/read/" "notes/literature/"))))))
+⚠️ 顶层文件用 `file-readable-p' 守卫, 目录用 `file-directory-p' 守卫 ——
+记录库目录可以是空的甚至还没建 (`directory-files' 对不存在的目录直接
+(error \"Opening directory\")), 而这份列表在**每次全库搜索**时都会被求值,
+一炸就是搜索全挂。合并/改名后宁可漏搜, 也不能让搜索整体报错。"
+    (let ((main (expand-file-name "notes.org" org-directory)))
+      (append (and (file-readable-p main) (list main))
+              (apply #'append
+                     (mapcar
+                      (lambda (d)
+                        (and (file-directory-p d) (directory-files d t "\\.org\\'")))
+                      (mapcar (lambda (d) (expand-file-name d org-directory))
+                              '("notes/read/" "notes/literature/")))))))
 
   ;; 2026-11-06: 全库收拢成 ~/org/notes.org 单文件 (原 7 个根目录收纳文件
   ;; 合并: Software / Hardware / Books / Games / Media / Investment / Health,
@@ -5616,19 +5612,31 @@ URL 和标题通常要手填 (URL 拿剪贴板里的纯文本预填)。
 ;; 最近 N 天, 比在全库结果里翻要快。
 
 (defun my/org-ql-files ()
-  "org-ql 搜索的文件列表: inbox + notes 节点 + media/read 记录库, 不含 journal。
+  "org-ql 搜索的文件列表: inbox + notes.org 主体 + notes/ 节点 + 记录库, 不含 journal。
+
+2026-11-08 修: 11-06 把 7 个根目录收纳文件合并成 ~/org/notes.org 并删除后,
+`my/notes-bulk-files' 还硬编码 media.org → org-ql 拿到不存在的文件, `SPC n q'
+报 \"Not a readable file: ~/org/media.org\"。同时 notes.org 一直**没进**这份列表,
+等于主体知识库搜不到。现在把 notes.org 补回, 并在出口过滤不可读文件 ——
+以后再合并/改文件名, 最多是漏搜 + 一条提示, 不会把整个搜索挂掉。
 
 2026-11-05 起与 `org-refile-targets' **分家**: refile 只认 ~/org/notes.org 单文件,
-这里仍按全库节点 + 记录库扫。复用 `my/notes-node-files' 与
+这里按全库节点 + 收纳大文件扫。复用 `my/notes-node-files' 与
 `my/notes-bulk-files', 那两个函数都用 `my/org-daily-file-p' 过滤过, 所以
 这里天然继承 daily 排除, 不用再写一遍正则。
 
 为什么不能直接 `(setq org-ql-search-directories-files-recursive t)':
-那会递归整个 ~/org —— 会把 notes/journal/ 的日记也带进来,
+那会递归整个 ~/org —— 会把 journal 也带进来,
 理由见 `my/org-daily-file-p' 的第 1 条。"
-  (append (list (expand-file-name "inbox.org" org-directory))
-          (my/notes-node-files)
-          (my/notes-bulk-files)))
+  (let ((files (append (list (expand-file-name "inbox.org" org-directory))
+                       (my/notes-node-files)
+                       (my/notes-bulk-files))))
+    (delete-dups
+     (seq-filter (lambda (f)
+                   (if (file-readable-p f) t
+                     (message "org-ql: 跳过不可读文件 %s" f)
+                     nil))
+                 files))))
 
 (declare-function org-ql-find "org-ql-find")
 (defun my/org-ql-find-notes ()
@@ -6051,14 +6059,17 @@ TIME 参数保留仅为接口兼容 (`my/journal-goto-time' / `my/journal-goto-d
       (my/weather--fetch callback))))
 
 (defun my/journal--today-weather-p (&optional buffer)
-  "当前 buffer (年份日记文件) 里「今天那天 heading」之下是否已有天气条目。
+  "当前 buffer (日记文件) 里「今天那天 heading」之下是否已有天气**正文**。
+
+2026-11-10 起天气不再是 heading, 降级成一行正文 `天气：TEXT', 挂在当天
+日期 heading 之下、:PROPERTIES: 抽屉之后。判据是当天范围内的 `^天气[：:]'。
 
 2026-11-01 起日记按年合并到 YYYY.org: 天气只在该天 heading 的范围内判断,
 不能像单文件时代那样搜整个 buffer (否则任一天有天气都算「今天已有」)。
 
-判断范围 = 当天 heading 起, 到下一个同级日期 heading 之前 (或文件尾) ——
-无论天气是当天 heading 的子 heading, 还是紧跟其后的同级 heading 都能识别。
-这避免了旧逻辑「插成同级 → 子树内搜不到 → 反复判定缺失 → 重复插入」的死循环。
+判断范围 = 当天 heading 起, 到下一个同级日期 heading 之前 (或文件尾)。
+早期「插成同级 → 子树内搜不到 → 反复判定缺失 → 重复插入」的死循环靠这个
+范围收敛解决; 现在只有正文, 不再有层级歧义。
 
 注意: 算上限时要先 (forward-line 1) 越过当天 heading 行, 否则「找下一个日期
 heading」的正则会命中自己, 把上限截到当天 heading 行尾, 其下的天气就永远搜不到,
@@ -6076,14 +6087,30 @@ heading」的正则会命中自己, 把上限截到当天 heading 行尾, 其下
                                  nil t)
                                (point-max)))))
               (goto-char start)
-              (re-search-forward "^\\*+[ \t]+天气[ \t]*$" limit t))))))))
+              (re-search-forward "^天气[：:]" limit t))))))))
+
+(defun my/journal--after-day-drawer ()
+  "Point 在当天 heading 的下一行行首时, 移到 :PROPERTIES: 抽屉之后。
+无抽屉则不动。抽屉畸形 (找不到 :END:) 返回 nil, 调用方应放弃插入,
+否则正文会插进抽屉里把它挤坏。"
+  (if (not (looking-at "[ \t]*:PROPERTIES:[ \t]*$"))
+      t
+    (when (re-search-forward "^[ \t]*:END:[ \t]*$" nil t)
+      (forward-line 1)
+      t)))
 
 (defun my/journal--insert-today-weather (buffer text)
-  "在 BUFFER (年份日记文件) 里「今天那天 heading」之下插入 `** 天气' + TEXT。
+  "在 BUFFER (日记文件) 里「今天那天 heading」之下插入一行正文 `天气：TEXT'。
 已经有了 (见 `my/journal--today-weather-p') 或今天还没有日记 heading 就不插, 返回是否插入。
 
-2026-11-01 起: 插在当天 heading 之下、其第一条子内容之前; 不再插到整文件顶部
-(单文件时代那会是 1 月 1 日的头, 不是今天)。
+2026-11-10 起天气**不再是 `** 天气' 标题**。旧版插成标题有两个后果:
+1. 当天所有正文都落在这个标题之下, 大纲里整天被切成「天气」的子树;
+2. 它紧跟日期 heading, 把当天的 :PROPERTIES: 抽屉挤到正文之后 —— org 只认
+   紧跟 heading 的抽屉, 于是 :ID: 失效 (2026-11-10 实测 11-08/09/10 皆为 nil),
+   `my/org-attach--slug' 拿不到 ID 所在的 heading 时就用当前标题「天气」
+   当附件名, 拖进来的图全叫 `…--天气.jpg'。
+现在只插一行正文, 不产生新 heading, 且位置在抽屉之后。
+
 今天若还没有 heading (还没写今天日记), 不自动建 —— 交给 capture 去建,
 否则 hook 建的空 heading 会和 capture 建的重复。"
   (with-current-buffer buffer
@@ -6094,9 +6121,10 @@ heading」的正则会命中自己, 把上限截到当天 heading 行尾, 其下
              (my/journal--goto-day-heading (my/journal--effective-time))
              (progn
                (forward-line 1)           ; 越过 heading 行
-               (unless (bolp) (insert "\n"))
-               (insert "** 天气\n" text "\n")
-               t))))))
+               (when (my/journal--after-day-drawer)
+                 (unless (bolp) (insert "\n"))
+                 (insert "\n天气：" text "\n\n")
+                 t)))))))
 
 (defun my/journal--live-buffer ()
   "日记文件的 base buffer —— 在内存里是明文, 可以直接改。没打开返回 nil。
@@ -7215,6 +7243,8 @@ Use FILE arg, current buffer's file (if .epub), or prompt."
      :account "Assets:Investment:Broker:Normal:Nasdaq100:ETF159696" :category "纳指100")
     ("513100" :name "国泰纳斯达克100ETF(QDII)" :commodity "ETF513100"
      :account "Assets:Investment:Broker:Normal:Nasdaq100:ETF513100" :category "纳指100")
+    ("513390" :name "纳指100ETF博时" :commodity "ETF513390"
+     :account "Assets:Investment:Broker:Normal:Nasdaq100:ETF513390" :category "纳指100")
     ("513870" :name "富国纳斯达克100ETF(QDII)" :commodity "ETF513870"
      :account "Assets:Investment:Broker:Normal:Nasdaq100:ETF513870" :category "纳指100")
     ("511880" :name "银华日利ETF" :commodity "ETF511880"
