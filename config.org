@@ -6058,11 +6058,20 @@ TIME 参数保留仅为接口兼容 (`my/journal-goto-time' / `my/journal-goto-d
         (funcall callback (cdr my/weather--cache))
       (my/weather--fetch callback))))
 
+(defvar my/journal--weather-line-re
+  "^[^ \t*#][^:：\t\n]\\{0,9\\}[:： \t].*[+-]?[0-9]+°[CF][ \t]*$"
+  "匹配一行 wttr.in 天气正文 (无「天气：」前缀): `上海: ☀️  +25°C' 或
+`上海 ☀️ +24°C'。行首是短地点名 + 冒号或空格, 行尾是 ±N°C / ±N°F。
+2026-11-10 Sean 定: 天气行直接用 wttr.in 原样、不加任何前缀, 所以判据只能
+靠这个形状。排除 * / # 开头以免命中标题与 #+ 关键字; 实测全库 75 行天气
+全部命中、正文零误伤。")
+
 (defun my/journal--today-weather-p (&optional buffer)
   "当前 buffer (日记文件) 里「今天那天 heading」之下是否已有天气**正文**。
 
-2026-11-10 起天气不再是 heading, 降级成一行正文 `天气：TEXT', 挂在当天
-日期 heading 之下、:PROPERTIES: 抽屉之后。判据是当天范围内的 `^天气[：:]'。
+2026-11-10 起天气既不是 heading、也不带「天气：」前缀, 就是 wttr.in 原样
+一行 (`上海: ☀️  +25°C'), 挂在当天日期 heading 之下、:PROPERTIES: 抽屉
+之后。判据 = 当天范围内搜 `my/journal--weather-line-re'。
 
 2026-11-01 起日记按年合并到 YYYY.org: 天气只在该天 heading 的范围内判断,
 不能像单文件时代那样搜整个 buffer (否则任一天有天气都算「今天已有」)。
@@ -6087,7 +6096,7 @@ heading」的正则会命中自己, 把上限截到当天 heading 行尾, 其下
                                  nil t)
                                (point-max)))))
               (goto-char start)
-              (re-search-forward "^天气[：:]" limit t))))))))
+              (re-search-forward my/journal--weather-line-re limit t))))))))
 
 (defun my/journal--after-day-drawer ()
   "Point 在当天 heading 的下一行行首时, 移到 :PROPERTIES: 抽屉之后。
@@ -6100,7 +6109,9 @@ heading」的正则会命中自己, 把上限截到当天 heading 行尾, 其下
       t)))
 
 (defun my/journal--insert-today-weather (buffer text)
-  "在 BUFFER (日记文件) 里「今天那天 heading」之下插入一行正文 `天气：TEXT'。
+  "在 BUFFER (日记文件) 里「今天那天 heading」之下插入一行天气正文 TEXT。
+TEXT 是 wttr.in 原样 (`上海: ☀️  +25°C'), **不加任何前缀** —— 2026-11-10
+Sean 定: 不要「天气：」两个字, 这行本身就是天气。
 已经有了 (见 `my/journal--today-weather-p') 或今天还没有日记 heading 就不插, 返回是否插入。
 
 2026-11-10 起天气**不再是 `** 天气' 标题**。旧版插成标题有两个后果:
@@ -6123,7 +6134,7 @@ heading」的正则会命中自己, 把上限截到当天 heading 行尾, 其下
                (forward-line 1)           ; 越过 heading 行
                (when (my/journal--after-day-drawer)
                  (unless (bolp) (insert "\n"))
-                 (insert "\n天气：" text "\n\n")
+                 (insert "\n" text "\n\n")
                  t)))))))
 
 (defun my/journal--live-buffer ()
